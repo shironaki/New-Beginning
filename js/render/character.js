@@ -174,9 +174,11 @@ export function posture(p) {
     // Weight: the pelvis slides over the supporting leg, shoulders counter it.
     const sway = sideView ? 0 : -Math.cos(phase) * GAIT.hipSway * g;
     const counter = -sway * GAIT.shoulderCounter;
+    // Cloth trails the pelvis — which no longer moves sideways, so this is
+    // zero by construction. Kept as one expression, not scattered magic.
     const flagX = sideView
         ? 0
-        : -Math.cos(phase - GAIT.clothLagPhase) * GAIT.hipSway * g;   // cloth trails
+        : -Math.cos(phase - GAIT.clothLagPhase) * GAIT.hipSway * g;
 
     const lean = sideView ? side * GAIT.leanRun * run * g : 0;
     const squash = -GAIT.squash * Math.cos(phase * 2) * g;     // ±3% on contact

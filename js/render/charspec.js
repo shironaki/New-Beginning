@@ -155,7 +155,7 @@ export const GAIT = {
     armRatio: 0.75,          // arm swing relative to leg swing
     armRatioTool: 0.40,      // the hand holding a tool swings less
     leanRun: 1.2,            // torso offset into the direction of travel
-    squash: 0.03,            // ±3% on contact
+    squash: 0.015,           // ±1.5% on contact — a hint, not a bounce
     kneeBend: 0.6,           // how hard the IK pushes the knee forward (0..1)
 
     blendWalk: 0.12,         // s, idle <-> walk
@@ -163,12 +163,14 @@ export const GAIT = {
     blendAction: 0.09,       // s, into a tool swing
     park: 0.12,              // s, coasting the phase to the nearest contact pose
 
-    // Weight. Albion walks heavy: the pelvis swings over the supporting leg,
-    // the shoulders counter-rotate, cloth lags behind and the heel lands hard.
-    hipSway: 1.2,            // lateral pelvis travel, head-on
-    shoulderCounter: 0.45,   // fraction of the sway, in the opposite direction
+    // Weight. Albion walks heavy, but weight is VERTICAL: the body drops on
+    // contact and rises on the pass. Lateral pelvis travel was a mistake — at
+    // this scale any sideways hip motion reads as a wiggle, not as weight.
+    // Keep hipSway at 0; the number stays so the choice is explicit.
+    hipSway: 0,              // lateral pelvis travel, head-on — DO NOT RAISE
+    shoulderCounter: 0,      // follows the sway; zero while the sway is zero
     clothLagPhase: 0.5,      // rad the belt flap trails the pelvis
-    heelStrike: 0.5,         // extra dip on contact
+    heelStrike: 0.6,         // extra dip on contact — this is where weight lives
 
     breathAmp: 0.35,         // idle
     breathHz: 0.28,

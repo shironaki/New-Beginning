@@ -497,4 +497,23 @@ test("standing still the pose is neutral: no swing, no lean, no squash", () => {
 });
 
 
+test("the hips do not wiggle: no lateral travel in any pose", () => {
+    assert.eq(GAIT.hipSway, 0, "lateral hip sway reads as a wiggle at this scale");
+    for (const dir of ["down", "up", "left", "right"]) {
+        for (let phase = 0; phase < Math.PI * 2; phase += 0.3) {
+            const q = posture({ dir, phase, gait: 1, runBlend: 1 });
+            assert.near(q.sway, 0, 1e-9, `${dir}: the pelvis slid sideways`);
+            assert.near(q.counter, 0, 1e-9, `${dir}: the shoulders slid sideways`);
+            assert.near(q.flagX, 0, 1e-9, `${dir}: the belt flap swung on its own`);
+        }
+    }
+});
+
+test("weight is vertical: the body drops on contact, rises on the pass", () => {
+    const at = (phase) => posture({ dir: "down", phase, gait: 1 }).bob;
+    assert.gt(at(0), at(Math.PI / 2), "the body must be lowest at contact");
+    assert.gt(at(Math.PI), at(Math.PI * 1.5), "the body must be lowest at contact");
+});
+
+
 run("v3 survival");
