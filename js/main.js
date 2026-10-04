@@ -43,7 +43,7 @@ export class Game {
         this.cookJournal = new CookingJournal({ bus: this.bus });
         this.particles = new Particles();
         this.fires = new Map();          // `${zoneId}:${tx},${ty}` -> Campfire
-        this.look = { skin: "#e2b48a", hair: "#3f2d20", shirt: "#7a6a4a", pants: "#4a4034" };
+        this.look = { skin: "#e2b48a", hair: "#3f2d20", shirt: "#77684a", pants: "#524636", accent: "#8a4b32" };
 
         this.zone = this.world.get(START_ZONE);
         this.player = new Player({ x: this.zone.spawn.x, y: this.zone.spawn.y, bus: this.bus });

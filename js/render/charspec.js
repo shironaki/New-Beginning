@@ -22,77 +22,114 @@
 /** Quantisation grid: 0.5 u = exactly 1 screen pixel at zoom 2. */
 export const QUANT = 0.5;
 
-/** Body proportions — head : body = 1 : 3.1. */
+/**
+ * Body proportions — "Albion lean": small head, heavy shoulders, waist pulled
+ * in, hips and boots wide again. The pyramid is what makes a 60 px figure
+ * read as a person with gear instead of a cute doll.
+ *
+ * head : body = 1 : 3.9
+ */
 export const BODY = {
-    total: 28,
+    total: 31,
 
-    headH: 9,
-    headW: 9,
-    headY: -28,              // top of the skull
+    headH: 8,
+    headW: 8,
+    headY: -31,              // top of the skull
 
-    torsoY: -19,             // shoulder line
-    torsoH: 10,
-    shoulderW: 11,           // front/back view
-    shoulderWSide: 8.5,      // profile is narrower — that is what sells the turn
-    hipW: 7.5,
+    torsoY: -23,             // shoulder line
+    torsoH: 11,
+    shoulderW: 13,           // front/back view
+    shoulderWSide: 9.5,      // profile is narrower — that is what sells the turn
+    waistW: 8.5,             // the pinch, at 72% down the torso
+    waistAt: 0.72,
+    hipW: 9,
 
-    hipY: -9,
-    legW: 3.4,
-    legGap: 1.2,
-    thigh: 3.6,
-    shin: 3.6,
+    hipY: -12,
+    legW: 3.8,
+    legGap: 1.0,
+    thigh: 5.0,
+    shin: 4.8,
 
-    ankleY: -2.0,
-    bootW: 4.6,
-    bootH: 2.4,
-    bootToe: 1.4,            // how far the toe sticks out past the ankle
-    idleStance: 1.1,         // profile: feet part this much when standing
+    ankleY: -2.4,
+    bootW: 5.2,
+    bootH: 2.8,
+    bootToe: 1.5,            // how far the toe sticks out past the ankle
+    idleStance: 1.2,         // profile: feet part this much when standing
 
-    armY: -17.5,             // shoulder pivot
-    armLen: 8,
-    armW: 2.6,
-    sleeveW: 1.25,           // the shoulder is wider than the forearm
-    handH: 2.2,
-    farArmX: 1.4,            // profile: how far the hidden arm peeks out
-    nearArmX: 0.8,
+    armY: -22,               // shoulder pivot, just under the shoulder line
+    armLen: 9.5,
+    armW: 3.0,
+    sleeveW: 1.3,            // the shoulder is wider than the forearm
+    handH: 2.8,              // big hands — an Albion marker
+    farArmX: 1.6,            // profile: how far the hidden arm peeks out
+    nearArmX: 0.9,
 
     knifeScale: 0.78,        // a belt knife, not a short sword
-    gripX: 6.4,              // where a tool sits — the end of the arm, not the face
-    gripY: -11
+    gripX: 7,                // where a tool sits — the end of the arm, not the face
+    gripY: -12
 };
+
+/**
+ * Gear is what you recognise at distance, so it is geometry, not texture.
+ * Every piece is optional and lives in `look`, which keeps the door open for
+ * "you are what you wear" later without touching the painter.
+ */
+export const GEAR = {
+    shoulderW: 5.5,          // pauldron
+    shoulderH: 2.5,
+    shoulderDrop: 1.2,       // how far it slants down past the arm
+    bracerH: 1.8,            // forearm cuff
+    bracerW: 1.25,           // multiplier on arm width
+    cuffH: 1.2,              // boot cuff
+    cuffW: 1.1,              // multiplier on boot width
+    flapW: 2.4,              // belt flap hanging on the near hip
+    flapH: 3.5
+};
+
+/**
+ * Tone system: three bands plus a deep core, not two. The shadow boundary runs
+ * upper-left -> lower-right, matching the sun used by tilesart.
+ */
+export const TONE = { lit: 22, base: 0, dark: -20, deep: -38 };
 
 /** Palette tokens. Shades are offsets fed to shadeHex(), not separate hexes. */
 export const PALETTE = {
     skinLit: 16,
     skinShade: -28,
     skinDeep: -48,           // far-side limb
-    shirtLit: 20,
-    shirtShade: -22,
     shirtFar: -34,
-    pantsShade: -16,
-    pantsLit: 14,
     pantsFar: -34,
     hairLit: 24,
     hairShade: -22,
 
-    boot: "#3a2d22",
-    bootFar: "#2e241b",
+    boot: "#55402b",
+    bootFar: "#3e2e1e",
     sole: "#241b14",
     soleFar: "#1d160f",
     belt: "#4a3722",
-    buckle: "#8a6a3c",
+    buckle: "#9a7a44",
+    leather: "#6b4b2c",      // pauldrons, bracers, cuffs
+    leatherLit: 20,
+    leatherDark: -22,
+    metal: "#8e949c",
+    metalLit: "#e8eef4",
+    metalDark: "#4b5159",
     eye: "#2a211a",
 
-    outline: "rgba(34,26,19,0.50)",
+    // Selective contour: dark only where the form turns AWAY from the sun.
+    // A uniform outline makes an icon; this makes an object in a world.
+    outline: "rgba(26,20,14,0.55)",
     outlineW: QUANT,
-    rim: "rgba(255,233,194,0.22)",
+    ao: "rgba(0,0,0,0.22)",  // ambient occlusion in the joints
+    aoW: QUANT,
+    rim: "rgba(255,236,200,0.30)",
     rimW: QUANT
 };
 
 /** Contact shadow — anchored to the centroid of the feet, not the sprite. */
 export const SHADOW = {
-    coreRX: 6.6, coreRY: 2.6, coreA: 0.30,
-    haloRX: 9.0, haloRY: 3.4, haloA: 0.14,
+    coreRX: 7.2, coreRY: 2.8, coreA: 0.30,
+    haloRX: 9.8, haloRY: 3.7, haloA: 0.14,
     liftShrink: 0.045        // radii *= 1 - liftShrink * bob
 };
 
@@ -125,6 +162,13 @@ export const GAIT = {
     blendRun: 0.18,          // s, walk <-> run
     blendAction: 0.09,       // s, into a tool swing
     park: 0.12,              // s, coasting the phase to the nearest contact pose
+
+    // Weight. Albion walks heavy: the pelvis swings over the supporting leg,
+    // the shoulders counter-rotate, cloth lags behind and the heel lands hard.
+    hipSway: 1.2,            // lateral pelvis travel, head-on
+    shoulderCounter: 0.45,   // fraction of the sway, in the opposite direction
+    clothLagPhase: 0.5,      // rad the belt flap trails the pelvis
+    heelStrike: 0.5,         // extra dip on contact
 
     breathAmp: 0.35,         // idle
     breathHz: 0.28,
