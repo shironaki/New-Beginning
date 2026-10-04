@@ -202,15 +202,19 @@ export function drawCharacter(ctx, p) {
 
     /** `hand = false` when a tool is drawn over this hand — otherwise the hero
      *  grows a spare hand next to the one holding the knife. */
+    const paintHand = (a, far) => {
+        rect(ctx, a.ex - BODY.armW / 2, a.ey - 0.5, BODY.armW, BODY.handH,
+            far ? shadeHex(look.skin, PALETTE.skinDeep) : skinLit, !far);
+        rect(ctx, a.ex - BODY.armW / 2, a.ey - 0.5 + BODY.handH - 0.6, BODY.armW, 0.6,
+            "rgba(0,0,0,0.18)", false);
+    };
+
     const paintArm = (a, far, hand = true) => {
         const sleeve = far ? shadeHex(look.shirt, PALETTE.shirtFar) : shirtDark;
         const skinC = far ? shadeHex(look.skin, PALETTE.skinDeep) : look.skin;
         limb(ctx, a.sx, a.sy, a.mx, a.my, BODY.armW * BODY.sleeveW, BODY.armW, sleeve);
         limb(ctx, a.mx, a.my, a.ex, a.ey, BODY.armW, BODY.armW * 0.85, skinC);
-        if (hand) {
-            rect(ctx, a.ex - BODY.armW / 2, a.ey - 0.5, BODY.armW, BODY.handH,
-                far ? shadeHex(look.skin, PALETTE.skinDeep) : skinLit, !far);
-        }
+        if (hand) paintHand(a, far);
     };
 
     const armAmp = amp * GAIT.armRatio * g;
@@ -221,7 +225,10 @@ export function drawCharacter(ctx, p) {
     const ax0 = BODY.shoulderW / 2 + BODY.armW / 2 - 0.4;     // clear of the shirt
     const farArm = sideView
         ? armPose(-BODY.farArmX * side, -swingF * GAIT.armRatio, 0)
-        : armPose(-ax0, 0, (back ? 1 : -1) * Math.sin(phase) * armAmp);
+        // Head-on the tool is in the right hand, from behind it is on the left,
+        // so the free arm has to swap sides too — otherwise both arms stack up
+        // on one side and the hero loses an arm.
+        : armPose(back ? ax0 : -ax0, 0, (back ? 1 : -1) * Math.sin(phase) * armAmp);
     const toolArm = sideView
         ? armPose(BODY.nearArmX * side,
             -swingN * GAIT.armRatioTool + side * swing * 2.2, Math.max(0, swing) * 1.5)
@@ -230,6 +237,7 @@ export function drawCharacter(ctx, p) {
 
     if (sideView) paintArm(farArm, true);
     if (p.tool && back) drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, true);
+    if (p.tool && back) paintHand(toolArm, false);          // fist closes over the grip
 
     if (sideView) {
         drawLeg(-0.9 * side, swingF - stance, liftF, true, side);
@@ -325,8 +333,12 @@ export function drawCharacter(ctx, p) {
 
     ctx.restore();
 
-    // Tool in the near hand, in front of the body.
-    if (p.tool && !back) drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, false);
+    // Tool in the near hand, in front of the body; the fist closes over the
+    // handle afterwards so the grip reads as a grip and not as a loose block.
+    if (p.tool && !back) {
+        drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, false);
+        paintHand(toolArm, false);
+    }
 }
 
 /**
@@ -351,7 +363,7 @@ function drawHeldTool(ctx, tool, dir, side, swing, arm, behind) {
     switch (id) {
         case "axe": drawAxe(ctx, itemId.includes("iron")); break;
         case "pick": drawPick(ctx); break;
-        case "knife": drawKnife(ctx); break;
+        case "knife": ctx.scale(BODY.knifeScale, BODY.knifeScale); drawKnife(ctx); break;
         case "spear": drawSpear(ctx); break;
         case "rod": drawRod(ctx); break;
         case "hoe": drawHoe(ctx); break;
@@ -359,12 +371,9 @@ function drawHeldTool(ctx, tool, dir, side, swing, arm, behind) {
         default: drawGeneric(ctx); break;
     }
 
-    // The hand itself, over the handle, so the grip reads as a grip.
+    // No hand here: the fist is part of the arm and is painted by the caller
+    // right after this, so it always lines up with the forearm.
     ctx.globalAlpha = 1;
-    ctx.fillStyle = "#e2b48a";
-    ctx.fillRect(-1.5, -1.6, 3, 3.2);
-    ctx.fillStyle = "rgba(0,0,0,0.18)";
-    ctx.fillRect(-1.5, 0.8, 3, 0.8);
     ctx.restore();
 }
 

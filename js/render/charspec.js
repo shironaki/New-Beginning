@@ -56,6 +56,7 @@ export const BODY = {
     farArmX: 1.4,            // profile: how far the hidden arm peeks out
     nearArmX: 0.8,
 
+    knifeScale: 0.78,        // a belt knife, not a short sword
     gripX: 6.4,              // where a tool sits — the end of the arm, not the face
     gripY: -11
 };
