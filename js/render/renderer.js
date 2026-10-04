@@ -120,26 +120,43 @@ export class Renderer {
                 if (!info || !info.liquid) continue;
                 const s = cam.worldToScreen(tx * TILE_SIZE, ty * TILE_SIZE);
                 const z = cam.zoom, S = TILE_SIZE * z;
-                // Swell: two bands drifting across the tile.
+                // Swell: curved crests drifting across the tile.
+                ctx.lineCap = "round";
                 for (let k = 0; k < 2; k++) {
                     const phase = t * (0.45 + k * 0.2) + tx * 0.35 + ty * 0.7 + k;
                     const yy = s.y + ((Math.sin(phase) * 0.5 + 0.5) * 0.7 + k * 0.18) * S;
                     const w = (0.35 + 0.3 * Math.abs(Math.cos(phase * 1.3))) * S;
-                    ctx.fillStyle = k ? "rgba(255,255,255,0.10)" : "rgba(10,40,60,0.12)";
-                    ctx.fillRect(s.x + ((tx * 7 + ty * 3) % 5) * z, yy, w, Math.max(1, 1.2 * z));
+                    const x0 = s.x + ((tx * 7 + ty * 3) % 5) * z;
+                    ctx.strokeStyle = k ? "rgba(255,255,255,0.12)" : "rgba(10,40,60,0.13)";
+                    ctx.lineWidth = Math.max(1, 1.2 * z);
+                    ctx.beginPath();
+                    ctx.moveTo(x0, yy);
+                    ctx.quadraticCurveTo(x0 + w * 0.5, yy - 1.6 * z, x0 + w, yy + 0.4 * z);
+                    ctx.stroke();
                 }
-                // Foam where the water meets land.
+                // Surf where the water meets land: a wobbling line of foam
+                // that breathes, not a rectangle glued to the tile edge.
                 const neighbours = [[0, -1], [0, 1], [-1, 0], [1, 0]];
                 for (const [dx, dy] of neighbours) {
                     const n = zone.map.get(tx + dx, ty + dy);
                     const ni = TILES[n];
                     if (!ni || ni.liquid) continue;
-                    const pulse = 0.18 + 0.14 * Math.sin(t * 1.6 + tx * 0.8 + ty * 0.5);
-                    ctx.fillStyle = `rgba(255,255,255,${pulse})`;
-                    if (dy < 0) ctx.fillRect(s.x, s.y, S, 2.2 * z);
-                    else if (dy > 0) ctx.fillRect(s.x, s.y + S - 2.2 * z, S, 2.2 * z);
-                    else if (dx < 0) ctx.fillRect(s.x, s.y, 2.2 * z, S);
-                    else ctx.fillRect(s.x + S - 2.2 * z, s.y, 2.2 * z, S);
+                    const pulse = 0.22 + 0.16 * Math.sin(t * 1.6 + tx * 0.8 + ty * 0.5);
+                    ctx.strokeStyle = `rgba(255,255,255,${pulse})`;
+                    ctx.lineWidth = Math.max(1, 1.6 * z);
+                    ctx.beginPath();
+                    const seg = 6;
+                    for (let i = 0; i <= seg; i++) {
+                        const f = i / seg;
+                        const wob = (Math.sin(t * 1.3 + (tx + f) * 3.1 + ty * 2.3) * 0.5 + 0.5) * 3.2 * z;
+                        let X, Y;
+                        if (dy < 0) { X = s.x + f * S; Y = s.y + 1.5 * z + wob; }
+                        else if (dy > 0) { X = s.x + f * S; Y = s.y + S - 1.5 * z - wob; }
+                        else if (dx < 0) { X = s.x + 1.5 * z + wob; Y = s.y + f * S; }
+                        else { X = s.x + S - 1.5 * z - wob; Y = s.y + f * S; }
+                        if (i) ctx.lineTo(X, Y); else ctx.moveTo(X, Y);
+                    }
+                    ctx.stroke();
                 }
             }
         }

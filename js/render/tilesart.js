@@ -161,25 +161,42 @@ function detailPass(ctx, id, px, py, size, tx, ty, pal) {
 
     switch (id) {
         case T.GRASS: case T.MEADOW: case T.MOSS: case T.GRASS_DRY: case T.PINE_FLOOR: {
-            // Blades of grass: short vertical strokes, lighter at the tip.
-            const n = 3 + Math.floor(h(tx, ty, 2) * 3);
-            for (let i = 0; i < n; i++) {
-                const gx = px + h(tx, ty, i * 3 + 1) * (size - 3) + 1;
-                const gy = py + h(tx, ty, i * 7 + 2) * (size - 5) + 3;
-                const len = 2 + h(tx, ty, i * 11) * 3;
-                ctx.fillStyle = season === "winter" ? "rgba(226,236,244,0.5)" : light;
-                ctx.globalAlpha = 0.5;
-                ctx.fillRect(gx, gy - len, 1, len);
-                ctx.fillStyle = dark;
-                ctx.globalAlpha = 0.35;
-                ctx.fillRect(gx + 1, gy - len * 0.6, 1, len * 0.6);
+            // Tufts, not lone sticks: three or four blades leaning out of one
+            // root, lighter at the tip, with a darker blade behind.
+            const winter = season === "winter";
+            const tufts = 2 + Math.floor(h(tx, ty, 2) * 3);
+            for (let i = 0; i < tufts; i++) {
+                const gx = px + h(tx, ty, i * 3 + 1) * (size - 6) + 3;
+                const gy = py + h(tx, ty, i * 7 + 2) * (size - 6) + 4;
+                const n0 = h(tx, ty, i * 11);
+                const blades = 3 + Math.floor(n0 * 2);
+                ctx.lineCap = "round";
+                for (let k = 0; k < blades; k++) {
+                    const n = h(tx * 3 + i, ty * 5 + k, 19);
+                    const len = (2.6 + n * 3.4) * (id === T.MOSS ? 0.7 : 1);
+                    const lean = (k - (blades - 1) / 2) * (0.8 + n * 0.8);
+                    const front = k % 2 === 0;
+                    ctx.strokeStyle = winter ? "rgba(228,238,246,0.55)" : (front ? light : dark);
+                    ctx.globalAlpha = front ? 0.5 : 0.34;
+                    ctx.lineWidth = front ? 1 : 0.8;
+                    ctx.beginPath();
+                    ctx.moveTo(gx, gy);
+                    ctx.quadraticCurveTo(gx + lean * 0.4, gy - len * 0.6, gx + lean, gy - len);
+                    ctx.stroke();
+                }
                 ctx.globalAlpha = 1;
             }
-            // Occasional flower / pebble.
+            // Occasional flower / pebble / fallen needle.
             const spark = h(tx, ty, 77);
             if (id === T.MEADOW && spark > 0.86) {
-                ctx.fillStyle = ["#e8d05a", "#e6eaf0", "#d98ab0", "#9fc6ef"][Math.floor(spark * 97) % 4];
-                ctx.fillRect(px + 8 + spark * 12, py + 10 + spark * 10, 2, 2);
+                const c = ["#e8d05a", "#e6eaf0", "#d98ab0", "#9fc6ef"][Math.floor(spark * 97) % 4];
+                const fx = px + 8 + spark * 12, fy = py + 10 + spark * 10;
+                ctx.fillStyle = "rgba(40,60,30,0.3)";
+                ctx.fillRect(fx, fy + 1.6, 1, 2.4);           // a stem under it
+                ctx.fillStyle = c;
+                ctx.beginPath(); ctx.arc(fx + 0.5, fy + 0.5, 1.4, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = "rgba(255,255,255,0.5)";
+                ctx.fillRect(fx - 0.4, fy - 0.4, 0.9, 0.9);
             }
             if (id === T.PINE_FLOOR && spark > 0.7) {
                 ctx.strokeStyle = "rgba(60,48,30,0.5)";
@@ -187,6 +204,10 @@ function detailPass(ctx, id, px, py, size, tx, ty, pal) {
                 ctx.beginPath();
                 ctx.moveTo(px + 6 + spark * 14, py + 8 + spark * 12);
                 ctx.lineTo(px + 10 + spark * 14, py + 12 + spark * 10);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(px + 7 + spark * 14, py + 11 + spark * 10);
+                ctx.lineTo(px + 11 + spark * 14, py + 9 + spark * 10);
                 ctx.stroke();
             }
             break;
@@ -259,15 +280,38 @@ function detailPass(ctx, id, px, py, size, tx, ty, pal) {
 
         case T.WATER: case T.DEEP: {
             const deep = id === T.DEEP;
-            ctx.fillStyle = deep ? "rgba(10,30,45,0.35)" : "rgba(255,255,255,0.10)";
-            for (let i = 0; i < 3; i++) {
-                const ry = py + 4 + i * 10 + h(tx, ty, i) * 4;
-                const rw = 6 + h(tx, ty, i + 5) * 14;
-                ctx.fillRect(px + h(tx, ty, i + 9) * (size - rw), ry, rw, 1);
+            // Depth: the open water sinks towards blue-black, the shallows
+            // keep a sandy glow. Continuous noise, so no tile steps.
+            const q = size / 4;
+            for (let cy2 = 0; cy2 < 4; cy2++) {
+                for (let cx2 = 0; cx2 < 4; cx2++) {
+                    const gx = tx * 4 + cx2, gy = ty * 4 + cy2;
+                    const d = soft(gx, gy, 9, 13);
+                    ctx.fillStyle = deep
+                        ? `rgba(8,26,44,${0.18 + d * 0.3})`
+                        : `rgba(16,54,78,${0.06 + d * 0.22})`;
+                    // Exact, non-overlapping cells: translucent fills that
+                    // overlap by half a pixel leave a grid of dark seams.
+                    ctx.fillRect(px + cx2 * q, py + cy2 * q, q, q);
+                }
             }
-            if (!deep && h(tx, ty, 41) > 0.8) {       // sun glint on the shallows
+            // Caustics: bright wavy threads where the light hits the bottom.
+            ctx.strokeStyle = deep ? "rgba(140,200,230,0.1)" : "rgba(225,245,255,0.22)";
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 3; i++) {
+                const ry = py + 4 + i * 10 + h(tx, ty, i) * 5;
+                const rw = 7 + h(tx, ty, i + 5) * 15;
+                const rx = px + h(tx, ty, i + 9) * (size - rw);
+                ctx.beginPath();
+                ctx.moveTo(rx, ry);
+                ctx.quadraticCurveTo(rx + rw * 0.5, ry - 2.5, rx + rw, ry + 0.5);
+                ctx.stroke();
+            }
+            if (!deep && h(tx, ty, 41) > 0.72) {       // sun glint on the shallows
                 ctx.fillStyle = "rgba(255,255,255,0.3)";
-                ctx.fillRect(px + 10, py + 14, 4, 1);
+                ctx.beginPath();
+                ctx.ellipse(px + 8 + h(tx, ty, 3) * 14, py + 10 + h(tx, ty, 9) * 12, 3, 0.9, 0.3, 0, Math.PI * 2);
+                ctx.fill();
             }
             break;
         }
@@ -441,49 +485,101 @@ export function paintEdges(ctx, map, tx, ty, px, py, size) {
             continue;
         }
 
-        // Interlock the two grounds: a deep ragged fringe plus a scatter of
-        // the neighbour's colour further in, so patches never read as squares.
+        // Interlock the two *dry* grounds: a deep ragged fringe plus a
+        // scatter of the neighbour's colour further in, so patches never
+        // read as squares. Coasts are handled separately below — a gravel
+        // comb poking into the sea looks terrible.
         const steps = 16;
-        for (let layer = 0; layer < 2; layer++) {
-            ctx.fillStyle = oi.colors[layer === 0 ? 0 : 1];
-            ctx.globalAlpha = layer === 0 ? 0.6 : 0.34;
-            for (let i = 0; i < steps; i++) {
-                const n = h(tx * 13 + i, ty * 17 + layer, side.charCodeAt(0));
-                const n2 = h(tx * 31 + i * 3, ty * 7 + layer, side.charCodeAt(0) + 5);
-                const depth = (layer === 0 ? 4.5 : 10) * (0.2 + n * 1.1) * (0.6 + n2 * 0.7);
-                const seg = size / steps;
-                if (side === "n") ctx.fillRect(px + i * seg, py, seg, depth);
-                if (side === "s") ctx.fillRect(px + i * seg, py + size - depth, seg, depth);
-                if (side === "w") ctx.fillRect(px, py + i * seg, depth, seg);
-                if (side === "e") ctx.fillRect(px + size - depth, py + i * seg, depth, seg);
+        if (!oi.liquid && !hi.liquid) {
+            for (let layer = 0; layer < 2; layer++) {
+                ctx.fillStyle = oi.colors[layer === 0 ? 0 : 1];
+                ctx.globalAlpha = layer === 0 ? 0.6 : 0.34;
+                for (let i = 0; i < steps; i++) {
+                    const n = h(tx * 13 + i, ty * 17 + layer, side.charCodeAt(0));
+                    const n2 = h(tx * 31 + i * 3, ty * 7 + layer, side.charCodeAt(0) + 5);
+                    const depth = (layer === 0 ? 4.5 : 10) * (0.2 + n * 1.1) * (0.6 + n2 * 0.7);
+                    const seg = size / steps;
+                    if (side === "n") ctx.fillRect(px + i * seg, py, seg, depth);
+                    if (side === "s") ctx.fillRect(px + i * seg, py + size - depth, seg, depth);
+                    if (side === "w") ctx.fillRect(px, py + i * seg, depth, seg);
+                    if (side === "e") ctx.fillRect(px + size - depth, py + i * seg, depth, seg);
+                }
             }
+            ctx.globalAlpha = 0.4;
+            ctx.fillStyle = oi.colors[1];
+            for (let i = 0; i < 7; i++) {
+                const n = h(tx * 23 + i * 5, ty * 29, side.charCodeAt(0) + 11);
+                const n2 = h(tx * 17, ty * 41 + i * 3, side.charCodeAt(0) + 19);
+                if (n2 > 0.62) continue;
+                const along = n * size;
+                const into = 4 + n2 * 13;
+                const sz = 1.5 + n2 * 2.5;
+                if (side === "n") ctx.fillRect(px + along, py + into, sz, sz);
+                if (side === "s") ctx.fillRect(px + along, py + size - into - sz, sz, sz);
+                if (side === "w") ctx.fillRect(px + into, py + along, sz, sz);
+                if (side === "e") ctx.fillRect(px + size - into - sz, py + along, sz, sz);
+            }
+            ctx.globalAlpha = 1;
         }
-        // Speckles of the neighbouring ground drifting into this tile.
-        ctx.globalAlpha = 0.4;
-        ctx.fillStyle = oi.colors[1];
-        for (let i = 0; i < 7; i++) {
-            const n = h(tx * 23 + i * 5, ty * 29, side.charCodeAt(0) + 11);
-            const n2 = h(tx * 17, ty * 41 + i * 3, side.charCodeAt(0) + 19);
-            if (n2 > 0.62) continue;
-            const along = n * size;
-            const into = 4 + n2 * 13;
-            const sz = 1.5 + n2 * 2.5;
-            if (side === "n") ctx.fillRect(px + along, py + into, sz, sz);
-            if (side === "s") ctx.fillRect(px + along, py + size - into - sz, sz, sz);
-            if (side === "w") ctx.fillRect(px + into, py + along, sz, sz);
-            if (side === "e") ctx.fillRect(px + size - into - sz, py + along, sz, sz);
-        }
-        // Wet sand / foam where land meets water.
+        ctx.globalAlpha = 1;
+
+        // --- the shoreline ------------------------------------------------
+        // Land next to water: a band of wet, darker ground. Water next to
+        // land: a band of bright shallows. Both follow a wobbling line, so
+        // the coast never looks like a staircase of tiles.
+        const band = (depthAt, paint) => {
+            const fine = steps * 2;                            // 1 px teeth
+            const seg = size / fine;
+            for (let i = 0; i < fine; i++) {
+                const d = depthAt(i);
+                if (d <= 0) continue;
+                // Exact segment width: overlapping translucent strips
+                // double up and show as a comb of darker stripes.
+                paint(i * seg, seg, d);
+            }
+        };
+        // Low-frequency wobble: the band's inner edge is a slow wave along
+        // the coast. High-frequency noise here turns into a comb of teeth.
+        const along = (i) => (side === "n" || side === "s") ? tx * steps + i : ty * steps + i;
+        const across = (side === "n" || side === "s") ? ty * steps : tx * steps;
+        const wobble = (i, salt) => {
+            const n = soft(along(i), across, 11, salt);        // slow swell
+            const n2 = soft(along(i), across, 4.5, salt + 3);  // small bays
+            return 0.3 + n * 1.0 + n2 * 0.45;
+        };
         if (oi.liquid && !hi.liquid) {
-            ctx.fillStyle = "rgba(255,255,255,0.22)";
-            for (let i = 0; i < steps; i++) {
-                const n = h(tx * 7 + i, ty * 11, 3);
-                const seg = size / steps;
-                if (side === "n") ctx.fillRect(px + i * seg, py + 1 + n * 2, seg * 0.8, 1);
-                if (side === "s") ctx.fillRect(px + i * seg, py + size - 2 - n * 2, seg * 0.8, 1);
-                if (side === "w") ctx.fillRect(px + 1 + n * 2, py + i * seg, 1, seg * 0.8);
-                if (side === "e") ctx.fillRect(px + size - 2 - n * 2, py + i * seg, 1, seg * 0.8);
-            }
+            band((i) => wobble(i, 11) * 7, (off, len, d) => {
+                ctx.fillStyle = "rgba(96,78,52,0.32)";            // wet ground
+                if (side === "n") ctx.fillRect(px + off, py, len, d);
+                if (side === "s") ctx.fillRect(px + off, py + size - d, len, d);
+                if (side === "w") ctx.fillRect(px, py + off, d, len);
+                if (side === "e") ctx.fillRect(px + size - d, py + off, d, len);
+            });
+            band((i) => wobble(i, 23) * 2.6, (off, len, d) => {
+                ctx.fillStyle = "rgba(255,255,255,0.3)";          // dried foam line
+                if (side === "n") ctx.fillRect(px + off, py, len, d);
+                if (side === "s") ctx.fillRect(px + off, py + size - d, len, d);
+                if (side === "w") ctx.fillRect(px, py + off, d, len);
+                if (side === "e") ctx.fillRect(px + size - d, py + off, d, len);
+            });
+        } else if (hi.liquid && oi.liquid) {
+            // Shallow meeting deep: a soft lip instead of a hard rectangle.
+            const lighter = here === T.WATER;
+            band((i) => wobble(i, 29) * 8, (off, len, d) => {
+                ctx.fillStyle = lighter ? "rgba(10,34,56,0.18)" : "rgba(120,170,190,0.16)";
+                if (side === "n") ctx.fillRect(px + off, py, len, d);
+                if (side === "s") ctx.fillRect(px + off, py + size - d, len, d);
+                if (side === "w") ctx.fillRect(px, py + off, d, len);
+                if (side === "e") ctx.fillRect(px + size - d, py + off, d, len);
+            });
+        } else if (hi.liquid && !oi.liquid) {
+            band((i) => wobble(i, 17) * 9, (off, len, d) => {
+                ctx.fillStyle = "rgba(190,215,205,0.3)";          // sunlit shallows
+                if (side === "n") ctx.fillRect(px + off, py, len, d);
+                if (side === "s") ctx.fillRect(px + off, py + size - d, len, d);
+                if (side === "w") ctx.fillRect(px, py + off, d, len);
+                if (side === "e") ctx.fillRect(px + size - d, py + off, d, len);
+            });
         }
     }
     ctx.globalAlpha = 1;
@@ -536,11 +632,17 @@ function shadowEllipse(ctx, w, hh, alpha = 0.3) {
 
 /** Per-instance colour jitter so a forest is not a clone army. */
 function jitterPalette(colors, seedA, seedB) {
-    const k = (h(seedA, seedB, 17) - 0.5) * 16;
-    const warm = (h(seedA, seedB, 29) - 0.5) * 10;
+    // Each plant gets its own shade: brightness, warmth and a little
+    // saturation drift. A forest of identical greens looks like wallpaper.
+    const k = (h(seedA, seedB, 17) - 0.5) * 26;
+    const warm = (h(seedA, seedB, 29) - 0.5) * 20;
+    const sat = 0.86 + h(seedA, seedB, 43) * 0.3;
     return colors.map((c) => {
         const [r, g, b] = rgb(c);
-        return css(r + k + warm, g + k, b + k - warm * 0.5);
+        const lum = (r + g + b) / 3;
+        return css(lum + (r - lum) * sat + k + warm,
+                   lum + (g - lum) * sat + k,
+                   lum + (b - lum) * sat + k - warm * 0.5);
     });
 }
 
@@ -556,93 +658,133 @@ const TREE_COLORS = {
 
 const AUTUMN_COLORS = ["#b07a2c", "#8f6122", "#d79a3e", "#48300f"];
 
-function conifer(ctx, obj) {
+function conifer(ctx, obj, season = "spring") {
     const s = obj.size || 1;
     const pal = jitterPalette(TREE_COLORS[obj.kind] || TREE_COLORS.pine, obj.tx, obj.ty);
     const [mid, dark, lit, deep] = pal;
-    const H = 46 * s;
+    const winter = season === "winter";
+    const spruce = obj.kind === "spruce";
+    const H = (spruce ? 50 : 46) * s;
 
     shadowEllipse(ctx, 13 * s, 5 * s, 0.32);
 
-    // Trunk.
+    // Trunk, visible between the lowest branches.
     ctx.fillStyle = "#4b3722";
-    ctx.fillRect(-2.6 * s, -13 * s, 5.2 * s, 13 * s);
+    ctx.beginPath();
+    ctx.moveTo(-3.4 * s, 0);
+    ctx.quadraticCurveTo(-2.2 * s, -8 * s, -1.6 * s, -16 * s);
+    ctx.lineTo(1.6 * s, -16 * s);
+    ctx.quadraticCurveTo(2.2 * s, -8 * s, 3.4 * s, 0);
+    ctx.closePath(); ctx.fill();
     ctx.fillStyle = "#5e472c";
-    ctx.fillRect(0.4 * s, -13 * s, 2.2 * s, 13 * s);
+    ctx.fillRect(0.2 * s, -16 * s, 1.8 * s, 16 * s);
+    ctx.fillStyle = "rgba(0,0,0,0.25)";
+    ctx.fillRect(-3.2 * s, -16 * s, 1.2 * s, 16 * s);
 
-    // Five tiers of needles, each a jagged skirt.
-    const tiers = h(obj.tx, obj.ty, 47) > 0.5 ? 6 : 5;
+    // Branch tiers. Each one is a drooping skirt of needle bundles, with its
+    // own jitter — no two trees share a silhouette.
+    const tiers = 5 + Math.floor(h(obj.tx, obj.ty, 47) * 3);
     for (let i = 0; i < tiers; i++) {
         const t = i / (tiers - 1);
-        const w = (17 - t * 11) * s;
-        const y = -9 * s - t * (H - 14 * s);
-        const tierH = 15 * s;
+        const j = h(obj.tx + i, obj.ty, 53);
+        const w = (18 - t * 12) * s * (0.86 + j * 0.28);
+        const y = -11 * s - t * (H - 16 * s);
+        const tierH = (14 + j * 5) * s;
+        const droop = (2 + j * 2.5) * s;
 
-        ctx.fillStyle = i % 2 ? dark : mid;
-        ctx.beginPath();
-        ctx.moveTo(0, y - tierH);
-        for (let k = 1; k <= 5; k++) {
-            const f = k / 5;
-            ctx.lineTo(w * f, y - tierH * (1 - f) + (k % 2 ? 1.5 * s : 4 * s));
-        }
-        ctx.lineTo(w * 0.55, y + 2 * s);
-        ctx.lineTo(-w * 0.55, y + 2 * s);
-        for (let k = 5; k >= 1; k--) {
-            const f = k / 5;
-            ctx.lineTo(-w * f, y - tierH * (1 - f) + (k % 2 ? 1.5 * s : 4 * s));
-        }
-        ctx.closePath();
-        ctx.fill();
+        // Body of the tier: a jagged skirt, deeper notches near the edge.
+        const skirt = (scale, fill, dy) => {
+            ctx.fillStyle = fill;
+            ctx.beginPath();
+            ctx.moveTo(0, y - tierH * scale + dy);
+            for (let k = 1; k <= 6; k++) {
+                const f = k / 6;
+                const n = h(obj.tx + i * 3, obj.ty + k, 61);
+                ctx.lineTo(w * f * scale, y - tierH * (1 - f) * scale + dy + (k % 2 ? 1 : 3.4) * s + f * droop);
+            }
+            ctx.lineTo(w * 0.5 * scale, y + 1.5 * s + dy);
+            ctx.lineTo(-w * 0.5 * scale, y + 1.5 * s + dy);
+            for (let k = 6; k >= 1; k--) {
+                const f = k / 6;
+                ctx.lineTo(-w * f * scale, y - tierH * (1 - f) * scale + dy + (k % 2 ? 2.6 : 0.8) * s + f * droop);
+            }
+            ctx.closePath(); ctx.fill();
+        };
+        skirt(1, deep, 2.2 * s);                    // shadow under the branches
+        skirt(1, i % 2 ? dark : mid, 0);
 
-        // Sun on the upper-left, shade on the lower-right.
+        // Sunlit left half and shaded right half.
+        ctx.globalAlpha = 0.5;
         ctx.fillStyle = lit;
-        ctx.globalAlpha = 0.55;
         ctx.beginPath();
-        ctx.moveTo(0, y - tierH);
-        ctx.lineTo(-w * 0.75, y + 1 * s);
-        ctx.lineTo(-w * 0.2, y + 1 * s);
-        ctx.closePath();
-        ctx.fill();
+        ctx.moveTo(-0.5 * s, y - tierH);
+        ctx.lineTo(-w * 0.78, y + 0.5 * s + droop * 0.7);
+        ctx.lineTo(-w * 0.26, y + 0.5 * s);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = deep;
+        ctx.globalAlpha = 0.3;
+        ctx.beginPath();
+        ctx.moveTo(w * 0.16, y - tierH * 0.55);
+        ctx.lineTo(w * 0.95, y + 1.5 * s + droop * 0.7);
+        ctx.lineTo(w * 0.2, y + 1.5 * s);
+        ctx.closePath(); ctx.fill();
         ctx.globalAlpha = 1;
 
-        if (i === tiers - 1) {                       // sun on the crown
-            ctx.fillStyle = "rgba(255,240,190,0.22)";
+        // Needle bundles along the lower edge: this is what makes it read as
+        // a conifer instead of a stack of triangles.
+        ctx.strokeStyle = i % 2 ? lit : mid;
+        ctx.lineWidth = 0.9 * s;
+        ctx.lineCap = "round";
+        for (let k = 0; k < 7; k++) {
+            const f = (k + 0.5) / 7;
+            const n = h(obj.tx * 3 + i, obj.ty * 5 + k, 67);
+            const dir = k % 2 ? 1 : -1;
+            const ex = dir * w * f, ey = y - tierH * (1 - f) + 2 * s + f * droop;
+            ctx.beginPath();
+            ctx.moveTo(ex * 0.72, ey - 2.4 * s);
+            ctx.lineTo(ex + dir * (1 + n * 2) * s, ey + (1 + n) * s);
+            ctx.stroke();
+        }
+
+        if (i === tiers - 1) {                       // sun on the crown tip
+            ctx.fillStyle = "rgba(255,240,190,0.26)";
             ctx.beginPath();
             ctx.moveTo(0, y - tierH);
-            ctx.lineTo(-w * 0.5, y - tierH * 0.2);
-            ctx.lineTo(0, y - tierH * 0.35);
-            ctx.closePath();
-            ctx.fill();
+            ctx.lineTo(-w * 0.45, y - tierH * 0.15);
+            ctx.lineTo(0, y - tierH * 0.3);
+            ctx.closePath(); ctx.fill();
         }
-        ctx.fillStyle = deep;
-        ctx.globalAlpha = 0.35;
-        ctx.beginPath();
-        ctx.moveTo(w * 0.18, y - tierH * 0.55);
-        ctx.lineTo(w, y + 2 * s);
-        ctx.lineTo(w * 0.2, y + 2 * s);
-        ctx.closePath();
-        ctx.fill();
-        ctx.globalAlpha = 1;
+        if (winter) {                                // snow lying on the boughs
+            ctx.fillStyle = "rgba(236,244,252,0.72)";
+            ctx.beginPath();
+            ctx.moveTo(-w * 0.5, y + 0.5 * s);
+            for (let k = -3; k <= 3; k++) {
+                const f = k / 3;
+                ctx.lineTo(w * 0.5 * f, y - tierH * (1 - Math.abs(f)) * 0.9 + (k % 2 ? 0.5 : 2) * s);
+            }
+            ctx.closePath(); ctx.fill();
+        }
     }
 }
 
 function broadleaf(ctx, obj, season) {
     const s = obj.size || 1;
     const autumn = season === "autumn" && obj.kind !== "ancient_oak";
+    const winter = season === "winter" && obj.kind !== "ancient_oak";
     const pal = jitterPalette(autumn ? AUTUMN_COLORS : (TREE_COLORS[obj.kind] || TREE_COLORS.oak), obj.tx, obj.ty);
     const [mid, dark, lit, deep] = pal;
     const birch = obj.kind === "birch";
+    const willow = obj.kind === "willow";
     const big = obj.kind === "ancient_oak" ? 1.45 : 1;
     const S = s * big;
 
     shadowEllipse(ctx, 15 * S, 5.5 * S, 0.32);
 
-    // Trunk: root flare at the base, rising into the crown so the canopy
-    // never floats above a stump.
-    const trunk = birch ? "#cdc6b4" : "#5d4226";
-    const trunkTop = -30 * S;
-    const halfBase = birch ? 3.4 * S : 5.5 * S;
-    const halfTop = birch ? 1.7 * S : 2.4 * S;
+    /* ---- trunk ---------------------------------------------------------- */
+    const trunk = birch ? "#d6d0c0" : "#5d4226";
+    const trunkTop = (birch ? -34 : -30) * S;
+    const halfBase = birch ? 3.2 * S : 5.5 * S;
+    const halfTop = birch ? 1.6 * S : 2.4 * S;
     ctx.fillStyle = trunk;
     ctx.beginPath();
     ctx.moveTo(-halfBase, 0);
@@ -650,66 +792,161 @@ function broadleaf(ctx, obj, season) {
     ctx.lineTo(halfTop, trunkTop);
     ctx.quadraticCurveTo(halfBase * 0.62, -12 * S, halfBase, 0);
     ctx.closePath(); ctx.fill();
-    ctx.fillStyle = birch ? "#a8a192" : "#452f19";
+    // Shaded right flank and a lit left edge.
+    ctx.fillStyle = birch ? "#aba493" : "#452f19";
     ctx.beginPath();
-    ctx.moveTo(halfTop * 0.45, trunkTop);
+    ctx.moveTo(halfTop * 0.4, trunkTop);
     ctx.lineTo(halfTop, trunkTop);
     ctx.quadraticCurveTo(halfBase * 0.62, -12 * S, halfBase, 0);
-    ctx.lineTo(halfBase * 0.42, 0);
+    ctx.lineTo(halfBase * 0.4, 0);
     ctx.closePath(); ctx.fill();
-    // Limbs reaching into the canopy.
-    ctx.strokeStyle = birch ? "#c6c1b1" : "#523a20";
-    ctx.lineWidth = 2.2 * S; ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(-1 * S, -22 * S); ctx.quadraticCurveTo(-7 * S, -28 * S, -11 * S, -34 * S); ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(1 * S, -24 * S); ctx.quadraticCurveTo(7 * S, -29 * S, 10 * S, -34 * S); ctx.stroke();
-    if (birch) {
-        ctx.fillStyle = "#3a3630";
-        for (let i = 0; i < 6; i++) {
-            ctx.fillRect(-2 * S + h(obj.tx, obj.ty, i) * 3 * S, -27 * S + i * 4.3 * S, 1.8 * S, 0.9 * S);
+    ctx.fillStyle = birch ? "rgba(255,255,255,0.5)" : "rgba(214,178,120,0.18)";
+    ctx.fillRect(-halfBase * 0.86, -8 * S, 1.2 * S, 8 * S);
+    if (!birch) {                                    // bark furrows
+        ctx.strokeStyle = "rgba(30,20,10,0.35)";
+        ctx.lineWidth = 0.9 * S;
+        for (let i = 0; i < 4; i++) {
+            const fx = (-0.6 + i * 0.4) * halfBase;
+            ctx.beginPath();
+            ctx.moveTo(fx, -2 * S);
+            ctx.quadraticCurveTo(fx * 0.8, -12 * S, fx * 0.5, -22 * S);
+            ctx.stroke();
         }
+    } else {                                         // birch lenticels
+        ctx.fillStyle = "#3a3630";
+        for (let i = 0; i < 9; i++) {
+            const n = h(obj.tx, obj.ty + i, 7);
+            const yy = -4 * S - i * 3.2 * S;
+            const ww = (1.4 + n * 2.4) * S;
+            ctx.fillRect((n - 0.5) * 3.4 * S, yy, ww, 0.9 * S);
+            if (n > 0.7) ctx.fillRect((n - 0.8) * 3 * S, yy + 1.6 * S, ww * 0.5, 0.7 * S);
+        }
+        ctx.fillStyle = "rgba(60,52,44,0.5)";        // sooty base
+        ctx.beginPath();
+        ctx.moveTo(-halfBase, 0);
+        ctx.quadraticCurveTo(0, -6 * S, halfBase, 0);
+        ctx.closePath(); ctx.fill();
     }
 
-    // Crown: overlapping blobs sitting on the limbs — dark pass, mid pass,
-    // then a rim light on the sunward side.
-    const blobs = [[0, -40, 17], [-12, -33, 12.5], [12, -34, 11.5], [-5, -47, 11], [7, -45, 10]];
-    ctx.fillStyle = dark;
-    for (const [bx, by, br] of blobs) {
+    /* ---- limbs ---------------------------------------------------------- */
+    const limbCol = birch ? "#c6c1b1" : "#523a20";
+    ctx.strokeStyle = limbCol; ctx.lineCap = "round";
+    const limbs = [[-1, -20, -12, -36], [1, -23, 11, -35], [-0.5, -26, -4, -42], [0.5, -27, 6, -41]];
+    limbs.forEach(([x0, y0, x1, y1], i) => {
+        ctx.lineWidth = (2.4 - i * 0.4) * S;
         ctx.beginPath();
-        ctx.ellipse(bx * S + 2, by * S + 2.5, br * S, br * 0.84 * S, 0, 0, Math.PI * 2);
+        ctx.moveTo(x0 * S, y0 * S);
+        ctx.quadraticCurveTo((x0 + x1) * 0.5 * S, (y0 + y1) * 0.62 * S, x1 * S, y1 * S);
+        ctx.stroke();
+    });
+
+    /* ---- crown ----------------------------------------------------------
+     * A cloud of clumps generated from the tile seed: every tree gets its own
+     * outline. Three passes (shadow, body, sunlight) plus leaf dabs so the
+     * canopy has texture instead of being one flat blob.
+     */
+    const clumpCount = willow ? 9 : 8;
+    const cy = willow ? -36 : -42;
+    const spread = willow ? 19 : 17;
+    const clumps = [];
+    for (let i = 0; i < clumpCount; i++) {
+        const n1 = h(obj.tx * 3 + i, obj.ty, 71), n2 = h(obj.tx, obj.ty * 5 + i, 73);
+        const a = (i / clumpCount) * Math.PI * 2 + (n1 - 0.5) * 0.6;
+        const rad = spread * (0.45 + n2 * 0.55);
+        clumps.push([
+            Math.cos(a) * rad,
+            cy + Math.sin(a) * rad * 0.62 + (willow ? Math.max(0, Math.sin(a)) * 7 : 0),
+            (7.5 + n1 * 5.5) * (willow ? 0.85 : 1)
+        ]);
+    }
+    clumps.push([0, cy - 2, spread * (birch ? 0.62 : 0.78)]);   // dense centre
+
+    const paint = (fill, dx, dy, scale, alpha = 1) => {
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = fill;
+        for (const [bx, by, br] of clumps) {
+            ctx.beginPath();
+            ctx.ellipse((bx + dx) * S, (by + dy) * S, br * scale * S, br * 0.82 * scale * S, 0, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+    };
+    if (winter) {
+        // Bare branches: a few twigs instead of a canopy.
+        ctx.strokeStyle = limbCol;
+        for (let i = 0; i < 12; i++) {
+            const n = h(obj.tx + i, obj.ty * 2, 83);
+            const a = Math.PI + (i / 11) * Math.PI;
+            ctx.lineWidth = 0.9 * S;
+            ctx.beginPath();
+            ctx.moveTo(0, -28 * S);
+            ctx.quadraticCurveTo(Math.cos(a) * 8 * S, (-34 - n * 4) * S,
+                                 Math.cos(a) * (14 + n * 6) * S, (-36 - n * 8) * S);
+            ctx.stroke();
+        }
+        return;
+    }
+    paint(deep, 1.6, 2.6, 1.0, 0.9);       // the canopy's own shadow
+    paint(dark, 0, 0, 1.0);                // body
+    paint(mid, -0.8, -1.4, 0.86);          // lit body
+    paint(lit, -2.6, -3.4, 0.52, 0.75);    // sun from the upper left
+
+    // Leaf dabs: small flecks of light and shade across the whole crown.
+    for (let i = 0; i < 44; i++) {
+        const n1 = h(obj.tx * 7 + i, obj.ty, 89), n2 = h(obj.tx, obj.ty * 11 + i, 97);
+        const a = n1 * Math.PI * 2, rad = spread * Math.sqrt(n2) * 0.95;
+        const lx = Math.cos(a) * rad, ly = cy + Math.sin(a) * rad * 0.62;
+        const sun = lx < -2 && ly < cy + 2;           // the sunward shoulder
+        const shade = lx > 3 && ly > cy;              // the lower right
+        if (!sun && !shade) continue;
+        ctx.fillStyle = sun ? lit : deep;
+        ctx.globalAlpha = sun ? 0.32 : 0.2;
+        ctx.beginPath();
+        ctx.ellipse(lx * S, ly * S, (1 + n1 * 1.2) * S, (0.8 + n2 * 0.9) * S, a, 0, Math.PI * 2);
         ctx.fill();
     }
-    ctx.fillStyle = mid;
-    for (const [bx, by, br] of blobs) {
-        ctx.beginPath();
-        ctx.ellipse(bx * S, by * S, br * 0.94 * S, br * 0.78 * S, 0, 0, Math.PI * 2);
-        ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Willow: trailing curtains of leaves.
+    if (willow) {
+        ctx.lineCap = "round";
+        for (let i = 0; i < 17; i++) {
+            const n = h(obj.tx + i, obj.ty, 31), n2 = h(obj.tx, obj.ty + i, 37);
+            const x0 = (-17 + i * 2.1) * S;
+            const drop = (16 + n * 16) * S;
+            const sway = (n2 - 0.5) * 5 * S;
+            ctx.strokeStyle = i % 3 === 0 ? lit : (i % 3 === 1 ? mid : dark);
+            ctx.globalAlpha = 0.85;
+            ctx.lineWidth = (1.3 + n * 1.1) * S;
+            ctx.beginPath();
+            ctx.moveTo(x0, (cy + 6) * S);
+            ctx.quadraticCurveTo(x0 + sway * 0.4, (cy + 6) * S + drop * 0.6,
+                                 x0 + sway, (cy + 6) * S + drop);
+            ctx.stroke();
+            // leaves hanging off the strand
+            ctx.lineWidth = 0.9 * S;
+            for (let k = 1; k <= 3; k++) {
+                const f = k / 3.4;
+                const lxx = x0 + sway * f * f, lyy = (cy + 6) * S + drop * f;
+                ctx.beginPath();
+                ctx.moveTo(lxx, lyy);
+                ctx.lineTo(lxx + (k % 2 ? 2 : -2) * S, lyy + 2.4 * S);
+                ctx.stroke();
+            }
+        }
+        ctx.globalAlpha = 1;
     }
-    ctx.fillStyle = lit;
-    ctx.globalAlpha = 0.6;
-    ctx.beginPath();
-    ctx.ellipse(-8 * S, -45 * S, 8.5 * S, 6 * S, -0.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.ellipse(-14 * S, -35 * S, 5 * S, 3.6 * S, -0.3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = deep;
-    ctx.globalAlpha = 0.32;
-    ctx.beginPath();
-    ctx.ellipse(10 * S, -30 * S, 8.5 * S, 5 * S, 0.3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    // A few leaf clumps breaking the outline.
-    ctx.fillStyle = mid;
-    for (let i = 0; i < 5; i++) {
-        const a = h(obj.tx, obj.ty, i * 9) * Math.PI * 2;
-        const rr = 15 + h(obj.tx, obj.ty, i * 5) * 5;
-        ctx.beginPath();
-        ctx.ellipse(Math.cos(a) * rr * S, -40 * S + Math.sin(a) * rr * 0.6 * S,
-                    3.4 * S, 2.6 * S, a, 0, Math.PI * 2);
-        ctx.fill();
+    // Autumn: a few leaves already on the ground.
+    if (autumn) {
+        for (let i = 0; i < 5; i++) {
+            const n = h(obj.tx + i * 3, obj.ty, 41);
+            ctx.fillStyle = i % 2 ? mid : lit;
+            ctx.globalAlpha = 0.8;
+            ctx.beginPath();
+            ctx.ellipse((-14 + n * 28) * S, (-1 + n * 3) * S, 2 * S, 1.2 * S, n * 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1;
     }
 }
 
@@ -730,7 +967,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
 
     switch (kind) {
         case "pine": case "spruce":
-            conifer(ctx, obj); break;
+            conifer(ctx, obj, season); break;
 
         case "oak": case "birch": case "willow": case "ancient_oak":
             broadleaf(ctx, obj, season); break;
