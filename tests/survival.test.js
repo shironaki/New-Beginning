@@ -12,6 +12,7 @@ import { PROPS, propDef, rollDrops, requiredTool, toolHint } from "../js/sandbox
 import { Player } from "../js/entities/player.js";
 import { generateZone } from "../js/world/worldgen.js";
 import { GAIT } from "../js/render/charspec.js";
+import { posture } from "../js/render/character.js";
 
 suite("items");
 
@@ -466,6 +467,33 @@ test("the cadence is capped so a speed buff cannot sew", () => {
     p.update(1 / 60, { x: 1, y: 0 }, null, { speedFactor: 40 });
     const cap = GAIT.cadenceCap * Math.PI * 2 / 60;
     assert.lte(p.anim - before, cap + 1e-9);
+});
+
+
+test("the gait mirrors: walking left the feet go left", () => {
+    const at = (dir) => posture({ dir, phase: Math.PI / 2, gait: 1, runBlend: 0 });
+    const r = at("right"), l = at("left");
+    assert.gt(r.swingN, 0, "facing right the leading foot must go right");
+    assert.lt(l.swingN, 0, "facing left the leading foot must go left");
+    assert.near(r.swingN, -l.swingN, 1e-9, "the stride is not symmetric");
+    assert.near(r.liftN, l.liftN, 1e-9, "the foot lift must not depend on facing");
+});
+
+test("legs stay in antiphase and the arms counter-swing them", () => {
+    for (const dir of ["left", "right"]) {
+        for (const phase of [0.3, 1.1, 2.7, 4.4, 5.9]) {
+            const q = posture({ dir, phase, gait: 1 });
+            assert.near(q.swingN, -q.swingF, 1e-9, `${dir} @ ${phase}: legs fell in step`);
+        }
+    }
+});
+
+test("standing still the pose is neutral: no swing, no lean, no squash", () => {
+    const q = posture({ dir: "right", phase: 0, gait: 0 });
+    assert.near(q.swingN, 0, 1e-9);
+    assert.near(q.swingF, 0, 1e-9);
+    assert.near(q.lean, 0, 1e-9);
+    assert.near(q.squash, 0, 1e-9);
 });
 
 

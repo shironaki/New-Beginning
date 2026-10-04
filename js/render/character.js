@@ -87,20 +87,19 @@ function knee(hx, hy, ax, ay, bendDir) {
 }
 
 /**
- * @param {CanvasRenderingContext2D} ctx translated to the character's feet
- * @param {object} p { dir, phase|anim, gait|moving, runBlend, look,
- *                     actionTimer, tool, idleTime }
+ * The pose, as pure numbers. Separated from the painting so the walk can be
+ * unit tested — this is where the left/right mirror bug lived.
+ *
+ * @returns {object} swing/lift per leg (in world units, +X = screen right),
+ *                   torso bob, lean and squash.
  */
-export function drawCharacter(ctx, p) {
-    const look = Object.assign({}, DEFAULT_LOOK, p.look || {});
+export function posture(p) {
     const dir = p.dir || "down";
-    const idle = p.idleTime || 0;
-
-    /* ---- pose: pure numbers first, paint second ------------------------ */
     const phase = (p.phase != null ? p.phase : p.anim) || 0;
     const gaitRaw = clamp01(p.gait != null ? p.gait : (p.moving ? 1 : 0));
     const g = easeInOutSine(gaitRaw);                 // the one easing
     const run = clamp01(p.runBlend != null ? p.runBlend : 0);
+    const idle = p.idleTime || 0;
 
     const side = dir === "left" ? -1 : 1;
     const back = dir === "up";
@@ -113,8 +112,10 @@ export function drawCharacter(ctx, p) {
     const liftAmp = GAIT.liftWalk + (GAIT.liftRun - GAIT.liftWalk) * run;
     const bobAmp = GAIT.bobWalk + (GAIT.bobRun - GAIT.bobWalk) * run;
 
-    const swingN = Math.sin(phase) * amp * g;                 // near leg, forward+
-    const swingF = Math.sin(phase + Math.PI) * amp * g;       // far leg, antiphase
+    // `side` mirrors the whole gait: +1 facing right, -1 facing left. Without
+    // it the feet swung backwards when the hero walked left.
+    const swingN = side * Math.sin(phase) * amp * g;           // near leg, forward+
+    const swingF = side * Math.sin(phase + Math.PI) * amp * g; // far leg, antiphase
     const liftN = Math.max(0, Math.cos(phase)) * liftAmp * g;
     const liftF = Math.max(0, Math.cos(phase + Math.PI)) * liftAmp * g;
 
@@ -122,7 +123,8 @@ export function drawCharacter(ctx, p) {
     const breath = Math.sin(idle * GAIT.breathHz * Math.PI * 2) * GAIT.breathAmp;
     const bob = (Math.abs(Math.cos(phase)) - 0.5) * bobAmp * g + breath * (1 - g);
     const lean = sideView ? side * GAIT.leanRun * run * g : 0;
-    const squash = -GAIT.squash * Math.cos(phase * 2) * g;    // ±3% on contact
+    const squash = -GAIT.squash * Math.cos(phase * 2) * g;     // ±3% on contact
+    const stance = sideView ? side * BODY.idleStance * (1 - g) : 0;  // feet apart when idle
 
     // Action swing: wind-up then strike, both on the same eased curve.
     const act = p.actionTimer > 0 ? clamp01(1 - p.actionTimer / 0.35) : 0;
@@ -131,6 +133,24 @@ export function drawCharacter(ctx, p) {
             ? easeInOutSine(act / ACTION.windUp) * ACTION.windAmp
             : Math.sin(((act - ACTION.windUp) / (1 - ACTION.windUp)) * Math.PI) * ACTION.strikeAmp)
         : 0;
+
+    return { dir, phase, g, run, idle, side, back, sideView, amp,
+        swingN, swingF, liftN, liftF, bob, lean, squash, stance, swing };
+}
+
+/**
+ * @param {CanvasRenderingContext2D} ctx translated to the character's feet
+ * @param {object} p { dir, phase|anim, gait|moving, runBlend, look,
+ *                     actionTimer, tool, idleTime }
+ */
+export function drawCharacter(ctx, p) {
+    const look = Object.assign({}, DEFAULT_LOOK, p.look || {});
+    const dir = p.dir || "down";
+    const idle = p.idleTime || 0;
+
+    /* ---- pose: pure numbers first, paint second ------------------------ */
+    const { phase, g, side, back, sideView, amp,
+        swingN, swingF, liftN, liftF, bob, lean, squash, stance, swing } = posture(p);
 
     const skinDark = shadeHex(look.skin, PALETTE.skinShade);
     const skinLit = shadeHex(look.skin, PALETTE.skinLit);
@@ -142,7 +162,6 @@ export function drawCharacter(ctx, p) {
     const hipY = BODY.hipY - bob;
     const groundY = BODY.ankleY + BODY.bootH;                 // sole line
     const legSpread = BODY.legW / 2 + BODY.legGap / 2;
-    const stance = sideView ? side * BODY.idleStance * (1 - g) : 0;   // feet apart when idle
     const footNX = sideView ? swingN + stance : legSpread;
     const footFX = sideView ? -0.9 * side + swingF - stance : -legSpread;
     const centroid = (footNX + footFX) / 2;
@@ -174,24 +193,43 @@ export function drawCharacter(ctx, p) {
             far ? PALETTE.soleFar : PALETTE.sole, false);
     };
 
-    const drawArm = (shoulderX, reach, lift, far) => {
+    /** Arm kinematics first — the tool needs to know where the hand ends up. */
+    const armPose = (shoulderX, reach, lift) => {
         const sx = shoulderX, sy = BODY.armY - bob + lean;
         const ex = sx + reach, ey = sy + BODY.armLen - Math.abs(reach) * 0.25 - lift;
-        const el = { x: (sx + ex) / 2 + reach * 0.1, y: (sy + ey) / 2 };
+        return { sx, sy, ex, ey, mx: (sx + ex) / 2 + reach * 0.1, my: (sy + ey) / 2 };
+    };
+
+    /** `hand = false` when a tool is drawn over this hand — otherwise the hero
+     *  grows a spare hand next to the one holding the knife. */
+    const paintArm = (a, far, hand = true) => {
         const sleeve = far ? shadeHex(look.shirt, PALETTE.shirtFar) : shirtDark;
         const skinC = far ? shadeHex(look.skin, PALETTE.skinDeep) : look.skin;
-        limb(ctx, sx, sy, el.x, el.y, BODY.armW * BODY.sleeveW, BODY.armW, sleeve);  // sleeve
-        limb(ctx, el.x, el.y, ex, ey, BODY.armW, BODY.armW * 0.85, skinC);           // forearm
-        rect(ctx, ex - BODY.armW / 2, ey - 0.5, BODY.armW, BODY.handH,               // hand
-            far ? shadeHex(look.skin, PALETTE.skinDeep) : skinLit, !far);
+        limb(ctx, a.sx, a.sy, a.mx, a.my, BODY.armW * BODY.sleeveW, BODY.armW, sleeve);
+        limb(ctx, a.mx, a.my, a.ex, a.ey, BODY.armW, BODY.armW * 0.85, skinC);
+        if (hand) {
+            rect(ctx, a.ex - BODY.armW / 2, a.ey - 0.5, BODY.armW, BODY.handH,
+                far ? shadeHex(look.skin, PALETTE.skinDeep) : skinLit, !far);
+        }
     };
 
     const armAmp = amp * GAIT.armRatio * g;
     const armAmpTool = amp * GAIT.armRatioTool * g;
 
-    // Far arm and the far leg go behind the body.
-    if (sideView) drawArm(-BODY.farArmX * side, -side * Math.sin(phase) * armAmp, 0, true);
-    if (p.tool && back) drawHeldTool(ctx, p.tool, dir, side, swing, -bob, true);
+    // Arms counter-swing the legs: the far arm goes with the NEAR leg. Without
+    // this the hero marches like a tin soldier.
+    const ax0 = BODY.shoulderW / 2 + BODY.armW / 2 - 0.4;     // clear of the shirt
+    const farArm = sideView
+        ? armPose(-BODY.farArmX * side, -swingF * GAIT.armRatio, 0)
+        : armPose(-ax0, 0, (back ? 1 : -1) * Math.sin(phase) * armAmp);
+    const toolArm = sideView
+        ? armPose(BODY.nearArmX * side,
+            -swingN * GAIT.armRatioTool + side * swing * 2.2, Math.max(0, swing) * 1.5)
+        : armPose(back ? -ax0 : ax0, 0,
+            (back ? -1 : 1) * Math.sin(phase) * armAmpTool - swing * 2.2);
+
+    if (sideView) paintArm(farArm, true);
+    if (p.tool && back) drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, true);
 
     if (sideView) {
         drawLeg(-0.9 * side, swingF - stance, liftF, true, side);
@@ -232,14 +270,8 @@ export function drawCharacter(ctx, p) {
     rect(ctx, torsoX, torsoTop, PALETTE.rimW, torsoH - 2, PALETTE.rim, false);   // rim light
 
     /* ---- near arm ------------------------------------------------------- */
-    if (sideView) {
-        const reach = side * (Math.sin(phase) * armAmpTool + swing * 2.2);
-        drawArm(BODY.nearArmX * side, reach, Math.max(0, swing) * 1.5, false);
-    } else {
-        const ax0 = BODY.shoulderW / 2 + BODY.armW / 2 - 0.4;  // clear of the shirt
-        drawArm(-ax0, 0, (back ? 1 : -1) * Math.sin(phase) * armAmp, false);
-        drawArm(ax0, 0, (back ? -1 : 1) * Math.sin(phase) * armAmpTool - swing * 2.2, false);
-    }
+    if (!sideView) paintArm(farArm, false);
+    paintArm(toolArm, false, !p.tool);        // with a tool the hand is drawn by the tool
 
     /* ---- head ----------------------------------------------------------- */
     const headY = BODY.headY - bob;
@@ -294,16 +326,17 @@ export function drawCharacter(ctx, p) {
     ctx.restore();
 
     // Tool in the near hand, in front of the body.
-    if (p.tool && !back) drawHeldTool(ctx, p.tool, dir, side, swing, -bob, false);
+    if (p.tool && !back) drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, false);
 }
 
 /**
  * Draw the held tool at the hand. `dir` decides which side of the body the
  * grip sits on; the tool is rotated around the grip when swinging.
  */
-function drawHeldTool(ctx, tool, dir, side, swing, bob, behind) {
-    const gx = (dir === "down" ? BODY.gripX - 0.2 : dir === "up" ? -BODY.gripX + 0.2 : side * BODY.gripX);
-    const gy = BODY.gripY + bob + (dir === "up" ? -0.5 : 0);
+function drawHeldTool(ctx, tool, dir, side, swing, arm, behind) {
+    // The grip IS the hand of the tool arm — passing a fixed GRIP_Y used to
+    // leave the knife floating next to a second, phantom hand.
+    const gx = arm.ex, gy = arm.ey + BODY.handH / 2 - 0.5;
     const lean = dir === "up" ? -0.35 : dir === "down" ? 0.3 : side * 0.45;
     const angle = lean - side * swing * 1.9;
 
