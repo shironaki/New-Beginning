@@ -214,12 +214,18 @@ export class Renderer {
                 }
             } else if (d.kind === "player") {
                 drawCharacter(ctx, {
-                    dir: o.dir, anim: o.anim, moving: o.moving, look: state.look,
+                    dir: o.dir, phase: o.anim, gait: o.gait, runBlend: o.runBlend,
+                    moving: o.moving, look: state.look,
                     actionTimer: o.actionTimer, tool: state.tool, idleTime: this.time
                 });
             } else {
                 drawCharacter(ctx, {
-                    dir: o.dir || "down", anim: o.anim || 0, moving: !!o.moving, look: o.look
+                    // Settlers and travellers share the hero's locomotion contract:
+                    // whatever advances their `anim`/`gait` gets the same walk.
+                    dir: o.dir || "down", phase: o.anim || 0,
+                    gait: o.gait != null ? o.gait : (o.moving ? 1 : 0),
+                    runBlend: o.runBlend || 0,
+                    moving: !!o.moving, look: o.look, idleTime: this.time
                 });
             }
             ctx.restore();

@@ -82,11 +82,15 @@ const scenes = [
     },
     {
         name: "04-hero-closeup",
-        about: "Герой крупно: нож в руке, не у лица",
+        about: "Герой крупно в шаге: нож в руке, колено работает",
         setup(g) {
             g.clock.minute = 11 * 60;
             standAt(g, "tent", 46, 18);
             g.player.dir = "right";
+            // Mid-stride, so the sheet shows the walk and not a statue.
+            g.player.moving = true;
+            g.player.gait = 1;
+            g.player.anim = Math.PI * 0.35;
             g.camera.zoom = 6;
             g.camera.snapTo(g.player.x, g.player.y - 6);
         }

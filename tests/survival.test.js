@@ -11,6 +11,7 @@ import { ITEMS, itemDef, foodValue, burnValue } from "../js/sandbox/items.js";
 import { PROPS, propDef, rollDrops, requiredTool, toolHint } from "../js/sandbox/gather.js";
 import { Player } from "../js/entities/player.js";
 import { generateZone } from "../js/world/worldgen.js";
+import { GAIT } from "../js/render/charspec.js";
 
 suite("items");
 
@@ -399,5 +400,73 @@ test("the player cannot walk through a tree", () => {
     for (let i = 0; i < 60; i++) p.update(1 / 60, { x: 0, y: -1 }, zone, {});
     assert.gt(Math.hypot(p.x - tree.x, p.y - tree.y), 14, "walked into a tree");
 });
+
+suite("locomotion");
+
+const walkFor = (seconds, dt) => {
+    const p = new Player({ x: 0, y: 0 });
+    for (let i = 0; i < Math.round(seconds / dt); i++) p.update(dt, { x: 1, y: 0 }, null, {});
+    return p;
+};
+
+test("the walk cycle is distance driven: 30, 60 and 120 FPS agree", () => {
+    const a = walkFor(1, 1 / 30), b = walkFor(1, 1 / 60), c = walkFor(1, 1 / 120);
+    assert.near(a.dist, b.dist, 1e-9, "distance must not depend on the frame rate");
+    assert.near(b.dist, c.dist, 1e-9);
+    assert.near(a.anim, b.anim, 1e-9, "walk phase must not depend on the frame rate");
+    assert.near(b.anim, c.anim, 1e-9);
+});
+
+test("one stride of ground equals exactly one cycle of the legs", () => {
+    const p = new Player({ x: 0, y: 0 });
+    const dt = 1 / 60;
+    // Walk exactly one stride worth of ground.
+    const steps = Math.round((GAIT.strideWalk / p.walkSpeed) / dt);
+    for (let i = 0; i < steps; i++) p.update(dt, { x: 1, y: 0 }, null, {});
+    const cycles = p.dist / GAIT.strideWalk;
+    assert.near(p.dist, GAIT.strideWalk, 0.6, "walked the wrong distance");
+    assert.near(cycles, 1, 0.03, "feet and ground drifted apart");
+    assert.near(Math.cos(p.anim), 1, 0.05, "the cycle did not close");
+});
+
+test("a slowdown slows the legs too: no skating in mud", () => {
+    const fast = new Player({ x: 0, y: 0 });
+    const slow = new Player({ x: 0, y: 0 });
+    for (let i = 0; i < 60; i++) {
+        fast.update(1 / 60, { x: 1, y: 0 }, null, {});
+        slow.update(1 / 60, { x: 1, y: 0 }, null, { speedFactor: 0.5 });
+    }
+    assert.near(slow.dist, fast.dist / 2, 1e-6);
+    assert.near(slow.anim / slow.dist, fast.anim / fast.dist, 1e-6,
+        "phase per pixel must be constant whatever the speed");
+});
+
+test("idle to walk to idle blends instead of snapping", () => {
+    const p = new Player({ x: 0, y: 0 });
+    p.update(1 / 60, { x: 1, y: 0 }, null, {});
+    assert.lt(p.gait, 0.25, "the gait blend snapped open in one frame");
+    for (let i = 0; i < 60; i++) p.update(1 / 60, { x: 1, y: 0 }, null, {});
+    assert.near(p.gait, 1, 1e-9, "the blend never reached a full stride");
+    p.update(1 / 60, { x: 0, y: 0 }, null, {});
+    assert.gt(p.gait, 0.7, "the gait blend snapped shut in one frame");
+});
+
+test("stopping parks the legs on a contact pose", () => {
+    const p = new Player({ x: 0, y: 0 });
+    for (let i = 0; i < 37; i++) p.update(1 / 60, { x: 1, y: 0 }, null, {});
+    for (let i = 0; i < 30; i++) p.update(1 / 60, { x: 0, y: 0 }, null, {});
+    const k = p.anim / Math.PI;
+    assert.near(k - Math.round(k), 0, 1e-9, "the hero stopped mid-stride");
+    assert.near(p.gait, 0, 1e-9);
+});
+
+test("the cadence is capped so a speed buff cannot sew", () => {
+    const p = new Player({ x: 0, y: 0 });
+    const before = p.anim;
+    p.update(1 / 60, { x: 1, y: 0 }, null, { speedFactor: 40 });
+    const cap = GAIT.cadenceCap * Math.PI * 2 / 60;
+    assert.lte(p.anim - before, cap + 1e-9);
+});
+
 
 run("v3 survival");

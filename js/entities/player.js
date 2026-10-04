@@ -7,6 +7,7 @@
  */
 import { moveAndCollide } from "../world/tilemap.js";
 import { TILE_SIZE } from "../world/tiles.js";
+import { GAIT, approach } from "../render/charspec.js";
 
 export const DIRS = ["down", "left", "right", "up"];
 
@@ -21,7 +22,11 @@ export class Player {
         this.stamina = 100;
         this.maxStamina = 100;
         this.bus = bus;
-        this.anim = 0;           // walk cycle phase
+        // --- locomotion state (simulation side, fixed step => FPS independent)
+        this.anim = 0;           // walk cycle phase, radians (alias: `phase`)
+        this.dist = 0;           // metres of ground actually covered
+        this.gait = 0;           // 0 standing .. 1 full stride, blended
+        this.runBlend = 0;       // 0 walking .. 1 running, blended
         this.moving = false;
         this.running = false;
         this.actionTimer = 0;    // tool swing animation
@@ -53,7 +58,12 @@ export class Player {
      */
     update(dt, axis, zone, { speedFactor = 1, wantRun = false } = {}) {
         if (this.actionTimer > 0) this.actionTimer = Math.max(0, this.actionTimer - dt);
-        if (this.sleeping) { this.moving = false; return this; }
+        if (this.sleeping) {
+            this.moving = false;
+            this.gait = approach(this.gait, 0, dt, GAIT.blendWalk);
+            this.runBlend = approach(this.runBlend, 0, dt, GAIT.blendRun);
+            return this;
+        }
 
         const mag = Math.hypot(axis.x, axis.y);
         this.moving = mag > 0.01;
@@ -64,7 +74,11 @@ export class Player {
         if (canRun) this.stamina = Math.max(0, this.stamina - 16 * dt);
         else this.stamina = Math.min(this.maxStamina, this.stamina + (this.moving ? 7 : 14) * dt);
 
-        if (!this.moving) { this.vx = this.vy = 0; return this; }
+        if (!this.moving) {
+            this.vx = this.vy = 0;
+            this.settle(dt);
+            return this;
+        }
 
         // Analogue magnitude scales speed; sprint overrides the top end.
         const base = canRun ? this.runSpeed : this.walkSpeed;
@@ -77,6 +91,7 @@ export class Player {
         if (Math.abs(axis.x) > Math.abs(axis.y)) this.dir = axis.x > 0 ? "right" : "left";
         else this.dir = axis.y > 0 ? "down" : "up";
 
+        const x0 = this.x, y0 = this.y;
         if (zone) {
             const res = moveAndCollide(zone.map, this.x, this.y, dx, dy, this.radius,
                 (wx, wy) => zone.isBlockedTile(Math.floor(wx / TILE_SIZE), Math.floor(wy / TILE_SIZE)) ||
@@ -86,10 +101,48 @@ export class Player {
             this.x += dx; this.y += dy;
         }
 
-        this.vx = dx / dt; this.vy = dy / dt;
-        this.anim += dt * (canRun ? 11 : 7) * Math.min(1, mag);
+        // Distance ACTUALLY covered — after collision, after terrain slowdown.
+        // Everything the legs do is derived from this, so a foot plant always
+        // matches the ground under it: no skating, no legs lagging the torso.
+        const moved = Math.hypot(this.x - x0, this.y - y0);
+        this.dist += moved;
+        this.advance(dt, moved, canRun);
+
+        this.vx = (this.x - x0) / dt; this.vy = (this.y - y0) / dt;
         return this;
     }
+
+    /**
+     * Distance-driven walk cycle.
+     * One full cycle = `stride` pixels of ground, so the swing amplitude
+     * declared in charspec cancels the ground travel exactly.
+     */
+    advance(dt, moved, running) {
+        this.runBlend = approach(this.runBlend, running ? 1 : 0, dt, GAIT.blendRun);
+        this.gait = approach(this.gait, 1, dt, GAIT.blendWalk);
+        const stride = GAIT.strideWalk + (GAIT.strideRun - GAIT.strideWalk) * this.runBlend;
+        const step = (moved / stride) * Math.PI * 2;
+        const cap = GAIT.cadenceCap * Math.PI * 2 * dt;      // no sewing machine
+        this.anim = (this.anim + Math.min(step, cap)) % (Math.PI * 2);
+        return this;
+    }
+
+    /**
+     * Standing still: coast the phase to the nearest contact pose (k·π) instead
+     * of snapping the legs shut, and fade the gait blend out.
+     */
+    settle(dt) {
+        this.gait = approach(this.gait, 0, dt, GAIT.blendWalk);
+        this.runBlend = approach(this.runBlend, 0, dt, GAIT.blendRun);
+        const target = Math.round(this.anim / Math.PI) * Math.PI;
+        const rate = (Math.PI / GAIT.park) * dt;
+        const delta = target - this.anim;
+        this.anim += Math.abs(delta) <= rate ? delta : Math.sign(delta) * rate;
+        return this;
+    }
+
+    /** Walk cycle phase in radians — what the painter reads. */
+    get phase() { return this.anim; }
 
     /** Effort level feeding the needs model: running burns more than standing. */
     activity() {

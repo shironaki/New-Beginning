@@ -17,18 +17,20 @@ fs.mkdirSync(OUT, { recursive: true });
 
 const DIRS = ["down", "left", "right", "up"];
 const COLS = [
-    { label: "idle", anim: 0, moving: false, act: 0 },
-    { label: "walk 1", anim: 0, moving: true, act: 0 },
-    { label: "walk 2", anim: Math.PI / 2, moving: true, act: 0 },
-    { label: "walk 3", anim: Math.PI, moving: true, act: 0 },
-    { label: "walk 4", anim: Math.PI * 1.5, moving: true, act: 0 },
-    { label: "swing 1", anim: 0, moving: false, act: 0.3 },
-    { label: "swing 2", anim: 0, moving: false, act: 0.16 },
-    { label: "swing 3", anim: 0, moving: false, act: 0.05 }
+    { label: "idle",    phase: 0,            gait: 0, run: 0, act: 0 },
+    { label: "walk 1",  phase: 0,            gait: 1, run: 0, act: 0 },
+    { label: "walk 2",  phase: Math.PI / 2,  gait: 1, run: 0, act: 0 },
+    { label: "walk 3",  phase: Math.PI,      gait: 1, run: 0, act: 0 },
+    { label: "walk 4",  phase: Math.PI * 1.5, gait: 1, run: 0, act: 0 },
+    { label: "run 1",   phase: Math.PI / 2,  gait: 1, run: 1, act: 0 },
+    { label: "run 2",   phase: Math.PI * 1.5, gait: 1, run: 1, act: 0 },
+    { label: "swing 1", phase: 0,            gait: 0, run: 0, act: 0.3 },
+    { label: "swing 2", phase: 0,            gait: 0, run: 0, act: 0.16 },
+    { label: "swing 3", phase: 0,            gait: 0, run: 0, act: 0.05 }
 ];
 
-const S = 4;                       // zoom
-const CW = 46 * S / 1.6, CH = 44 * S / 1.6;
+const S = 6;                       // zoom
+const CW = 44 * S / 1.6, CH = 46 * S / 1.6;
 const canvas = new ShimCanvas(Math.round(CW * COLS.length), Math.round(CH * DIRS.length));
 const ctx = canvas.getContext("2d");
 ctx.fillStyle = "#6b7a56";
@@ -47,7 +49,7 @@ DIRS.forEach((dir, row) => {
         ctx.translate(i * CW + CW / 2, row * CH + CH - 6);
         ctx.scale(S / 1.6, S / 1.6);
         drawCharacter(ctx, {
-            dir, anim: col.anim, moving: col.moving,
+            dir, phase: col.phase, gait: col.gait, runBlend: col.run,
             actionTimer: col.act, idleTime: 1.2 + row * 0.7,
             tool: { id: "axe_stone", tool: "axe" }
         });

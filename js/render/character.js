@@ -2,17 +2,22 @@
  * v3 render — procedural character sprite.
  *
  * Drawn from primitives so appearance (hair, clothes, skin) is data, not an
- * atlas: the same function will later draw settlers, travellers and raiders by
- * swapping the palette.
+ * atlas: the same function draws settlers, travellers and raiders by swapping
+ * the palette.
  *
- * Body layout, in world units, feet at the origin:
- *     y   0        ground / feet
- *       -9 .. 0    legs + boots
- *      -18 .. -8   torso (shoulders at -17)
- *      -26 .. -18  head
- *   The grip (where a tool sits) is at y ≈ -10.5, x ≈ ±6 — the end of the arm,
- *   NOT next to the face. Tools are real little drawings, not emoji glyphs.
+ * THE CONTRACT LIVES IN charspec.js. There are no magic numbers in here — if
+ * you want to change a proportion, a colour or the length of a stride, edit
+ * the spec. This file only knows how to paint what the spec describes.
+ *
+ * Locomotion is DISTANCE DRIVEN: the caller advances `phase` by
+ * 2π · travelled / stride (see entities/player.js), and the swing amplitude in
+ * the spec is exactly stride/4, so a planted foot moves with the ground
+ * instead of skating. The hips rise when the legs pass under the body
+ * (|cos φ|), which is what makes the torso and the legs read as one creature.
+ *
+ * Body frame: origin between the feet, on the ground; up is negative Y.
  */
+import { BODY, PALETTE, SHADOW, GAIT, ACTION, clamp01, easeInOutSine, q } from "./charspec.js";
 
 export const DEFAULT_LOOK = {
     skin: "#e2b48a",
@@ -23,8 +28,6 @@ export const DEFAULT_LOOK = {
     hairStyle: "short"
 };
 
-const GRIP_Y = -10.5;
-
 function shadeHex(hex, amount) {
     const c = hex.replace("#", "");
     const r = parseInt(c.slice(0, 2), 16), g = parseInt(c.slice(2, 4), 16), b = parseInt(c.slice(4, 6), 16);
@@ -32,239 +35,266 @@ function shadeHex(hex, amount) {
     return `rgb(${f(r)},${f(g)},${f(b)})`;
 }
 
+/* --- primitives: everything lands on the pixel grid and carries the same
+       silhouette outline, so the hero reads on grass, ash, sand and water -- */
+
+function rect(ctx, x, y, w, h, fill, outline = true) {
+    const x0 = q(x), y0 = q(y), x1 = q(x + w), y1 = q(y + h);
+    ctx.fillStyle = fill;
+    ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+    if (outline) {
+        ctx.strokeStyle = PALETTE.outline;
+        ctx.lineWidth = PALETTE.outlineW;
+        ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+    }
+}
+
+/** A tapered quad between two joints — thigh, shin, upper arm, forearm. */
+function limb(ctx, x0, y0, x1, y1, w0, w1, fill, outline = true) {
+    const dx = x1 - x0, dy = y1 - y0;
+    const len = Math.hypot(dx, dy) || 0.001;
+    const nx = -dy / len, ny = dx / len;
+    ctx.beginPath();
+    ctx.moveTo(q(x0 + nx * w0 / 2), q(y0 + ny * w0 / 2));
+    ctx.lineTo(q(x1 + nx * w1 / 2), q(y1 + ny * w1 / 2));
+    ctx.lineTo(q(x1 - nx * w1 / 2), q(y1 - ny * w1 / 2));
+    ctx.lineTo(q(x0 - nx * w0 / 2), q(y0 - ny * w0 / 2));
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    if (outline) {
+        ctx.strokeStyle = PALETTE.outline;
+        ctx.lineWidth = PALETTE.outlineW;
+        ctx.stroke();
+    }
+}
+
+/**
+ * Two-bone IK: given hip and ankle, where is the knee?
+ * The old code faked a lift by SHORTENING the leg, which read as a telescope.
+ * A real knee keeps both bones at full length and folds between them.
+ */
+function knee(hx, hy, ax, ay, bendDir) {
+    const l1 = BODY.thigh, l2 = BODY.shin;
+    let dx = ax - hx, dy = ay - hy;
+    let d = Math.hypot(dx, dy) || 0.001;
+    const maxD = l1 + l2 - 0.08;
+    if (d > maxD) { dx *= maxD / d; dy *= maxD / d; d = maxD; }
+    const a = (d * d + l1 * l1 - l2 * l2) / (2 * d);
+    const h = Math.sqrt(Math.max(0, l1 * l1 - a * a));
+    const ux = dx / d, uy = dy / d;
+    return { x: hx + ux * a + uy * h * bendDir, y: hy + uy * a - ux * h * bendDir };
+}
+
 /**
  * @param {CanvasRenderingContext2D} ctx translated to the character's feet
- * @param {object} p { dir, anim, moving, look, actionTimer, tool, idleTime }
+ * @param {object} p { dir, phase|anim, gait|moving, runBlend, look,
+ *                     actionTimer, tool, idleTime }
  */
 export function drawCharacter(ctx, p) {
     const look = Object.assign({}, DEFAULT_LOOK, p.look || {});
     const dir = p.dir || "down";
-    const t = p.anim || 0;
-    const moving = !!p.moving;
     const idle = p.idleTime || 0;
 
-    /* ---- the walk cycle ------------------------------------------------
-     * One cycle = one full stride. Everything is driven off `phase`:
-     * the body rises twice per stride (contact → passing), the legs swing
-     * in opposite phase, the arms counter-swing, and the torso leans a
-     * little into the direction of travel.
-     */
-    const phase = t;
-    const stride = moving ? Math.sin(phase) : 0;
-    const bob = moving ? Math.abs(Math.sin(phase)) * 1.0 - 0.3
-                       : Math.sin(idle * 1.8) * 0.3;
+    /* ---- pose: pure numbers first, paint second ------------------------ */
+    const phase = (p.phase != null ? p.phase : p.anim) || 0;
+    const gaitRaw = clamp01(p.gait != null ? p.gait : (p.moving ? 1 : 0));
+    const g = easeInOutSine(gaitRaw);                 // the one easing
+    const run = clamp01(p.runBlend != null ? p.runBlend : 0);
+
     const side = dir === "left" ? -1 : 1;
     const back = dir === "up";
     const sideView = dir === "left" || dir === "right";
 
-    // Action swing: a quick wind-up, then a hard downward strike.
-    const act = p.actionTimer > 0 ? Math.min(1, 1 - p.actionTimer / 0.35) : 0;
-    const swing = act > 0 ? (act < 0.3 ? -(act / 0.3) * 0.45
-                                       : Math.sin(((act - 0.3) / 0.7) * Math.PI) * 1.15) : 0;
+    // Stride -> swing amplitude. stride/4 units of foot travel per step is
+    // exactly the ground covered per step, so the plant does not slide.
+    const strideU = (GAIT.strideWalk + (GAIT.strideRun - GAIT.strideWalk) * run) / GAIT.pxPerUnit;
+    const amp = strideU / 4;
+    const liftAmp = GAIT.liftWalk + (GAIT.liftRun - GAIT.liftWalk) * run;
+    const bobAmp = GAIT.bobWalk + (GAIT.bobRun - GAIT.bobWalk) * run;
 
-    const skinDark = shadeHex(look.skin, -28);
-    const skinLit = shadeHex(look.skin, 16);
-    const shirtDark = shadeHex(look.shirt, -22);
-    const shirtLit = shadeHex(look.shirt, 20);
-    const pantsDark = shadeHex(look.pants, -16);
+    const swingN = Math.sin(phase) * amp * g;                 // near leg, forward+
+    const swingF = Math.sin(phase + Math.PI) * amp * g;       // far leg, antiphase
+    const liftN = Math.max(0, Math.cos(phase)) * liftAmp * g;
+    const liftF = Math.max(0, Math.cos(phase + Math.PI)) * liftAmp * g;
 
-    // Contact shadow — shrinks as the body lifts off the ground.
-    const lift = Math.max(0, bob);
-    ctx.fillStyle = "rgba(10,9,8,0.32)";
-    ctx.beginPath(); ctx.ellipse(0.5, 0, 6.6 - lift * 0.5, 2.7 - lift * 0.3, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "rgba(10,9,8,0.16)";
-    ctx.beginPath(); ctx.ellipse(0.5, 0, 8.6 - lift * 0.5, 3.5 - lift * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+    // Hips are HIGH when the legs pass under the body, LOW on contact.
+    const breath = Math.sin(idle * GAIT.breathHz * Math.PI * 2) * GAIT.breathAmp;
+    const bob = (Math.abs(Math.cos(phase)) - 0.5) * bobAmp * g + breath * (1 - g);
+    const lean = sideView ? side * GAIT.leanRun * run * g : 0;
+    const squash = -GAIT.squash * Math.cos(phase * 2) * g;    // ±3% on contact
 
-    // Far arm and the tool held in it go behind the body.
-    const armTop = -16.5 + bob, armLen = 7.5;
-    const drawArm = (x, yOff, far, xOff = 0) => {
-        ctx.fillStyle = far ? shadeHex(look.shirt, -34) : shirtDark;
-        ctx.fillRect(x, armTop, 2.6, 3);
-        ctx.fillStyle = far ? shadeHex(look.skin, -34) : look.skin;
-        ctx.fillRect(x + xOff, armTop + 3 + yOff, 2.6, armLen - 3 - Math.abs(xOff) * 0.5);
-        ctx.fillStyle = far ? shadeHex(look.skin, -48) : skinDark;
-        ctx.fillRect(x + xOff, armTop + 3 + yOff, 0.9, armLen - 3 - Math.abs(xOff) * 0.5);
+    // Action swing: wind-up then strike, both on the same eased curve.
+    const act = p.actionTimer > 0 ? clamp01(1 - p.actionTimer / 0.35) : 0;
+    const swing = act > 0
+        ? (act < ACTION.windUp
+            ? easeInOutSine(act / ACTION.windUp) * ACTION.windAmp
+            : Math.sin(((act - ACTION.windUp) / (1 - ACTION.windUp)) * Math.PI) * ACTION.strikeAmp)
+        : 0;
+
+    const skinDark = shadeHex(look.skin, PALETTE.skinShade);
+    const skinLit = shadeHex(look.skin, PALETTE.skinLit);
+    const shirtDark = shadeHex(look.shirt, PALETTE.shirtShade);
+    const shirtLit = shadeHex(look.shirt, PALETTE.shirtLit);
+    const pantsDark = shadeHex(look.pants, PALETTE.pantsShade);
+
+    /* ---- contact shadow, under the FEET, not under the sprite ---------- */
+    const hipY = BODY.hipY - bob;
+    const groundY = BODY.ankleY + BODY.bootH;                 // sole line
+    const legSpread = BODY.legW / 2 + BODY.legGap / 2;
+    const stance = sideView ? side * BODY.idleStance * (1 - g) : 0;   // feet apart when idle
+    const footNX = sideView ? swingN + stance : legSpread;
+    const footFX = sideView ? -0.9 * side + swingF - stance : -legSpread;
+    const centroid = (footNX + footFX) / 2;
+    const shrink = 1 - SHADOW.liftShrink * Math.max(0, bob);
+    ctx.fillStyle = `rgba(10,9,8,${SHADOW.haloA})`;
+    ctx.beginPath();
+    ctx.ellipse(centroid, 0, SHADOW.haloRX * shrink, SHADOW.haloRY * shrink, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `rgba(10,9,8,${SHADOW.coreA})`;
+    ctx.beginPath();
+    ctx.ellipse(centroid, 0, SHADOW.coreRX * shrink, SHADOW.coreRY * shrink, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    /* ---- legs ---------------------------------------------------------- */
+    const drawLeg = (hipX, footX, lift, far, bendDir) => {
+        const ax = hipX + footX, ay = BODY.ankleY - lift;
+        const kn = knee(hipX, hipY, ax, ay, bendDir);
+        const cloth = far ? shadeHex(look.pants, PALETTE.pantsFar) : shadeHex(look.pants, PALETTE.pantsLit);
+        limb(ctx, hipX, hipY, kn.x, kn.y, BODY.legW, BODY.legW * 0.92, cloth);
+        limb(ctx, kn.x, kn.y, ax, ay, BODY.legW * 0.92, BODY.legW * 0.82,
+            far ? cloth : shadeHex(look.pants, PALETTE.pantsShade * 0.4));
+        // Boot: the toe points the way the hero faces. Head-on the boots are
+        // narrower so the two feet never merge into one dark block.
+        const toe = sideView ? side * BODY.bootToe : 0;
+        const bw = sideView ? BODY.bootW : BODY.bootW * 0.8;
+        rect(ctx, ax - bw / 2 + toe, ay - 0.4, bw, BODY.bootH,
+            far ? PALETTE.bootFar : PALETTE.boot);
+        rect(ctx, ax - bw / 2 + toe, ay - 0.4 + BODY.bootH - 0.8, bw, 0.8,
+            far ? PALETTE.soleFar : PALETTE.sole, false);
     };
 
-    // Far arm: counter-swings the near leg, so the walk reads from the side.
-    if (sideView) drawArm(side > 0 ? -2.2 : -0.4, Math.abs(stride) * 0.4, true, -side * stride * 2.4);
-    if (p.tool && back) drawHeldTool(ctx, p.tool, dir, side, swing, bob, true);
+    const drawArm = (shoulderX, reach, lift, far) => {
+        const sx = shoulderX, sy = BODY.armY - bob + lean;
+        const ex = sx + reach, ey = sy + BODY.armLen - Math.abs(reach) * 0.25 - lift;
+        const el = { x: (sx + ex) / 2 + reach * 0.1, y: (sy + ey) / 2 };
+        const sleeve = far ? shadeHex(look.shirt, PALETTE.shirtFar) : shirtDark;
+        const skinC = far ? shadeHex(look.skin, PALETTE.skinDeep) : look.skin;
+        limb(ctx, sx, sy, el.x, el.y, BODY.armW * BODY.sleeveW, BODY.armW, sleeve);  // sleeve
+        limb(ctx, el.x, el.y, ex, ey, BODY.armW, BODY.armW * 0.85, skinC);           // forearm
+        rect(ctx, ex - BODY.armW / 2, ey - 0.5, BODY.armW, BODY.handH,               // hand
+            far ? shadeHex(look.skin, PALETTE.skinDeep) : skinLit, !far);
+    };
 
-    /* ---- legs ----------------------------------------------------------
-     * In side view the legs swing forward/back; head-on they lift in turn.
-     */
-    const hipY = -9 + bob, legH = 9;
-    const footLift = (ph) => Math.max(0, Math.sin(ph)) * 1.6;
+    const armAmp = amp * GAIT.armRatio * g;
+    const armAmpTool = amp * GAIT.armRatioTool * g;
+
+    // Far arm and the far leg go behind the body.
+    if (sideView) drawArm(-BODY.farArmX * side, -side * Math.sin(phase) * armAmp, 0, true);
+    if (p.tool && back) drawHeldTool(ctx, p.tool, dir, side, swing, -bob, true);
+
     if (sideView) {
-        // The two legs swing symmetrically around the hip: one forward, one
-        // back by the same amount. (An offset on one leg only made the hero
-        // look like he was dragging it.) Standing still they part slightly so
-        // the silhouette is not a single pole.
-        const fwd = side * stride * 3.2;
-        const part = moving ? 0 : side * 1.1;
-        const legs = [
-            { x: -1.6 - fwd - part, lift: footLift(phase + Math.PI), far: true },
-            { x: -1.6 + fwd, lift: footLift(phase), far: false }
-        ];
-        for (const l of legs) {
-            const knee = l.lift * 0.9;                       // the lifted leg bends
-            ctx.fillStyle = l.far ? shadeHex(look.pants, -34) : shadeHex(look.pants, 6);
-            ctx.fillRect(l.x, hipY, 3.2, legH - knee);       // thigh + shin
-            ctx.fillStyle = l.far ? shadeHex(look.pants, -46) : pantsDark;
-            ctx.fillRect(l.x, hipY, 1, legH - knee);
-            if (!l.far) {                                    // gap between the legs
-                ctx.fillStyle = "rgba(0,0,0,0.25)";
-                ctx.fillRect(l.x - 0.7, hipY, 0.7, legH - knee);
-            }
-            ctx.fillStyle = l.far ? "#2e241b" : "#3a2d22";   // boot, toe pointing forward
-            ctx.fillRect(l.x - (side > 0 ? 0.3 : 1.1), -2 + bob - knee, 4.5, 2.2);
-            ctx.fillStyle = l.far ? "#1d160f" : "#241b14";
-            ctx.fillRect(l.x - (side > 0 ? 0.3 : 1.1), -0.4 + bob - knee, 4.5, 0.8);
-        }
+        drawLeg(-0.9 * side, swingF - stance, liftF, true, side);
+        drawLeg(0, swingN + stance, liftN, false, side);
     } else {
-        const lL = footLift(phase), lR = footLift(phase + Math.PI);
-        const legs = [[-3.9, lL], [0.5, lR]];
-        for (const [x, l] of legs) {
-            ctx.fillStyle = look.pants;
-            ctx.fillRect(x, hipY, 3.5, legH - l);
-            ctx.fillStyle = pantsDark;
-            ctx.fillRect(x, hipY, 1.2, legH - l);
-            ctx.fillStyle = "#3a2d22";
-            ctx.fillRect(x - 0.4, -2 + bob - l, 4.4, 2.2);
-            ctx.fillStyle = "#241b14";
-            ctx.fillRect(x - 0.4, -0.4 + bob - l, 4.4, 0.8);
-        }
+        drawLeg(-legSpread, 0, liftF, true, -0.5);
+        drawLeg(legSpread, 0, liftN, false, 0.5);
     }
 
-    /* ---- torso (leans with the stride and with the swing) --------------- */
+    /* ---- torso + head: one group, one transform ------------------------ */
     ctx.save();
-    // Weight shift: the torso drifts a hair over the leading leg. No rotation
-    // — a rotating box reads as a machine, not a person.
-    ctx.translate(sideView ? side * stride * 0.5 : stride * 0.4, 0);
+    ctx.translate(lean, 0);
+    ctx.translate(0, hipY);
+    ctx.scale(1 + squash * 0.5, 1 - squash);                  // squash & stretch
+    ctx.translate(0, -hipY);
 
-    const torsoTop = -18 + bob, torsoH = 10;
-    const torsoW = sideView ? 8.4 : 10, torsoX = sideView ? -4.2 : -5;
-    ctx.fillStyle = look.shirt;
-    ctx.fillRect(torsoX, torsoTop, torsoW, torsoH);
-    ctx.fillStyle = shirtLit;                              // light from upper-left
-    ctx.fillRect(torsoX, torsoTop, 2.2, torsoH - 2);
-    ctx.fillStyle = shirtDark;
-    ctx.fillRect(torsoX + torsoW - 2.2, torsoTop, 2.2, torsoH);
-    ctx.fillStyle = "rgba(0,0,0,0.18)";                    // shoulder line
-    ctx.fillRect(torsoX, torsoTop, torsoW, 1);
-    if (back) {                                            // seam and shoulder blades
-        ctx.fillStyle = "rgba(0,0,0,0.12)";
-        ctx.fillRect(-0.5, torsoTop + 1, 1, torsoH - 3);
-        ctx.fillStyle = shirtLit;
-        ctx.fillRect(-4, torsoTop + 1.6, 3, 1.1);
-        ctx.fillRect(1, torsoTop + 1.6, 3, 1.1);
+    const torsoTop = BODY.torsoY - bob;
+    const torsoW = sideView ? BODY.shoulderWSide : BODY.shoulderW;
+    const torsoX = -torsoW / 2;
+    const torsoH = BODY.torsoH;
+    rect(ctx, torsoX, torsoTop, torsoW, torsoH, look.shirt);
+    rect(ctx, torsoX, torsoTop, 2, torsoH - 2, shirtLit, false);          // light upper-left
+    rect(ctx, torsoX + torsoW - 2, torsoTop, 2, torsoH, shirtDark, false);
+    rect(ctx, torsoX, torsoTop, torsoW, 1, "rgba(0,0,0,0.18)", false);    // shoulder line
+    if (back) {
+        rect(ctx, -0.5, torsoTop + 1, 1, torsoH - 3, "rgba(0,0,0,0.12)", false);
+        rect(ctx, -4, torsoTop + 1.5, 3, 1, shirtLit, false);
+        rect(ctx, 1, torsoTop + 1.5, 3, 1, shirtLit, false);
     } else if (!sideView) {
-        ctx.fillStyle = shirtDark;                         // collar
-        ctx.fillRect(-1.8, torsoTop, 3.6, 1.6);
+        rect(ctx, -2, torsoTop, 4, 1.5, shirtDark, false);                // collar
     }
-    // Belt with a buckle.
-    ctx.fillStyle = "#4a3722";
-    ctx.fillRect(torsoX, torsoTop + torsoH - 2, torsoW, 2);
-    ctx.fillStyle = "#8a6a3c";
-    ctx.fillRect(sideView ? side * 1.6 - 1 : -1, torsoTop + torsoH - 1.8, 2, 1.6);
+    rect(ctx, torsoX, torsoTop + torsoH - 2, torsoW, 2, PALETTE.belt, false);
+    rect(ctx, sideView ? side * 1.5 - 1 : -1, torsoTop + torsoH - 1.5, 2, 1.5, PALETTE.buckle, false);
     if (look.cloak) {
-        ctx.fillStyle = look.cloak;
-        ctx.fillRect(torsoX - 1.2, torsoTop - 0.5, torsoW + 2.4, 7.5);
-        ctx.fillStyle = "rgba(0,0,0,0.2)";
-        ctx.fillRect(torsoX + torsoW - 1.6, torsoTop - 0.5, 3.6, 7.5);
+        rect(ctx, torsoX - 1, torsoTop - 0.5, torsoW + 2, 7.5, look.cloak);
+        rect(ctx, torsoX + torsoW - 1.5, torsoTop - 0.5, 3.5, 7.5, "rgba(0,0,0,0.2)", false);
     }
+    rect(ctx, torsoX, torsoTop, PALETTE.rimW, torsoH - 2, PALETTE.rim, false);   // rim light
 
     /* ---- near arm ------------------------------------------------------- */
     if (sideView) {
-        const ax = side > 0 ? 2.2 : -4.8;
-        ctx.fillStyle = shirtDark;
-        ctx.fillRect(ax, armTop, 2.6, 3);
-        const xOff = side * (stride * 2.4 + swing * 2.2);
-        const len = armLen - 3 - Math.max(0, swing) * 1.5 - Math.abs(xOff) * 0.4;
-        ctx.fillStyle = look.skin;
-        ctx.fillRect(ax + xOff, armTop + 3 - swing * 1.5, 2.6, len);
-        ctx.fillStyle = skinDark;
-        ctx.fillRect(ax + xOff, armTop + 3 - swing * 1.5, 0.9, len);
+        const reach = side * (Math.sin(phase) * armAmpTool + swing * 2.2);
+        drawArm(BODY.nearArmX * side, reach, Math.max(0, swing) * 1.5, false);
     } else {
-        drawArm(-7.2, (back ? -1 : 1) * stride * 1.5, false);
-        drawArm(4.6, (back ? 1 : -1) * stride * 1.5 - swing * 2.2, false);
+        const ax0 = BODY.shoulderW / 2 + BODY.armW / 2 - 0.4;  // clear of the shirt
+        drawArm(-ax0, 0, (back ? 1 : -1) * Math.sin(phase) * armAmp, false);
+        drawArm(ax0, 0, (back ? -1 : 1) * Math.sin(phase) * armAmpTool - swing * 2.2, false);
     }
 
     /* ---- head ----------------------------------------------------------- */
-    const headY = -26.5 + bob + Math.abs(stride) * 0.2;
-    const headH = 8.6;
-    const headX = sideView ? side * 0.6 : 0;
-    ctx.fillStyle = "rgba(0,0,0,0.16)";                     // neck shadow
-    ctx.fillRect(-2.4, headY + headH - 0.6, 4.8, 1.6);
-    ctx.fillStyle = look.skin;
-    ctx.fillRect(headX - 4.2, headY, 8.4, headH);
-    ctx.fillStyle = skinDark;                               // cheek in shade
-    ctx.fillRect(headX + 2.4, headY + 1, 1.8, headH - 1);
-    ctx.fillStyle = skinLit;
-    ctx.fillRect(headX - 4.2, headY + 1, 1.4, headH - 2);
-    if (back) {                                            // nape, not a bare box
-        ctx.fillStyle = skinDark;
-        ctx.fillRect(headX - 4.2, headY + headH - 2.4, 8.4, 2.4);
-    }
+    const headY = BODY.headY - bob;
+    const headH = BODY.headH, headW = BODY.headW;
+    const headX = sideView ? side * 0.5 : 0;
+    rect(ctx, -2.5, headY + headH - 0.5, 5, 1.5, "rgba(0,0,0,0.16)", false);   // neck shade
+    rect(ctx, headX - headW / 2, headY, headW, headH, look.skin);
+    rect(ctx, headX + headW / 2 - 2, headY + 1, 2, headH - 1, skinDark, false);
+    rect(ctx, headX - headW / 2, headY + 1, 1.5, headH - 2, skinLit, false);
+    rect(ctx, headX - headW / 2, headY + 1, PALETTE.rimW, headH - 3, PALETTE.rim, false);
+    if (back) rect(ctx, headX - headW / 2, headY + headH - 2.5, headW, 2.5, skinDark, false);
 
-    // Hair.
-    const hairDark = shadeHex(look.hair, -22);
-    const hairLit = shadeHex(look.hair, 24);
-    ctx.fillStyle = look.hair;
+    const hairDark = shadeHex(look.hair, PALETTE.hairShade);
+    const hairLit = shadeHex(look.hair, PALETTE.hairLit);
     if (back) {
-        ctx.fillRect(headX - 4.6, headY - 0.8, 9.2, headH - 1.4);
-        ctx.fillStyle = hairDark;
-        ctx.fillRect(headX + 2.2, headY - 0.8, 2.4, headH - 1.4);
-        ctx.fillStyle = hairLit;
-        ctx.fillRect(headX - 3.6, headY - 0.4, 3.4, 1.4);
-        ctx.fillStyle = hairDark;                           // hair falls over the nape
-        ctx.fillRect(headX - 3, headY + headH - 2.2, 6, 1.4);
+        rect(ctx, headX - headW / 2 - 0.5, headY - 1, headW + 1, headH - 1.5, look.hair);
+        rect(ctx, headX + headW / 2 - 2.5, headY - 1, 2.5, headH - 1.5, hairDark, false);
+        rect(ctx, headX - headW / 2 + 1, headY - 0.5, 3.5, 1.5, hairLit, false);
+        rect(ctx, headX - 3, headY + headH - 2.5, 6, 1.5, hairDark, false);
     } else {
-        ctx.fillRect(headX - 4.6, headY - 0.8, 9.2, 3.6);
-        ctx.fillStyle = hairDark;
-        ctx.fillRect(headX + 2.4, headY - 0.8, 2.2, 3.6);
-        ctx.fillStyle = look.hair;
+        rect(ctx, headX - headW / 2 - 0.5, headY - 1, headW + 1, 4, look.hair);
+        rect(ctx, headX + headW / 2 - 2.5, headY - 1, 2.5, 4, hairDark, false);
         if (look.hairStyle === "long") {
-            ctx.fillRect(headX - 5.4, headY, 1.8, 7.5);
-            ctx.fillRect(headX + 3.6, headY, 1.8, 7.5);
+            rect(ctx, headX - headW / 2 - 1.5, headY, 2, 7.5, look.hair, false);
+            rect(ctx, headX + headW / 2 - 0.5, headY, 2, 7.5, look.hair, false);
         } else {
-            ctx.fillRect(headX - 5, headY + 0.6, 1.2, 2.6);
-            ctx.fillRect(headX + 3.8, headY + 0.6, 1.2, 2.6);
+            rect(ctx, headX - headW / 2 - 1, headY + 0.5, 1.5, 2.5, look.hair, false);
+            rect(ctx, headX + headW / 2 - 0.5, headY + 0.5, 1.5, 2.5, look.hair, false);
         }
-        ctx.fillStyle = hairLit;                            // highlight strand
-        ctx.fillRect(headX - 3.6, headY - 0.4, 3, 1.1);
+        rect(ctx, headX - headW / 2 + 1, headY - 0.5, 3, 1, hairLit, false);
     }
 
-    // Face — with a blink every few seconds.
     if (!back) {
-        const blink = (idle % 4.1) < 0.12;
-        ctx.fillStyle = "#2a211a";
+        const blink = (idle % GAIT.blinkEvery) < GAIT.blinkFor;
+        const eyeH = blink ? 0.5 : 1.5, eyeW = 1.5;
+        const eyeY = headY + (blink ? 5.5 : 4.5);
         if (dir === "left") {
-            if (blink) ctx.fillRect(headX - 3.4, headY + 5.4, 1.5, 0.7);
-            else ctx.fillRect(headX - 3.4, headY + 4.6, 1.5, 1.7);
-            ctx.fillStyle = skinDark; ctx.fillRect(headX - 4.4, headY + 4.4, 1, 1.6);  // nose
-            ctx.fillStyle = "rgba(0,0,0,0.2)"; ctx.fillRect(headX - 4, headY + 7, 2.4, 0.9);
+            rect(ctx, headX - 3.5, eyeY, eyeW, eyeH, PALETTE.eye, false);
+            rect(ctx, headX - headW / 2 - 0.5, headY + 4.5, 1, 1.5, skinDark, false);   // nose
+            rect(ctx, headX - 4, headY + 7, 2.5, 1, "rgba(0,0,0,0.2)", false);
         } else if (dir === "right") {
-            if (blink) ctx.fillRect(headX + 1.9, headY + 5.4, 1.5, 0.7);
-            else ctx.fillRect(headX + 1.9, headY + 4.6, 1.5, 1.7);
-            ctx.fillStyle = skinDark; ctx.fillRect(headX + 3.6, headY + 4.4, 1, 1.6);
-            ctx.fillStyle = "rgba(0,0,0,0.2)"; ctx.fillRect(headX + 1.6, headY + 7, 2.4, 0.9);
+            rect(ctx, headX + 2, eyeY, eyeW, eyeH, PALETTE.eye, false);
+            rect(ctx, headX + headW / 2 - 0.5, headY + 4.5, 1, 1.5, skinDark, false);
+            rect(ctx, headX + 1.5, headY + 7, 2.5, 1, "rgba(0,0,0,0.2)", false);
         } else {
-            if (blink) {
-                ctx.fillRect(headX - 2.8, headY + 5.4, 1.6, 0.7);
-                ctx.fillRect(headX + 1.2, headY + 5.4, 1.6, 0.7);
-            } else {
-                ctx.fillRect(headX - 2.8, headY + 4.6, 1.6, 1.7);
-                ctx.fillRect(headX + 1.2, headY + 4.6, 1.6, 1.7);
-            }
-            ctx.fillStyle = "rgba(0,0,0,0.16)"; ctx.fillRect(headX - 1, headY + 7.2, 2, 0.8);
+            rect(ctx, headX - 3, eyeY, eyeW, eyeH, PALETTE.eye, false);
+            rect(ctx, headX + 1.5, eyeY, eyeW, eyeH, PALETTE.eye, false);
+            rect(ctx, headX - 1, headY + 7, 2, 1, "rgba(0,0,0,0.16)", false);
         }
     }
 
     ctx.restore();
 
     // Tool in the near hand, in front of the body.
-    if (p.tool && !back) drawHeldTool(ctx, p.tool, dir, side, swing, bob, false);
+    if (p.tool && !back) drawHeldTool(ctx, p.tool, dir, side, swing, -bob, false);
 }
 
 /**
@@ -272,8 +302,8 @@ export function drawCharacter(ctx, p) {
  * grip sits on; the tool is rotated around the grip when swinging.
  */
 function drawHeldTool(ctx, tool, dir, side, swing, bob, behind) {
-    const gx = (dir === "down" ? 6.2 : dir === "up" ? -6.2 : side * 6.4);
-    const gy = GRIP_Y + bob + (dir === "up" ? -0.5 : 0);
+    const gx = (dir === "down" ? BODY.gripX - 0.2 : dir === "up" ? -BODY.gripX + 0.2 : side * BODY.gripX);
+    const gy = BODY.gripY + bob + (dir === "up" ? -0.5 : 0);
     const lean = dir === "up" ? -0.35 : dir === "down" ? 0.3 : side * 0.45;
     const angle = lean - side * swing * 1.9;
 
