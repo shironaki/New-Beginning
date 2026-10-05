@@ -1,5 +1,7 @@
 /** v3 tests — core: RNG, noise, events, ECS, clock, save, loop. */
 import { suite, test, assert, run } from "./tiny.js";
+import { LIGHT, ambientAt } from "../js/render/lighting.js";
+import { Particles } from "../js/render/particles.js";
 import { RNG, hashSeed, mixSeeds, valueNoise2D, fbm2D } from "../js/core/rng.js";
 import { EventBus } from "../js/core/events.js";
 import { World } from "../js/core/ecs.js";
@@ -233,6 +235,74 @@ test("a long freeze does not spiral", () => {
     loop.lastTime = 0;
     loop.advance(10000);          // 10 second stall
     assert.lte(ticks, 8, "death spiral guard failed");
+});
+
+suite("light & fx");
+
+test("the day curve is a 24-hour table with no visible steps", () => {
+    assert.eq(LIGHT.lut.length, 24, "the table must cover every hour");
+    for (let h = 0; h < 24; h++) {
+        const a = LIGHT.lut[h], b = LIGHT.lut[(h + 1) % 24];
+        assert.lte(Math.abs(b.a - a.a), 0.26, `hour ${h}→${h + 1} jumps too hard`);
+    }
+    // And the interpolation itself must be smooth: no step larger than the
+    // hour gap divided over its minutes.
+    let prev = ambientAt(0, "clear").alpha;
+    for (let m = 1; m <= 24 * 60; m++) {
+        const now = ambientAt(m / 60, "clear").alpha;
+        assert.lte(Math.abs(now - prev), 0.01, `click at minute ${m}`);
+        prev = now;
+    }
+});
+
+test("noon is daylight, midnight is dark but never black", () => {
+    assert.eq(ambientAt(12, "clear").alpha, 0, "midday must not be tinted at all");
+    for (const h of [10, 11, 13, 14, 15, 16]) {
+        assert.lte(ambientAt(h, "clear").alpha, 0.02, `${h}:00 should read as day`);
+    }
+    const night = ambientAt(0, "clear").alpha;
+    assert.gte(night, 0.7, "night must actually be night");
+    // The floor keeps a lit pixel above 14 % — a black screen is not a mood.
+    assert.lt(Math.min(1 - LIGHT.floor, night), 0.9);
+    assert.gte(LIGHT.floor, 0.1);
+});
+
+test("weather only ever adds darkness, and never past the floor", () => {
+    for (const w of ["rain", "storm", "fog", "snow"]) {
+        for (const h of [0, 6, 12, 19]) {
+            const clear = ambientAt(h, "clear").alpha;
+            const bad = ambientAt(h, w).alpha;
+            assert.gte(bad, clear, `${w} at ${h}:00 should not brighten the world`);
+            assert.lte(bad, 0.9, `${w} at ${h}:00 is past the floor`);
+        }
+    }
+    assert.eq(ambientAt(3, "clear", true).alpha, LIGHT.underground.a, "caves use their own value");
+});
+
+test("particles never allocate once the pool is warm", () => {
+    const fx = new Particles({ max: 64, maxTexts: 8 });
+    const slots = new Set(fx.pool);
+    for (let frame = 0; frame < 300; frame++) {
+        fx.sparks(10, 10, 5);
+        fx.smoke(10, 10, 2);
+        fx.chips(10, 10, "#fff", 4);
+        fx.dust(10, 10, 2);
+        fx.text(0, 0, "+1");
+        fx.update(1 / 60);
+    }
+    assert.eq(fx.pool.length, 64, "the pool must not grow");
+    assert.lte(fx.n, 64);
+    for (const p of fx.pool) assert.ok(slots.has(p), "a particle object was replaced, not reused");
+});
+
+test("dead particles are swapped out, not spliced", () => {
+    const fx = new Particles({ max: 8, maxTexts: 4 });
+    fx.spawn({ x: 1, y: 1, life: 0.05 });
+    fx.spawn({ x: 2, y: 2, life: 10 });
+    fx.update(0.1);
+    assert.eq(fx.n, 1, "the dead one should be gone");
+    assert.eq(fx.pool[0].x, 2, "the survivor moved into the free slot");
+    assert.eq(fx.count, 1);
 });
 
 run("v3 core");

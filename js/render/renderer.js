@@ -415,7 +415,7 @@ export class Renderer {
         // even without a torch (a torch is still far brighter).
         if (state.underground) {
             const s2 = cam.worldToScreen(state.player.x, state.player.y - 8);
-            this.lightMap.add(s2.x, s2.y, 70 * cam.zoom, { intensity: 0.42, warmth: 0.35 });
+            this.lightMap.addPreset(s2.x, s2.y, "caveEye", cam.zoom);
         }
         if (state.playerLight > 0) {
             const s = cam.worldToScreen(state.player.x, state.player.y - 8);
@@ -426,6 +426,7 @@ export class Renderer {
             this.lightMap.add(s.x, s.y, L.r * cam.zoom, { intensity: L.i || 0.7, warmth: L.w !== undefined ? L.w : 0.6 });
         }
         this.lightMap.render(ctx, {
+            hour: state.clock ? state.clock.minute / 60 : 12,
             daylight: state.clock ? state.clock.daylight : 1,
             weather: state.weather,
             underground: !!(state.zone.def && state.zone.def.underground),

@@ -436,6 +436,16 @@ export class ShimContext {
             d[i + 3] = d[i + 3] * (1 - a);
             return;
         }
+        if (mode === "multiply") {
+            // Source colour scales the destination instead of covering it —
+            // this is what keeps the ground green under a night light map.
+            const t = a;
+            d[i] = d[i] * (1 - t) + (d[i] * r / 255) * t;
+            d[i + 1] = d[i + 1] * (1 - t) + (d[i + 1] * g / 255) * t;
+            d[i + 2] = d[i + 2] * (1 - t) + (d[i + 2] * b / 255) * t;
+            d[i + 3] = Math.max(d[i + 3], a * 255);
+            return;
+        }
         if (mode === "lighter") {
             d[i] = Math.min(255, d[i] + r * a);
             d[i + 1] = Math.min(255, d[i + 1] + g * a);

@@ -75,6 +75,13 @@ export class Camera {
         return this;
     }
 
+    /**
+     * Allocation-free projection. `worldToScreen` builds an object, which is
+     * fine once per entity but not once per particle — hot loops use these.
+     */
+    toScreenX(wx) { return (wx - this.x + this.offsetX) * this.zoom; }
+    toScreenY(wy) { return (wy - this.y + this.offsetY) * this.zoom; }
+
     worldToScreen(wx, wy) {
         return {
             x: (wx - this.x + this.offsetX) * this.zoom,
