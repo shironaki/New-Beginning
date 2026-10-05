@@ -97,8 +97,8 @@ export const PALETTE = {
     skinLit: 16,
     skinShade: -28,
     skinDeep: -48,           // far-side limb
-    shirtFar: -34,
-    pantsFar: -34,
+    shirtFar: -44,
+    pantsFar: -46,
     hairLit: 24,
     hairShade: -22,
 
@@ -122,11 +122,28 @@ export const PALETTE = {
     outlineW: QUANT,
     ao: "rgba(0,0,0,0.22)",  // ambient occlusion in the joints
     aoW: QUANT,
-    rim: "rgba(255,236,200,0.30)",
+    rim: "rgba(255,236,200,0.34)",
     rimW: QUANT
 };
 
 /** Contact shadow — anchored to the centroid of the feet, not the sprite. */
+/**
+ * Readability. At a camera zoom of 2 the hero is ~60 px tall, and at that
+ * size legs merge into one block, hands disappear into sleeves and the whole
+ * figure dissolves on a busy background. These numbers exist for one job: a
+ * silhouette that still reads over ash, grass, stone and night.
+ */
+export const READ = {
+    legSeam: 0.6,            // u — dark seam drawn down between the legs
+    legSeamA: 0.30,
+    bootTop: 0.6,            // u — lit edge along the top of the boot
+    bootTopA: 0.30,
+    footAO: 0.8,             // u — darkening right where the boot meets ground
+    footAOA: 0.26,
+    handEdgeA: 0.34,         // the line that separates hand from sleeve
+    rimA: 0.34               // contour light on the sunward silhouette
+};
+
 export const SHADOW = {
     coreRX: 7.2, coreRY: 2.8, coreA: 0.30,
     haloRX: 9.8, haloRY: 3.7, haloA: 0.14,

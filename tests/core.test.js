@@ -4,6 +4,7 @@ import { LIGHT, ambientAt } from "../js/render/lighting.js";
 import { SUN, SHADOW, setSun, castShadow, setFireLights, setShadowOrigin, propHeight,
          ROCK, pick, rockOutline } from "../js/render/tilesart.js";
 import { Renderer, OCCLUDE } from "../js/render/renderer.js";
+import { READ, PALETTE, BODY } from "../js/render/charspec.js";
 import { Particles } from "../js/render/particles.js";
 import { RNG, hashSeed, mixSeeds, valueNoise2D, fbm2D } from "../js/core/rng.js";
 import { EventBus } from "../js/core/events.js";
@@ -421,6 +422,19 @@ test("stone archetypes and palettes come from a weighted table", () => {
         assert.near(tally[name] / 1000, weight / 100, 0.02, `${name} is mis-weighted`);
     }
     assert.gt(pick(ROCK.stone, 0.5)[1].length, 2, "a stone palette is an rgb triple");
+});
+
+test("the hero stays readable: seams, edges and far limbs", () => {
+    // These are the numbers that keep a 60 px figure from turning into one
+    // brown column; a regression here is invisible in a unit test otherwise.
+    assert.gt(READ.legSeam, 0, "the legs need a seam between them");
+    assert.lt(READ.legSeam, BODY.legGap + BODY.legW, "the seam must not eat a leg");
+    assert.gt(READ.legSeamA, 0.2);
+    assert.gt(READ.bootTopA, 0.2, "the boot needs a lit top edge");
+    assert.gt(READ.footAOA, 0.2, "the boot needs a contact line");
+    assert.lt(PALETTE.pantsFar, -30, "the far leg must be clearly darker");
+    assert.lt(PALETTE.shirtFar, -30, "the far arm must be clearly darker");
+    assert.lt(PALETTE.skinDeep, PALETTE.skinShade, "the far hand must be the darkest skin");
 });
 
 test("particles never allocate once the pool is warm", () => {

@@ -18,7 +18,7 @@
  * Body frame: origin between the feet, on the ground; up is negative Y.
  */
 import { SUN, castShadow } from "./tilesart.js";
-import { BODY, GEAR, TONE, PALETTE, SHADOW, GAIT, ACTION, clamp01, easeInOutSine, q } from "./charspec.js";
+import { BODY, GEAR, TONE, PALETTE, READ, SHADOW, GAIT, ACTION, clamp01, easeInOutSine, q } from "./charspec.js";
 
 export const DEFAULT_LOOK = {
     skin: "#e2b48a",
@@ -268,8 +268,15 @@ export function drawCharacter(ctx, p) {
         const toe = sideView ? side * BODY.bootToe : 0;
         const bw = sideView ? BODY.bootW : BODY.bootW * 0.74;
         const bx = ax - bw / 2 + toe, by = ay - 0.4;
-        rect(ctx, bx, by, bw, BODY.bootH, far ? PALETTE.bootFar : PALETTE.boot);
+        rect(ctx, bx, by, bw, BODY.bootH, far ? PALETTE.bootFar : PALETTE.boot, "all");
         rect(ctx, bx, by + BODY.bootH - 0.9, bw, 0.9, far ? PALETTE.soleFar : PALETTE.sole, false);
+        // A lit edge on top of the boot and a dark line where it meets the
+        // ground: without them the leg and the boot are one brown column.
+        if (!far) {
+            rect(ctx, bx, by, bw, READ.bootTop, `rgba(255,236,200,${READ.bootTopA})`, false);
+        }
+        rect(ctx, bx - 0.3, by + BODY.bootH - READ.footAO * 0.4, bw + 0.6, READ.footAO,
+            `rgba(0,0,0,${far ? READ.footAOA * 0.7 : READ.footAOA})`, false);
         if (look.bootCuff) {                                  // gear: boot cuff
             const cw = bw * GEAR.cuffW;
             rect(ctx, ax - cw / 2 + toe * 0.6, by - GEAR.cuffH, cw, GEAR.cuffH,
@@ -285,6 +292,10 @@ export function drawCharacter(ctx, p) {
     };
 
     const paintHand = (a, far) => {
+        // The cuff line: a hand that butts straight onto a sleeve of the same
+        // value disappears at this size.
+        rect(ctx, a.ex - BODY.armW / 2 - 0.2, a.ey - 1.1, BODY.armW + 0.4, 0.7,
+            `rgba(0,0,0,${READ.handEdgeA})`, false);
         rect(ctx, a.ex - BODY.armW / 2, a.ey - 0.5, BODY.armW, BODY.handH,
             far ? shadeHex(skin, PALETTE.skinDeep) : shadeHex(skin, PALETTE.skinLit),
             far ? true : "all");
@@ -327,6 +338,10 @@ export function drawCharacter(ctx, p) {
     } else {
         drawLeg(-legSpread, 0, liftF, true, -0.5);
         drawLeg(legSpread, 0, liftN, false, 0.5);
+        // Head-on the two legs touch and read as one block of cloth. One
+        // dark seam between them is all it takes to see two legs.
+        rect(ctx, sway - READ.legSeam / 2, hipY + 1, READ.legSeam,
+            Math.abs(BODY.ankleY - hipY) - 1.4, `rgba(0,0,0,${READ.legSeamA})`, false);
     }
 
     /* ---- torso: the pyramid, in three tone bands ----------------------- */
