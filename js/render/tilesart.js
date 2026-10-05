@@ -95,8 +95,9 @@ export function paintTile(ctx, id, px, py, size, tx, ty, season = "spring") {
     const amp = (id === T.ASH || id === T.SOOT) ? 26
         : (id === T.DIRT || id === T.SAND || id === T.GRAVEL || id === T.MUD) ? 18
         : LIVING.has(id) ? 16 : 12;
-    // 4 px cells: fine enough that the eye reads grain, not a chequerboard.
-    const cells = 8;
+    // ~2.7 px cells: at the camera's zoom that is a couple of screen pixels,
+    // fine enough that a close-up reads as grain instead of as soft blur.
+    const cells = 12;
     const cs = size / cells;
     ctx.fillStyle = base;
     ctx.fillRect(px, py, size, size);
@@ -2394,36 +2395,109 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         }
 
         case "tent": {
-            shadowEllipse(ctx, 23, 7, 0.34, propHeight(kind, s));
-            // Canvas, two tones, with a seam and a rolled-back door.
-            ctx.fillStyle = "#6a5a40";
-            ctx.beginPath(); ctx.moveTo(-21, 0); ctx.lineTo(0, -29); ctx.lineTo(21, 0); ctx.closePath(); ctx.fill();
-            ctx.fillStyle = "#857047";
-            ctx.beginPath(); ctx.moveTo(-21, 0); ctx.lineTo(0, -29); ctx.lineTo(-3, 0); ctx.closePath(); ctx.fill();
-            ctx.fillStyle = "rgba(0,0,0,0.18)";
-            ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(0, -29); ctx.lineTo(21, 0); ctx.closePath(); ctx.fill();
-            // Folds.
-            ctx.strokeStyle = "rgba(0,0,0,0.16)"; ctx.lineWidth = 1;
-            for (let i = -2; i <= 2; i++) {
+            // Canvas sags, it does not stretch over a ruler. Ridge dips in
+            // the middle, the walls bow out, the hem buckles on the ground,
+            // and the whole thing is seeded so no two camps look stamped.
+            const n0 = h(obj.tx, obj.ty, 11), n1 = h(obj.tx, obj.ty, 23);
+            const W = 21 + n0 * 3, Hh = 28 + n1 * 4;
+            const sagK = 1.6 + n0 * 1.4;
+            shadowEllipse(ctx, W * 1.1, 7, 0.34, propHeight(kind, s));
+            // Silhouette with bowed walls and a dipped ridge.
+            const wall = (dir) => {
+                ctx.beginPath();
+                ctx.moveTo(dir * W, 0);
+                ctx.quadraticCurveTo(dir * W * 0.62, -Hh * 0.46, dir * 1.2, -Hh + sagK);
+                ctx.lineTo(0, -Hh);
+                ctx.lineTo(0, 0);
+                ctx.closePath();
+            };
+            ctx.fillStyle = "#6a5a40"; wall(1); ctx.fill();
+            ctx.fillStyle = "#8a7449"; wall(-1); ctx.fill();          // sunward side
+            ctx.fillStyle = "rgba(0,0,0,0.16)";                        // far half dims
+            ctx.beginPath();
+            ctx.moveTo(W * 0.45, 0);
+            ctx.quadraticCurveTo(W * 0.62, -Hh * 0.46, 1.2, -Hh + sagK);
+            ctx.lineTo(0, -Hh); ctx.lineTo(W * 0.45, 0);
+            ctx.closePath(); ctx.fill();
+            // Folds: each one hangs from the ridge and fades out at the hem.
+            for (let i = -3; i <= 3; i++) {
                 if (!i) continue;
-                ctx.beginPath(); ctx.moveTo(i * 7, 0); ctx.lineTo(i * 1.6, -24); ctx.stroke();
+                const t = i / 3;
+                const foot = t * W * 0.9 + (h(obj.tx + i, obj.ty, 31) - 0.5) * 2;
+                const head = t * 2.2;
+                ctx.strokeStyle = i < 0 ? "rgba(255,240,210,0.13)" : "rgba(0,0,0,0.15)";
+                ctx.lineWidth = 0.9 + Math.abs(t) * 0.6;
+                ctx.beginPath();
+                ctx.moveTo(foot, -1);
+                ctx.quadraticCurveTo(foot * 0.55, -Hh * 0.5, head, -Hh + sagK + 1);
+                ctx.stroke();
             }
-            // Dark interior.
+            // Stitched seam along the ridge and a patch sewn on the cloth.
+            ctx.strokeStyle = "rgba(60,48,32,0.5)"; ctx.lineWidth = 0.8;
+            ctx.setLineDash([1.6, 1.8]);
+            ctx.beginPath();
+            ctx.moveTo(-W * 0.86, -1.5);
+            ctx.quadraticCurveTo(0, -3.2 - n1, W * 0.86, -1.5);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            if (n1 > 0.4) {
+                ctx.fillStyle = "rgba(118,98,66,0.9)";
+                ctx.fillRect(-W * 0.55, -Hh * 0.52, 5.5, 4.4);
+                ctx.strokeStyle = "rgba(52,42,28,0.55)"; ctx.lineWidth = 0.6;
+                ctx.setLineDash([1.2, 1.4]);
+                ctx.strokeRect(-W * 0.55, -Hh * 0.52, 5.5, 4.4);
+                ctx.setLineDash([]);
+            }
+            // Door: rolled back to one side, dark inside, bedroll showing.
             ctx.fillStyle = "#15110c";
-            ctx.beginPath(); ctx.moveTo(-7, 0); ctx.lineTo(0, -17); ctx.lineTo(7, 0); ctx.closePath(); ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(-7, 0);
+            ctx.quadraticCurveTo(-5.5, -11, 0, -17);
+            ctx.quadraticCurveTo(5.5, -11, 7, 0);
+            ctx.closePath(); ctx.fill();
             ctx.fillStyle = "#2b2319";
-            ctx.beginPath(); ctx.moveTo(-7, 0); ctx.lineTo(-3, -14); ctx.lineTo(0, 0); ctx.closePath(); ctx.fill();
-            // Ridge pole and guy lines.
-            ctx.strokeStyle = "#4a3c2a"; ctx.lineWidth = 1.4;
-            ctx.beginPath(); ctx.moveTo(0, -29); ctx.lineTo(0, -33); ctx.stroke();
-            ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.moveTo(-21, 0); ctx.lineTo(-27, 4); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(21, 0); ctx.lineTo(27, 4); ctx.stroke();
-            ctx.fillStyle = "#3a2f21";
-            ctx.fillRect(-28, 3, 3, 2); ctx.fillRect(25, 3, 3, 2);
-            // A bedroll peeking out.
+            ctx.beginPath();
+            ctx.moveTo(-7, 0); ctx.quadraticCurveTo(-5, -10, -1.5, -14.5);
+            ctx.lineTo(0, 0); ctx.closePath(); ctx.fill();
+            // The door flap, rolled up and tied off to the side.
+            ctx.fillStyle = "#86714d";
+            ctx.beginPath();
+            ctx.ellipse(7.6, -7.5, 2.3, 7.4, 0.12, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = "rgba(255,240,210,0.16)";
+            ctx.beginPath();
+            ctx.ellipse(6.8, -7.5, 0.9, 6.8, 0.12, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = "rgba(0,0,0,0.24)";
+            ctx.beginPath();
+            ctx.ellipse(8.8, -7.5, 0.8, 6.6, 0.12, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "rgba(58,47,33,0.75)"; ctx.lineWidth = 0.9;
+            for (const ty2 of [-11.5, -4]) {                            // ties
+                ctx.beginPath();
+                ctx.moveTo(5.2, ty2); ctx.lineTo(10, ty2 + 0.6);
+                ctx.stroke();
+            }
+            // Ridge pole, guy lines under tension, pegs.
+            ctx.strokeStyle = "#4a3c2a"; ctx.lineWidth = 1.4; ctx.lineCap = "round";
+            ctx.beginPath(); ctx.moveTo(0, -Hh); ctx.lineTo(0, -Hh - 4); ctx.stroke();
+            ctx.lineWidth = 0.9;
+            for (const dir of [-1, 1]) {
+                ctx.beginPath();
+                ctx.moveTo(dir * 1.2, -Hh + sagK + 1);
+                ctx.quadraticCurveTo(dir * (W * 0.8), -Hh * 0.34, dir * (W + 7), 4);
+                ctx.stroke();
+                ctx.fillStyle = "#3a2f21";
+                ctx.fillRect(dir * (W + 7) - 1.5, 3, 3, 2.2);
+            }
+            // Hem shadow: the cloth meets the ground, it does not hover.
+            ctx.fillStyle = "rgba(0,0,0,0.26)";
+            ctx.beginPath(); ctx.ellipse(0, 0.6, W * 0.96, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+            // A bedroll peeking out of the door.
             ctx.fillStyle = "#7d6a4e";
             ctx.beginPath(); ctx.ellipse(0, -2, 6, 2.4, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "rgba(255,240,210,0.16)";
+            ctx.beginPath(); ctx.ellipse(-1.6, -2.8, 3.4, 1.2, 0, 0, Math.PI * 2); ctx.fill();
             break;
         }
 
@@ -2434,14 +2508,37 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
             ctx.scale(1.25, 1.25);
             shadowEllipse(ctx, 17, 6, 0.36, propHeight(kind, s));
             ctx.fillStyle = "#7d5d4c"; ctx.fillRect(-14, -26, 28, 26);
+            // Courses of brick: every brick its own tone, length and a
+            // chipped corner or two. A grid of identical rectangles was the
+            // thing that made the stove look printed on the ground.
             for (let r = 0; r < 6; r++) {
-                for (let c = 0; c < 4; c++) {
-                    const bx = -14 + c * 7 + (r % 2 ? 3.5 : 0);
-                    const k = h(obj.tx + c, obj.ty + r, 7);
-                    ctx.fillStyle = k > 0.7 ? "#916b56" : k > 0.35 ? "#74564698" : "#5f453a";
-                    ctx.fillRect(bx, -25 + r * 4.4, 6.2, 3.6);
+                const rowShift = (r % 2 ? 3.5 : 0) + (h(obj.tx, obj.ty + r, 17) - 0.5) * 1.6;
+                let bx = -14 + rowShift - 7;
+                while (bx < 14) {
+                    const k = h(obj.tx + Math.round(bx), obj.ty + r, 7);
+                    const bw = 5.2 + k * 2.6;
+                    const x1 = Math.max(-14, bx), x2 = Math.min(14, bx + bw);
+                    if (x2 > x1) {
+                        const by = -25 + r * 4.4 + (k - 0.5) * 0.5;
+                        ctx.fillStyle = k > 0.7 ? "#916b56" : k > 0.35 ? "#775849" : "#5f453a";
+                        ctx.fillRect(x1, by, x2 - x1, 3.6);
+                        ctx.fillStyle = "rgba(255,236,206,0.1)";       // lit top edge
+                        ctx.fillRect(x1, by, x2 - x1, 0.7);
+                        if (k > 0.82) {                                 // chipped corner
+                            ctx.fillStyle = "rgba(40,30,26,0.4)";
+                            ctx.fillRect(x2 - 1.4, by + 2.2, 1.4, 1.4);
+                        }
+                    }
+                    bx += bw + 0.8;
                 }
             }
+            // Fire-blackened brick creeps up from the mouth.
+            ctx.fillStyle = "rgba(22,18,16,0.3)";
+            ctx.beginPath();
+            ctx.moveTo(-10, 0);
+            ctx.quadraticCurveTo(-7, -16, 0, -22);
+            ctx.quadraticCurveTo(7, -16, 10, 0);
+            ctx.closePath(); ctx.fill();
             ctx.fillStyle = "rgba(255,230,200,0.12)"; ctx.fillRect(-14, -26, 28, 2);
             ctx.fillStyle = "rgba(0,0,0,0.32)"; ctx.fillRect(8, -26, 6, 26);
             // Broken chimney stub with soot.
@@ -2479,15 +2576,59 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         }
 
         case "chest_old": {
+            // Planks, iron and wear. A chest is a box the player will walk up
+            // to and look at, so it gets grain, bands with rivets and a hasp.
+            const n0 = h(obj.tx, obj.ty, 13), n1 = h(obj.tx, obj.ty, 27);
             shadowEllipse(ctx, 12, 4, 0.3, propHeight(kind, s));
-            ctx.fillStyle = "#5e4428"; ctx.fillRect(-11, -13, 22, 13);
-            ctx.fillStyle = "#74552f"; ctx.fillRect(-11, -13, 22, 2);
+            const W2 = 11, bodyTop = -13;
+            ctx.fillStyle = "#5e4428"; ctx.fillRect(-W2, bodyTop, W2 * 2, 13);
+            // Vertical planks with their own tone and grain.
+            for (let i = 0; i < 5; i++) {
+                const px2 = -W2 + i * (W2 * 2 / 5);
+                const k = h(obj.tx + i, obj.ty, 33);
+                ctx.fillStyle = `rgba(${Math.round(104 + k * 26)},${Math.round(76 + k * 20)},${Math.round(44 + k * 14)},0.55)`;
+                ctx.fillRect(px2 + 0.3, bodyTop + 0.5, W2 * 2 / 5 - 0.8, 12.2);
+                ctx.fillStyle = "rgba(40,28,16,0.35)";
+                ctx.fillRect(px2, bodyTop + 0.5, 0.6, 12.2);
+                ctx.strokeStyle = "rgba(48,34,20,0.3)"; ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.moveTo(px2 + 1.4, bodyTop + 2 + k * 2);
+                ctx.quadraticCurveTo(px2 + 2.4, bodyTop + 6, px2 + 1.2, bodyTop + 11);
+                ctx.stroke();
+            }
+            ctx.fillStyle = "rgba(0,0,0,0.26)";                 // shaded right flank
+            ctx.fillRect(W2 - 3.4, bodyTop, 3.4, 13);
+            // Domed lid.
             ctx.fillStyle = "#4a3620";
-            ctx.beginPath(); ctx.ellipse(0, -13, 11, 5, 0, Math.PI, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(0, bodyTop, W2, 5, 0, Math.PI, Math.PI * 2); ctx.fill();
             ctx.fillStyle = "#8a6a3c";
-            ctx.beginPath(); ctx.ellipse(0, -13.5, 11, 4.4, 0, Math.PI, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = "#3c3a40"; ctx.fillRect(-12, -9, 24, 2); ctx.fillRect(-2.5, -11, 5, 7);
-            ctx.fillStyle = "#c8b060"; ctx.fillRect(-1.5, -8, 3, 3);
+            ctx.beginPath(); ctx.ellipse(0, bodyTop - 0.5, W2, 4.4, 0, Math.PI, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "rgba(255,232,190,0.2)";            // light along the dome
+            ctx.beginPath(); ctx.ellipse(-2.5, bodyTop - 1.6, 6.5, 2.4, -0.18, Math.PI, Math.PI * 2); ctx.fill();
+            // Iron bands with rivets, hasp and lock.
+            const band2 = (y, hgt) => {
+                ctx.fillStyle = "#3c3a40"; ctx.fillRect(-W2 - 1, y, W2 * 2 + 2, hgt);
+                ctx.fillStyle = "rgba(255,255,255,0.14)"; ctx.fillRect(-W2 - 1, y, W2 * 2 + 2, 0.6);
+                ctx.fillStyle = "#232226";
+                for (let i = 0; i < 6; i++) ctx.fillRect(-W2 + 0.6 + i * 4, y + hgt * 0.3, 0.9, 0.9);
+            };
+            band2(-9.5, 2.2);
+            band2(-4, 1.8);
+            ctx.fillStyle = "#3c3a40"; ctx.fillRect(-2.5, -11.5, 5, 7.5);
+            ctx.fillStyle = "#c8b060"; ctx.fillRect(-1.5, -8.4, 3, 3);   // brass lock
+            ctx.fillStyle = "rgba(255,248,200,0.5)"; ctx.fillRect(-1.2, -8.1, 1, 1);
+            ctx.fillStyle = "rgba(20,16,12,0.6)"; ctx.fillRect(-0.5, -7.2, 1, 1.4);
+            // Wear: a chipped corner and moss at the foot on older chests.
+            if (n0 > 0.5) {
+                ctx.fillStyle = "rgba(40,28,16,0.5)";
+                ctx.beginPath();
+                ctx.moveTo(-W2, -2.5); ctx.lineTo(-W2 + 3, 0); ctx.lineTo(-W2, 0);
+                ctx.closePath(); ctx.fill();
+            }
+            if (n1 > 0.6) {
+                ctx.fillStyle = "rgba(96,122,66,0.3)";
+                ctx.beginPath(); ctx.ellipse(-4, -0.4, 5, 1.4, 0, 0, Math.PI * 2); ctx.fill();
+            }
             break;
         }
 
