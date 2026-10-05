@@ -126,9 +126,14 @@ export function moveAndCollide(map, x, y, dx, dy, radius = 9, extraSolid = null)
         if (map.solidAt(wx, wy)) return true;
         return extraSolid ? extraSolid(wx, wy) : false;
     };
+    // The body is a CIRCLE of `radius`, so the diagonal probes sit on that
+    // circle (radius * cos 45°) instead of on the corners of a square. Square
+    // corners stick out 41 % further than the body ever does, which is what
+    // made a gap you can see feel narrower than it looks.
+    const d = radius * 0.70710678;
     const blockedAt = (px, py) => (
-        solid(px - radius, py - radius) || solid(px + radius, py - radius) ||
-        solid(px - radius, py + radius) || solid(px + radius, py + radius) ||
+        solid(px - d, py - d) || solid(px + d, py - d) ||
+        solid(px - d, py + d) || solid(px + d, py + d) ||
         solid(px, py - radius) || solid(px, py + radius) ||
         solid(px - radius, py) || solid(px + radius, py)
     );
@@ -142,6 +147,43 @@ export function moveAndCollide(map, x, y, dx, dy, radius = 9, extraSolid = null)
         const ty = ny + dy;
         if (!blockedAt(nx, ty)) ny = ty; else hitY = true;
     }
+
+    // Corner assist. Walking straight at a tree trunk or into the edge of a
+    // gap used to stop you dead until you pressed a second direction by hand.
+    // When the way forward is blocked and the player is NOT steering sideways,
+    // look for clearance a little to either side and slip round the obstacle.
+    // The sideways step is proportional to the frame's own movement, so the
+    // result is identical at 30, 60 and 120 FPS, and it only fires when the
+    // forward step genuinely becomes possible — it can never push you into
+    // geometry or move you when there is a real wall ahead.
+    const slip = (horizontal) => {
+        const along = horizontal ? dx : dy;
+        const step = Math.abs(along) * 0.85;         // gentle: never outruns the player
+        const far = radius * 1.6;                    // how far aside we are willing to look
+        const at = (lat, forward) => (horizontal
+            ? blockedAt(nx + (forward ? dx : 0), ny + lat)
+            : blockedAt(nx + lat, ny + (forward ? dy : 0)));
+        // Commit to a side only if the way forward is genuinely open there.
+        // Against a solid wall both probes are blocked and nothing happens.
+        let best = 0;
+        for (const sgn of [1, -1]) {
+            if (at(sgn * far, true) || at(sgn * far, false)) continue;
+            if (!best) best = sgn;
+            else if (!at(sgn * far * 0.5, true)) { best = sgn; break; }
+        }
+        if (!best) return false;
+        if (!at(best * step, true)) {                // forward is already clear aside
+            if (horizontal) { nx += dx; ny += best * step; } else { ny += dy; nx += best * step; }
+            return true;
+        }
+        if (!at(best * step, false)) {               // still shouldering past: slide only
+            if (horizontal) ny += best * step; else nx += best * step;
+            return true;
+        }
+        return false;
+    };
+    if (hitX && dy === 0 && slip(true)) hitX = false;
+    else if (hitY && dx === 0 && slip(false)) hitY = false;
     // Keep inside the zone rectangle.
     nx = Math.max(radius, Math.min(map.widthPx - radius, nx));
     ny = Math.max(radius, Math.min(map.heightPx - radius, ny));

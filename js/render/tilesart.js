@@ -1183,6 +1183,11 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         }
 
         case "burnt_stump": {
+            // Scale: a stump is what is LEFT of a trunk, so it must read as
+            // narrower than `burnt_tree` (half-width 6 u) and far shorter than
+            // any standing tree. 0.66 puts the body at ~12.5 u across.
+            ctx.save();
+            ctx.scale(0.66 * s, 0.66 * s);
             // A sawn-off trunk the fire ate into. The thing that makes a stump
             // readable is the CUT FACE: an ellipse of growth rings seen from
             // three quarters. Everything else is support for it.
@@ -1269,6 +1274,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
             ctx.beginPath();
             ctx.moveTo(3.6, topY + 0.4); ctx.lineTo(4.4, topY - 2.0); ctx.lineTo(5.2, topY + 0.3);
             ctx.closePath(); ctx.fill();
+            ctx.restore();
             break;
         }
 

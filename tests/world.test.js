@@ -252,6 +252,41 @@ test("ore stays underground: no metal lying about on the surface", () => {
         "the mine must actually have ore");
 });
 
+test("walking straight at a trunk slips round it without a second key", () => {
+    // The gap exists (previous test), but the player used to stop dead when
+    // they clipped the edge of a trunk head-on and had to steer by hand.
+    const map = new TileMap(12, 12, "slip");
+    for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) map.set(x, y, T.GRASS);
+    const trunk = { x: 6 * 32 + 16, y: 4 * 32 + 16, r: 5 };
+    const extra = (wx, wy) => {
+        const dx = wx - trunk.x, dy = wy - trunk.y;
+        return dx * dx + dy * dy <= trunk.r * trunk.r;
+    };
+    // Start a little off the trunk's axis and walk straight up: no sideways input.
+    let x = trunk.x + 6, y = trunk.y + 60, stuck = 0;
+    for (let i = 0; i < 70; i++) {
+        const before = y;
+        const res = moveAndCollide(map, x, y, 0, -68 / 60, 9, extra);
+        x = res.x; y = res.y;
+        if (before - y < 0.2) stuck++;
+    }
+    assert.lte(stuck, 4, "straight-on walk should not stall against a round trunk");
+    assert.lt(y, trunk.y - 10, "player ends up past the trunk");
+});
+
+test("corner assist never pushes the player into a solid wall", () => {
+    const map = new TileMap(12, 12, "wall");
+    for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) map.set(x, y, T.GRASS);
+    for (let x = 0; x < 12; x++) map.set(x, 4, T.ROCK);      // a full wall, no gap
+    let x = 6 * 32 + 16, y = 6 * 32 + 16;
+    for (let i = 0; i < 180; i++) {
+        const res = moveAndCollide(map, x, y, 0, -68 / 60, 9);
+        x = res.x; y = res.y;
+    }
+    assert.gt(y, 5 * 32, "a wall is still a wall");
+    assert.not(map.solidAt(x, y), "the assist never leaves the player inside geometry");
+});
+
 test("two blockers one tile apart leave a gap the player fits through", () => {
     const PLAYER_R = 9;
     let pairs = 0, passable = 0;
