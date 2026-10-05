@@ -1,7 +1,7 @@
 /** v3 tests — world: tiles, chunked map, collision, zone generation, weather. */
 import { suite, test, assert, run } from "./tiny.js";
 import { T, TILES, tileInfo, isSolidTile, TILE_SIZE } from "../js/world/tiles.js";
-import { TileMap, moveAndCollide, CHUNK } from "../js/world/tilemap.js";
+import { TileMap, moveAndCollide, bodyBlocked, CHUNK } from "../js/world/tilemap.js";
 import { generateZone, WorldMap, Zone } from "../js/world/worldgen.js";
 import { ZONES, BIOMES, valleyTileCount, oppositeEdge, zoneDef } from "../js/world/regions.js";
 import { WeatherSystem, WEATHER } from "../js/world/weather.js";
@@ -250,6 +250,43 @@ test("ore stays underground: no metal lying about on the surface", () => {
     const mine = generateZone("mine", 5);
     assert.gt(mine.objects.filter((o) => o.kind === "ore_rock").length, 0,
         "the mine must actually have ore");
+});
+
+test("the mover never leaves the player somewhere the body does not fit", () => {
+    // ONE probe set. When the mover and the game's own "does he fit?" test
+    // disagreed, the safety net in main.js saw a legal position as occupied
+    // and teleported the hero — sometimes straight into a prop.
+    for (const id of ["forest", "meadow", "ashfall"]) {
+        const z = generateZone(id, 5);
+        const solid = (wx, wy) => z.solidAt(wx, wy);
+        let x = z.spawn.x, y = z.spawn.y;
+        assert.not(bodyBlocked(solid, x, y, 9), `${id}: spawn itself is occupied`);
+        let a = 0.7;
+        for (let i = 0; i < 600; i++) {
+            a += Math.sin(i * 1.7) * 0.6;
+            const dx = Math.cos(a) * 118 / 60, dy = Math.sin(a) * 118 / 60;
+            const res = moveAndCollide(z.map, x, y, dx, dy, 9, (wx, wy) => z.propSolidAt(wx, wy));
+            x = res.x; y = res.y;
+            assert.not(bodyBlocked(solid, x, y, 9), `${id}: wedged at ${x | 0},${y | 0} on step ${i}`);
+        }
+    }
+});
+
+test("a small prop cannot slip between the body probes", () => {
+    // A stump (block 3.6) is smaller than the gaps in a rim-only probe ring,
+    // so the hero used to walk over it and stand inside it.
+    const map = new TileMap(12, 12, "probe");
+    for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) map.set(x, y, T.GRASS);
+    const px = 6 * 32 + 16, py = 6 * 32 + 16;
+    for (const r of [3.0, 3.6, 5, 6.5]) {
+        for (let a = 0; a < Math.PI * 2; a += Math.PI / 12) {
+            for (let d = 0; d <= 9 - 0.5; d += 1) {
+                const ox = px + Math.cos(a) * d, oy = py + Math.sin(a) * d;
+                const solid = (wx, wy) => (wx - ox) * (wx - ox) + (wy - oy) * (wy - oy) <= r * r;
+                assert.ok(bodyBlocked(solid, px, py, 9), `prop r=${r} hidden inside the body`);
+            }
+        }
+    }
 });
 
 test("walking straight at a trunk slips round it without a second key", () => {

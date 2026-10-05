@@ -98,6 +98,25 @@ test("number keys switch the hotbar slot", () => {
     assert.eq(g.inventory.activeSlot, 1);
 });
 
+test("the hero is never teleported while walking", () => {
+    // Regression: the mover and Game.fitsAt used different probe shapes, so
+    // the safety net saw legal positions as occupied and flung the hero —
+    // occasionally straight into a prop. One probe set, no jumps.
+    const g = boot();
+    const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0], [0.7, -0.7], [-0.7, -0.7], [0.7, 0.7], [-0.7, 0.7]];
+    let cur = { x: 0, y: 0 };
+    g.input.axis = () => cur;
+    const maxStep = 118 / 60 * 1.5;               // run speed plus the corner-assist slide
+    for (let i = 0; i < 2400; i++) {
+        cur = { x: dirs[(i / 70 | 0) % dirs.length][0], y: dirs[(i / 70 | 0) % dirs.length][1] };
+        const x0 = g.player.x, y0 = g.player.y;
+        g.update(1 / 60);
+        const jump = Math.hypot(g.player.x - x0, g.player.y - y0);
+        assert.lte(jump, maxStep, `teleport of ${jump.toFixed(1)} px on frame ${i}`);
+        assert.ok(g.fitsAt(g.player.x, g.player.y), `wedged inside something on frame ${i}`);
+    }
+});
+
 suite("interaction");
 
 test("E on firewood picks it up and shows a floating number", () => {

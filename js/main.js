@@ -16,6 +16,7 @@ import { WorldMap } from "./world/worldgen.js";
 import { WeatherSystem } from "./world/weather.js";
 import { START_ZONE, biomeDef, oppositeEdge } from "./world/regions.js";
 import { TILE_SIZE } from "./world/tiles.js";
+import { bodyBlocked } from "./world/tilemap.js";
 import { Player } from "./entities/player.js";
 import { Inventory } from "./sandbox/inventory.js";
 import { itemDef, itemEmoji, itemName, foodValue } from "./sandbox/items.js";
@@ -195,13 +196,7 @@ export class Game {
      */
     fitsAt(x, y, radius = this.player.radius) {
         const zone = this.zone;
-        const solid = (wx, wy) => zone.solidAt(wx, wy);
-        return !(
-            solid(x - radius, y - radius) || solid(x + radius, y - radius) ||
-            solid(x - radius, y + radius) || solid(x + radius, y + radius) ||
-            solid(x, y - radius) || solid(x, y + radius) ||
-            solid(x - radius, y) || solid(x + radius, y)
-        );
+        return !bodyBlocked((wx, wy) => zone.solidAt(wx, wy), x, y, radius);
     }
 
     /**
@@ -212,7 +207,7 @@ export class Game {
      */
     placeSafely(x, y) {
         if (this.fitsAt(x, y)) { this.player.x = x; this.player.y = y; return true; }
-        const step = TILE_SIZE / 2;
+        const step = this.player.radius;      // nudge out, do not fling across the field
         for (let ring = 1; ring <= 12; ring++) {
             // Prefer straight below the target (in front of a tent, say),
             // then the other directions, then the diagonals.

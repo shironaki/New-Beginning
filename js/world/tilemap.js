@@ -121,22 +121,44 @@ export class TileMap {
  * smooth instead of sticky. Returns the resolved position and whether the mover
  * was blocked on each axis.
  */
+/**
+ * The player's body as a set of probe points, in units of `radius`.
+ *
+ * ONE source of truth: `moveAndCollide` and every "does the hero fit here?"
+ * check in the game must use this, or they disagree — a spot the mover is
+ * happy with gets judged occupied elsewhere and the hero is teleported out
+ * of it. The body is a CIRCLE, so the diagonals sit on the circle
+ * (cos 45° = 0.7071), never on the corners of a square: square corners stick
+ * out 41 % further than the body ever does.
+ *
+ * The centre and the inner ring matter just as much as the rim: a small prop
+ * (a stump, block 3.6) fits entirely between rim probes, and without them the
+ * hero walks into it and stands inside it.
+ */
+const D = 0.70710678, M = 0.5, MD = 0.46194, MX = 0.19134;
+export const BODY_PROBES = [
+    [0, 0],
+    [1, 0], [-1, 0], [0, 1], [0, -1],
+    [D, D], [D, -D], [-D, D], [-D, -D],
+    [M, 0], [-M, 0], [0, M], [0, -M],
+    [MD, MX], [MD, -MX], [-MD, MX], [-MD, -MX],
+    [MX, MD], [MX, -MD], [-MX, MD], [-MX, -MD]
+];
+
+/** Is the body of `radius` centred on (px, py) overlapping anything solid? */
+export function bodyBlocked(solid, px, py, radius) {
+    for (const [ox, oy] of BODY_PROBES) {
+        if (solid(px + ox * radius, py + oy * radius)) return true;
+    }
+    return false;
+}
+
 export function moveAndCollide(map, x, y, dx, dy, radius = 9, extraSolid = null) {
     const solid = (wx, wy) => {
         if (map.solidAt(wx, wy)) return true;
         return extraSolid ? extraSolid(wx, wy) : false;
     };
-    // The body is a CIRCLE of `radius`, so the diagonal probes sit on that
-    // circle (radius * cos 45°) instead of on the corners of a square. Square
-    // corners stick out 41 % further than the body ever does, which is what
-    // made a gap you can see feel narrower than it looks.
-    const d = radius * 0.70710678;
-    const blockedAt = (px, py) => (
-        solid(px - d, py - d) || solid(px + d, py - d) ||
-        solid(px - d, py + d) || solid(px + d, py + d) ||
-        solid(px, py - radius) || solid(px, py + radius) ||
-        solid(px - radius, py) || solid(px + radius, py)
-    );
+    const blockedAt = (px, py) => bodyBlocked(solid, px, py, radius);
 
     let nx = x, ny = y, hitX = false, hitY = false;
     if (dx !== 0) {
