@@ -130,7 +130,13 @@ export const PALETTE = {
 export const SHADOW = {
     coreRX: 7.2, coreRY: 2.8, coreA: 0.30,
     haloRX: 9.8, haloRY: 3.7, haloA: 0.14,
-    liftShrink: 0.045        // radii *= 1 - liftShrink * bob
+    liftShrink: 0.045,       // radii *= 1 - liftShrink * bob
+    // The CORE stays strictly under the feet — that is the rule that keeps
+    // the hero planted. Only the soft halo leans with the sun, and never more
+    // than this, so the hero is lit by the same sun as the trees without ever
+    // looking like he is hovering next to his own shadow.
+    sunLean: 2.6,            // u of halo offset at a full-length sun shadow
+    sunStretch: 0.35         // halo radii gained along the sun direction
 };
 
 /**

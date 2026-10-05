@@ -17,6 +17,7 @@
  *
  * Body frame: origin between the feet, on the ground; up is negative Y.
  */
+import { SUN } from "./tilesart.js";
 import { BODY, GEAR, TONE, PALETTE, SHADOW, GAIT, ACTION, clamp01, easeInOutSine, q } from "./charspec.js";
 
 export const DEFAULT_LOOK = {
@@ -229,9 +230,15 @@ export function drawCharacter(ctx, p) {
     const footFX = sideView ? -0.9 * side + swingF - stance : -legSpread + sway;
     const centroid = (footNX + footFX) / 2;
     const shrink = 1 - SHADOW.liftShrink * Math.max(0, bob);
+    // Halo: leans with the sun like every other shadow in the world.
+    const sunLean = Math.min(1, SUN.alpha * SUN.len / 1.2);
+    const lx = SUN.dx * SHADOW.sunLean * sunLean;
+    const ly = SUN.dy * SHADOW.sunLean * sunLean * 0.5;
+    const stretch = 1 + SHADOW.sunStretch * sunLean;
     ctx.fillStyle = `rgba(10,9,8,${SHADOW.haloA})`;
     ctx.beginPath();
-    ctx.ellipse(centroid, 0, SHADOW.haloRX * shrink, SHADOW.haloRY * shrink, 0, 0, Math.PI * 2);
+    ctx.ellipse(centroid + lx, ly, SHADOW.haloRX * shrink * stretch,
+                SHADOW.haloRY * shrink, Math.atan2(ly, lx) * 0.2, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = `rgba(10,9,8,${SHADOW.coreA})`;
     ctx.beginPath();

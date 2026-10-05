@@ -594,43 +594,106 @@ export function paintEdges(ctx, map, tx, ty, px, py, size) {
  * props use it to throw a shadow in the right direction and length, which is
  * most of what makes a scene read as "morning" or "noon".
  */
-export const SUN = { dx: 0.55, dy: 0.42, len: 1, alpha: 1 };
+export const SUN = { dx: 0.55, dy: 0.42, len: 1, alpha: 1, hour: 12 };
 
+/**
+ * Cast-shadow contract. A shadow is the cheapest depth cue there is, and the
+ * one thing that stops props from looking like stickers lying on the ground.
+ *
+ *   len      shadow length as a multiple of the object's HEIGHT — this is
+ *            what makes a tree's shadow long and a mushroom's short. At noon
+ *            `lenNoon`, near the horizon `lenLow`, by the sun's elevation;
+ *   squash   the ground plane is seen at a slant, so it foreshortens;
+ *   alpha    strongest at noon, fading out as the sun sets — after that the
+ *            light map takes over and there is no sun shadow at all;
+ *   contact  the small dark pool directly under the object; that one stays at
+ *            every hour, because it is contact, not sunlight.
+ */
+export const SHADOW = {
+    lenNoon: 0.34,
+    lenLow: 1.65,
+    squash: 0.42,
+    alphaNoon: 0.30,
+    alphaLow: 0.20,
+    softSteps: 3,          // stacked ellipses -> a penumbra, not a hard ring
+    softGrow: 0.16,
+    maxLen: 64,            // u; a 46 u tree at dusk would otherwise cross a field
+    contactAlpha: 0.42,
+    contactGrow: 1.12,
+    azDawn: 1.05,          // shadow direction x at first light …
+    azDusk: 0.20,          // … and at last light; y comes from the elevation
+    riseStart: 5.0,        // h, the sun clears the ridge
+    riseEnd: 7.5,
+    setStart: 17.5,
+    setEnd: 20.5
+};
+
+/** Place the sun for the hour; every prop reads `SUN` when it draws. */
 export function setSun(hour, daylight) {
-    // Low sun in the morning and evening → long shadows pointing away from it.
-    const t = Math.max(0, Math.min(1, (hour - 6) / 12));      // 0 at dawn, 1 at dusk
-    const elevation = Math.sin(Math.max(0, Math.min(Math.PI, t * Math.PI)));
-    SUN.dx = Math.cos(Math.PI * (0.15 + t * 0.7)) * -1.25;    // east → west
-    SUN.dy = 0.34 + (1 - elevation) * 0.5;
-    SUN.len = 0.55 + (1 - elevation) * 1.35;
-    SUN.alpha = Math.max(0, Math.min(1, daylight)) * 0.9;
+    SUN.hour = hour;
+    const span = Math.max(0.001, SHADOW.setEnd - SHADOW.riseStart);
+    const t = Math.max(0, Math.min(1, (hour - SHADOW.riseStart) / span));
+    const elevation = Math.sin(Math.PI * t);          // 0 horizon .. 1 noon
+    // Azimuth is deliberately NOT a full east-to-west swing. Every prop in
+    // this game is shaded for a key light at the upper left, all day; if the
+    // cast shadow crossed to the other side in the evening it would fight the
+    // shading on the object throwing it. So the shadow stays in the lower
+    // right and only swings within that quadrant: long and far out at dawn,
+    // tucked under the object at dusk.
+    SUN.dx = SHADOW.azDawn + (SHADOW.azDusk - SHADOW.azDawn) * t;
+    SUN.dy = 0.30 + (1 - elevation) * 0.36;
+    SUN.len = SHADOW.lenNoon + (1 - elevation) * (SHADOW.lenLow - SHADOW.lenNoon);
+    let day = Math.max(0, Math.min(1, daylight));     // fade, never pop
+    if (hour < SHADOW.riseEnd) {
+        day *= Math.max(0, (hour - SHADOW.riseStart) / (SHADOW.riseEnd - SHADOW.riseStart));
+    }
+    if (hour > SHADOW.setStart) {
+        day *= Math.max(0, 1 - (hour - SHADOW.setStart) / (SHADOW.setEnd - SHADOW.setStart));
+    }
+    SUN.alpha = Math.max(0, Math.min(1, day));
 }
 
-function shadowEllipse(ctx, w, hh, alpha = 0.3) {
-    // A cast shadow stretching away from the sun, plus a soft contact pool
-    // under the object. Grounding things this way is most of the "3D" feeling.
-    if (SUN.alpha > 0.05) {
-        const reach = w * SUN.len * SUN.alpha;
+/**
+ * Ground shadow for a prop standing at the origin.
+ *
+ * @param {number} w      half-width of the footprint, u
+ * @param {number} hh     half-depth of the footprint, u
+ * @param {number} alpha  contact strength
+ * @param {number} height how tall the thing is, u — the cast shadow is this
+ *                        long times the sun factor, so a tree throws a tree's
+ *                        shadow and a mushroom throws a mushroom's
+ */
+function shadowEllipse(ctx, w, hh, alpha = 0.3, height = 0) {
+    const tall = height || w * 2.2;
+    if (SUN.alpha > 0.04) {
+        const reach = Math.min(SHADOW.maxLen, tall * SUN.len) * SUN.alpha;
+        const ang = Math.atan2(SUN.dy * SHADOW.squash, SUN.dx);
+        const ex = SUN.dx * reach * 0.5;
+        const ey = SUN.dy * reach * 0.5 * SHADOW.squash;
+        const lit = SHADOW.alphaLow + (SHADOW.alphaNoon - SHADOW.alphaLow) *
+            Math.max(0, 1 - (SUN.len - SHADOW.lenNoon) / (SHADOW.lenLow - SHADOW.lenNoon));
         ctx.save();
-        ctx.fillStyle = `rgba(14,12,10,${alpha * 0.3 * SUN.alpha})`;
-        ctx.beginPath();
-        ctx.ellipse(SUN.dx * reach * 0.6, SUN.dy * hh * SUN.len * 0.8,
-                    w * (1 + SUN.len * 0.55), hh * (1 + SUN.len * 0.25),
-                    Math.atan2(SUN.dy * hh, SUN.dx * w) * 0.35, 0, Math.PI * 2);
-        ctx.fill();
+        for (let i = SHADOW.softSteps; i >= 1; i--) {
+            const k = 1 + (i - 1) * SHADOW.softGrow;
+            ctx.fillStyle = `rgba(14,12,10,${(lit * alpha * SUN.alpha) / (i * 1.35)})`;
+            ctx.beginPath();
+            ctx.ellipse(ex, ey, (w + reach * 0.5) * k,
+                        Math.max(hh, reach * 0.22 * SHADOW.squash) * k, ang, 0, Math.PI * 2);
+            ctx.fill();
+        }
         ctx.restore();
     }
-    ctx.fillStyle = `rgba(14,12,10,${alpha * 0.4})`;
+    // Contact: always there, sun or no sun. Without it everything floats.
+    ctx.fillStyle = `rgba(14,12,10,${alpha * SHADOW.contactAlpha})`;
     ctx.beginPath();
-    ctx.ellipse(1.6, 1.2, w * 1.12, hh * 1.12, 0, 0, Math.PI * 2);
+    ctx.ellipse(1.2, 1, w * SHADOW.contactGrow, hh * SHADOW.contactGrow, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = `rgba(14,12,10,${alpha})`;
     ctx.beginPath();
-    ctx.ellipse(1.5, 1, w, hh, 0, 0, Math.PI * 2);
+    ctx.ellipse(1, 0.8, w * 0.82, hh * 0.82, 0, 0, Math.PI * 2);
     ctx.fill();
 }
 
-/** Per-instance colour jitter so a forest is not a clone army. */
 function jitterPalette(colors, seedA, seedB) {
     // Each plant gets its own shade: brightness, warmth and a little
     // saturation drift. A forest of identical greens looks like wallpaper.
@@ -666,7 +729,7 @@ function conifer(ctx, obj, season = "spring") {
     const spruce = obj.kind === "spruce";
     const H = (spruce ? 50 : 46) * s;
 
-    shadowEllipse(ctx, 13 * s, 5 * s, 0.32);
+    shadowEllipse(ctx, 13 * s, 5 * s, 0.32, 50 * s);
 
     // Trunk, visible between the lowest branches.
     ctx.fillStyle = "#4b3722";
@@ -778,7 +841,7 @@ function broadleaf(ctx, obj, season) {
     const big = obj.kind === "ancient_oak" ? 1.45 : 1;
     const S = s * big;
 
-    shadowEllipse(ctx, 15 * S, 5.5 * S, 0.32);
+    shadowEllipse(ctx, 15 * S, 5.5 * S, 0.32, 46 * S);
 
     /* ---- trunk ---------------------------------------------------------- */
     const trunk = birch ? "#d6d0c0" : "#5d4226";
@@ -975,7 +1038,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         case "palm": {
             // A real palm: a thick curved trunk that reaches the crown, big
             // drooping fronds that fall below the growing point, coconuts.
-            shadowEllipse(ctx, 14 * s, 4.6 * s, 0.3);
+            shadowEllipse(ctx, 14 * s, 4.6 * s, 0.3, 46 * s);
             const bend = (h(obj.tx, obj.ty, 11) - 0.5) * 12 * s;
             const topX = 3 * s + bend, topY = -46 * s;
             // Trunk as a tapered filled shape (thick boot, slim neck) — the old
@@ -1085,7 +1148,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
 
         case "dead_tree": {
             // A tree that died standing: bare, pale, still has its shape.
-            shadowEllipse(ctx, 10 * s, 3.8 * s, 0.26);
+            shadowEllipse(ctx, 10 * s, 3.8 * s, 0.26, 34 * s);
             const lean = (h(obj.tx, obj.ty, 5) - 0.5) * 6 * s;
             const top = -34 * s;
             ctx.fillStyle = "#6a5a48";                 // trunk with a root flare
@@ -1128,7 +1191,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         case "burnt_tree": {
             // A trunk the fire went through: thick, black, split at the top,
             // grey ash on the windward side, stubs where branches burned off.
-            shadowEllipse(ctx, 11 * s, 4 * s, 0.38);
+            shadowEllipse(ctx, 11 * s, 4 * s, 0.38, 38 * s);
             const lean = (h(obj.tx, obj.ty, 9) - 0.5) * 7 * s;
             const tall = 30 * s + h(obj.tx, obj.ty, 3) * 14 * s;
             const top = -tall;
@@ -1192,7 +1255,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
             // readable is the CUT FACE: an ellipse of growth rings seen from
             // three quarters. Everything else is support for it.
             const sw = 9.5, sh = 11;
-            shadowEllipse(ctx, sw + 2, 3.8, 0.34);
+            shadowEllipse(ctx, sw + 2, 3.8, 0.34, 13);
             ctx.fillStyle = "rgba(122,114,104,0.26)";              // ash collar
             ctx.beginPath(); ctx.ellipse(0, 1.2, sw + 2.5, 3.6, 0, 0, Math.PI * 2); ctx.fill();
 
@@ -1279,7 +1342,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         }
 
                 case "burnt_beam": {
-            shadowEllipse(ctx, 13, 3.5, 0.3);
+            shadowEllipse(ctx, 13, 3.5, 0.3, 7);
             ctx.save(); ctx.rotate(-0.22);
             ctx.fillStyle = "#231d1a"; ctx.fillRect(-14, -8, 28, 8);
             ctx.fillStyle = "#39312b"; ctx.fillRect(-14, -8, 28, 2.5);
@@ -1297,7 +1360,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
             const flip = n2 > 0.5 ? -1 : 1;
             ctx.save();
             ctx.scale(flip * grow, grow);
-            shadowEllipse(ctx, 12, 4.4, 0.3);
+            shadowEllipse(ctx, 12, 4.4, 0.3, 14);
 
             // Base silhouette of a boulder, each vertex nudged by the seed.
             const base = [[-12, 0], [-10.5, -7], [-7, -13], [-2, -16.5],
@@ -1390,7 +1453,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         }
 
         case "ruin_wall": {
-            shadowEllipse(ctx, 14, 5, 0.3);
+            shadowEllipse(ctx, 14, 5, 0.3, 26);
             const topL = -20 - h(obj.tx, obj.ty, 2) * 6;
             const topR = -13 - h(obj.tx, obj.ty, 4) * 9;
             // Broken silhouette: the wall never ends in a straight line.
@@ -1435,7 +1498,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         }
 
         case "bush": {
-            shadowEllipse(ctx, 11, 3.6, 0.26);
+            shadowEllipse(ctx, 11, 3.6, 0.26, 12);
             const autumn = season === "autumn";
             const pal = jitterPalette(autumn ? ["#9a6a28", "#7d551f", "#c08a39"]
                                              : ["#3f6b33", "#30542a", "#6a9c4c"], obj.tx, obj.ty);
@@ -1542,7 +1605,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         }
 
                 case "firewood": {
-            shadowEllipse(ctx, 9, 2.6, 0.22);
+            shadowEllipse(ctx, 9, 2.6, 0.22, 6);
             const logs = [[-0.35, -8, 16], [0.25, -5, 15], [0.05, -2.5, 13]];
             for (let i = 0; i < logs.length; i++) {
                 const [rot, yy, len] = logs[i];
@@ -1688,7 +1751,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         }
 
         case "driftwood": {
-            shadowEllipse(ctx, 11, 2.6, 0.22);
+            shadowEllipse(ctx, 11, 2.6, 0.22, 5);
             ctx.save(); ctx.rotate(-0.18);
             ctx.fillStyle = "#a89880"; ctx.fillRect(-12, -5, 24, 5);
             ctx.fillStyle = "#c3b49c"; ctx.fillRect(-12, -5, 24, 1.5);
@@ -1699,7 +1762,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         }
 
         case "tent": {
-            shadowEllipse(ctx, 23, 7, 0.34);
+            shadowEllipse(ctx, 23, 7, 0.34, 30);
             // Canvas, two tones, with a seam and a rolled-back door.
             ctx.fillStyle = "#6a5a40";
             ctx.beginPath(); ctx.moveTo(-21, 0); ctx.lineTo(0, -29); ctx.lineTo(21, 0); ctx.closePath(); ctx.fill();
@@ -1737,7 +1800,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
             // and soot licking up the chimney. It is a landmark, so it is big.
             ctx.save();
             ctx.scale(1.25, 1.25);
-            shadowEllipse(ctx, 17, 6, 0.36);
+            shadowEllipse(ctx, 17, 6, 0.36, 34);
             ctx.fillStyle = "#7d5d4c"; ctx.fillRect(-14, -26, 28, 26);
             for (let r = 0; r < 6; r++) {
                 for (let c = 0; c < 4; c++) {
@@ -1772,7 +1835,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         }
 
         case "diary": {
-            shadowEllipse(ctx, 7, 2, 0.24);
+            shadowEllipse(ctx, 7, 2, 0.24, 3);
             ctx.save(); ctx.rotate(-0.12);
             ctx.fillStyle = "#e5d8b4"; ctx.fillRect(-6, -4.5, 12, 4.5);
             ctx.fillStyle = "#c9b98f"; ctx.fillRect(-6, -4.5, 12, 1);
@@ -1784,7 +1847,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         }
 
         case "chest_old": {
-            shadowEllipse(ctx, 12, 4, 0.3);
+            shadowEllipse(ctx, 12, 4, 0.3, 11);
             ctx.fillStyle = "#5e4428"; ctx.fillRect(-11, -13, 22, 13);
             ctx.fillStyle = "#74552f"; ctx.fillRect(-11, -13, 22, 2);
             ctx.fillStyle = "#4a3620";
@@ -1799,7 +1862,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         case "campfire": {
             // Fire ring only; flames are drawn live by the renderer.
             // Chunky field stones set into the soil — never flat petals.
-            shadowEllipse(ctx, 14, 5, 0.22);
+            shadowEllipse(ctx, 14, 5, 0.22, 6);
             ctx.fillStyle = "#3a332c";
             ctx.beginPath(); ctx.ellipse(0, 0, 11, 5.5, 0, 0, Math.PI * 2); ctx.fill();
             ctx.fillStyle = "#4a4139";
@@ -1845,7 +1908,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         }
 
         default: {
-            shadowEllipse(ctx, 7, 2.4, 0.22);
+            shadowEllipse(ctx, 7, 2.4, 0.22, 7);
             ctx.fillStyle = "#8a7a6a";
             ctx.fillRect(-5, -8, 10, 8);
         }

@@ -1,6 +1,7 @@
 /** v3 tests — core: RNG, noise, events, ECS, clock, save, loop. */
 import { suite, test, assert, run } from "./tiny.js";
 import { LIGHT, ambientAt } from "../js/render/lighting.js";
+import { SUN, SHADOW, setSun } from "../js/render/tilesart.js";
 import { Particles } from "../js/render/particles.js";
 import { RNG, hashSeed, mixSeeds, valueNoise2D, fbm2D } from "../js/core/rng.js";
 import { EventBus } from "../js/core/events.js";
@@ -277,6 +278,48 @@ test("weather only ever adds darkness, and never past the floor", () => {
         }
     }
     assert.eq(ambientAt(3, "clear", true).alpha, LIGHT.underground.a, "caves use their own value");
+});
+
+test("the sun keeps every shadow in the lower right, all day", () => {
+    // Props are shaded for a key light at the upper left at every hour. A
+    // cast shadow that crossed to the other side in the evening would fight
+    // the shading on the object throwing it.
+    for (let h = 5; h <= 20.5; h += 0.25) {
+        setSun(h, 1);
+        assert.gte(SUN.dx, 0.15, `${h}:00 throws its shadow the wrong way`);
+        assert.gt(SUN.dy, 0, `${h}:00 throws its shadow upwards`);
+    }
+});
+
+test("shadows are long at the horizon, short at noon, gone at night", () => {
+    setSun(12, 1);
+    const noon = SUN.len;
+    setSun(6.5, 1);
+    const dawn = SUN.len;
+    setSun(19, 1);
+    const dusk = SUN.len;
+    assert.lt(noon, dawn, "noon shadows must be the shortest");
+    assert.lt(noon, dusk);
+    assert.lte(noon, SHADOW.lenNoon + 0.02);
+    for (const h of [0, 2, 4.4, 21, 23]) {
+        setSun(h, 0);
+        assert.lte(SUN.alpha, 0.04, `${h}:00 has sunlight`);
+    }
+});
+
+test("the sun never jumps between one minute and the next", () => {
+    let prev = null;
+    for (let m = 0; m <= 24 * 60; m++) {
+        const h = m / 60;
+        setSun(h, h <= 4 || h >= 22 ? 0 : 1);
+        const now = { dx: SUN.dx, dy: SUN.dy, len: SUN.len, alpha: SUN.alpha };
+        if (prev) {
+            assert.lte(Math.abs(now.dx - prev.dx), 0.02, `dx jumps at ${h}`);
+            assert.lte(Math.abs(now.len - prev.len), 0.02, `length jumps at ${h}`);
+            assert.lte(Math.abs(now.alpha - prev.alpha), 0.03, `strength jumps at ${h}`);
+        }
+        prev = now;
+    }
 });
 
 test("particles never allocate once the pool is warm", () => {
