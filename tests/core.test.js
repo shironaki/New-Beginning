@@ -1,7 +1,8 @@
 /** v3 tests — core: RNG, noise, events, ECS, clock, save, loop. */
 import { suite, test, assert, run } from "./tiny.js";
 import { LIGHT, ambientAt } from "../js/render/lighting.js";
-import { SUN, SHADOW, setSun, castShadow, setFireLights, setShadowOrigin, propHeight } from "../js/render/tilesart.js";
+import { SUN, SHADOW, setSun, castShadow, setFireLights, setShadowOrigin, propHeight,
+         ROCK, pick, rockOutline } from "../js/render/tilesart.js";
 import { Renderer, OCCLUDE } from "../js/render/renderer.js";
 import { Particles } from "../js/render/particles.js";
 import { RNG, hashSeed, mixSeeds, valueNoise2D, fbm2D } from "../js/core/rng.js";
@@ -395,6 +396,31 @@ test("a tree in front of the hero steps out of the way, gently", () => {
     const aside = { kind: "pine", size: 1, x: 200 + 50 * OCCLUDE.spread + OCCLUDE.bodyHalf + 1, y: 214 };
     occlude.call(null, aside, hero, 1 / 60);
     assert.eq(aside._fade, 0, "a pine beside the hero is not in the way");
+});
+
+test("a field of stones is a field of different stones", () => {
+    const shape = (tx, ty) => rockOutline([], ROCK.radius, ROCK.radius * 0.8, 9,
+                                          0.1, ROCK.jitter, tx, ty)
+        .map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join("|");
+    const seen = new Set();
+    for (let tx = 0; tx < 8; tx++) for (let ty = 0; ty < 8; ty++) seen.add(shape(tx, ty));
+    assert.eq(seen.size, 64, "two boulders share an outline");
+    assert.eq(shape(3, 4), shape(3, 4), "the same tile must redraw identically");
+});
+
+test("stone archetypes and palettes come from a weighted table", () => {
+    assert.eq(pick(ROCK.kinds, 0)[0], "boulder");
+    assert.eq(pick(ROCK.kinds, 1)[0], "cluster");
+    const tally = {};
+    for (let i = 0; i < 1000; i++) {
+        const k = pick(ROCK.kinds, i / 1000)[0];
+        tally[k] = (tally[k] || 0) + 1;
+    }
+    assert.eq(Object.keys(tally).length, ROCK.kinds.length, "an archetype is unreachable");
+    for (const [name, weight] of ROCK.kinds) {
+        assert.near(tally[name] / 1000, weight / 100, 0.02, `${name} is mis-weighted`);
+    }
+    assert.gt(pick(ROCK.stone, 0.5)[1].length, 2, "a stone palette is an rgb triple");
 });
 
 test("particles never allocate once the pool is warm", () => {
