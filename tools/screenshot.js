@@ -182,6 +182,21 @@ const scenes = [
         setup(g) { g.enterZone("mine", null, true); g.clock.minute = 12 * 60; }
     },
     {
+        name: "17-behind-pine",
+        about: "Герой за сосной: крона уходит в прозрачность",
+        setup(g) {
+            g.enterZone("forest", null, true);
+            g.clock.minute = 11 * 60;
+            const pine = g.zone.objects.find((o) => o.kind === "pine" || o.kind === "spruce");
+            if (pine) {
+                g.player.x = pine.x; g.player.y = pine.y - 20;
+                g.player.dir = "down";
+                g.camera.zoom = 3;
+                g.camera.snapTo(pine.x, pine.y - 26);
+            }
+        }
+    },
+    {
         name: "08-shore-afternoon",
         about: "Лазурный берег",
         setup(g) {

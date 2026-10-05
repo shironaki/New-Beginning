@@ -17,7 +17,7 @@
  *
  * Body frame: origin between the feet, on the ground; up is negative Y.
  */
-import { SUN } from "./tilesart.js";
+import { SUN, castShadow } from "./tilesart.js";
 import { BODY, GEAR, TONE, PALETTE, SHADOW, GAIT, ACTION, clamp01, easeInOutSine, q } from "./charspec.js";
 
 export const DEFAULT_LOOK = {
@@ -230,6 +230,14 @@ export function drawCharacter(ctx, p) {
     const footFX = sideView ? -0.9 * side + swingF - stance : -legSpread + sway;
     const centroid = (footNX + footFX) / 2;
     const shrink = 1 - SHADOW.liftShrink * Math.max(0, bob);
+    // Cast shadow: the hero is lit by the same sun and the same campfire as
+    // every prop around him, so he throws the same kind of shadow. The CORE
+    // below still sits strictly under the feet — that is what keeps him
+    // planted while the cast part stretches away from the light.
+    ctx.save();
+    castShadow(ctx, SHADOW.coreRX * shrink, SHADOW.coreRY * shrink, 0.9,
+               SHADOW.castHeight, idle);
+    ctx.restore();
     // Halo: leans with the sun like every other shadow in the world.
     const sunLean = Math.min(1, SUN.alpha * SUN.len / 1.2);
     const lx = SUN.dx * SHADOW.sunLean * sunLean;

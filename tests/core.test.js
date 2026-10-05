@@ -1,7 +1,8 @@
 /** v3 tests — core: RNG, noise, events, ECS, clock, save, loop. */
 import { suite, test, assert, run } from "./tiny.js";
 import { LIGHT, ambientAt } from "../js/render/lighting.js";
-import { SUN, SHADOW, setSun } from "../js/render/tilesart.js";
+import { SUN, SHADOW, setSun, castShadow, setFireLights, setShadowOrigin, propHeight } from "../js/render/tilesart.js";
+import { Renderer, OCCLUDE } from "../js/render/renderer.js";
 import { Particles } from "../js/render/particles.js";
 import { RNG, hashSeed, mixSeeds, valueNoise2D, fbm2D } from "../js/core/rng.js";
 import { EventBus } from "../js/core/events.js";
@@ -320,6 +321,80 @@ test("the sun never jumps between one minute and the next", () => {
         }
         prev = now;
     }
+});
+
+/** A context that writes down the ellipses it is asked to draw. */
+function recorder() {
+    const shapes = [];
+    return {
+        shapes,
+        fillStyle: "", globalAlpha: 1,
+        save() {}, restore() {}, beginPath() {}, fill() {},
+        ellipse(x, y, rx, ry) { shapes.push({ x, y, rx, ry }); }
+    };
+}
+
+test("a fire throws every shadow away from itself", () => {
+    setSun(1, 0);                       // night: the sun is out of the way
+    setFireLights([{ x: 100, y: 100, r: 150, i: 1 }]);
+    for (const [ox, oy] of [[140, 100], [60, 100], [100, 150], [100, 55]]) {
+        setShadowOrigin(ox, oy);
+        const c = recorder();
+        castShadow(c, 10, 4, 1, 40, 0);
+        assert.gt(c.shapes.length, 0, `no shadow at ${ox},${oy}`);
+        const far = c.shapes[c.shapes.length - 1];
+        assert.gte(Math.sign(far.x) * Math.sign(ox - 100), 0, "shadow falls towards the fire");
+        if (oy !== 100) assert.gt(far.y * Math.sign(oy - 100), 0, "wrong side");
+    }
+    setFireLights([]);
+});
+
+test("firelight shadows are longer close in and gone far out", () => {
+    setSun(1, 0);
+    setFireLights([{ x: 0, y: 0, r: 120, i: 1 }]);
+    const reach = (d) => {
+        setShadowOrigin(d, 0);
+        const c = recorder();
+        castShadow(c, 10, 4, 1, 40, 0);
+        return c.shapes.length ? c.shapes[c.shapes.length - 1].x : 0;
+    };
+    assert.gt(reach(20), reach(70), "a near object should throw the longer shadow");
+    assert.eq(reach(130), 0, "nothing is lit beyond the fire's radius");
+    setSun(12, 1);                      // noon washes firelight out
+    setShadowOrigin(20, 0);
+    const c = recorder();
+    castShadow(c, 10, 4, 1, 40, 0);
+    const sunward = c.shapes.every((sh) => sh.x >= 0);
+    assert.ok(sunward, "at noon only the sun throws shadows");
+    setFireLights([]);
+});
+
+test("every prop height is a number from one table", () => {
+    assert.gt(propHeight("pine"), propHeight("bush"));
+    assert.gt(propHeight("pine", 1.2), propHeight("pine", 1));
+    assert.eq(propHeight("tent", 1.2), propHeight("tent", 1), "built things do not grow");
+    assert.gt(propHeight("whatever_new_prop"), 0, "unknown props still get a height");
+});
+
+test("a tree in front of the hero steps out of the way, gently", () => {
+    const occlude = Renderer.prototype._occlude;
+    const hero = { x: 200, y: 200 };
+    const pine = { kind: "pine", size: 1, x: 200, y: 214 };
+    const first = occlude.call(null, pine, hero, 1 / 60);
+    assert.gt(first, 0, "a pine covering the hero must start fading");
+    assert.lt(first, 0.3, "and must not pop");
+    for (let i = 0; i < 120; i++) occlude.call(null, pine, hero, 1 / 60);
+    assert.gte(pine._fade, 0.95, "after a second it is fully faded");
+    for (let i = 0; i < 180; i++) occlude.call(null, pine, hero, 1 / 60);
+    const behind = { kind: "pine", size: 1, x: 200, y: 180 };
+    occlude.call(null, behind, hero, 1 / 60);
+    assert.eq(behind._fade, 0, "a tree the hero walks in front of stays solid");
+    const bush = { kind: "bush", size: 1, x: 200, y: 214 };
+    occlude.call(null, bush, hero, 1 / 60);
+    assert.eq(bush._fade, 0, "short props hide nobody");
+    const aside = { kind: "pine", size: 1, x: 200 + 50 * OCCLUDE.spread + OCCLUDE.bodyHalf + 1, y: 214 };
+    occlude.call(null, aside, hero, 1 / 60);
+    assert.eq(aside._fade, 0, "a pine beside the hero is not in the way");
 });
 
 test("particles never allocate once the pool is warm", () => {

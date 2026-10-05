@@ -135,6 +135,7 @@ export const SHADOW = {
     // the hero planted. Only the soft halo leans with the sun, and never more
     // than this, so the hero is lit by the same sun as the trees without ever
     // looking like he is hovering next to his own shadow.
+    castHeight: 26,          // u of body that actually throws a shadow
     sunLean: 2.6,            // u of halo offset at a full-length sun shadow
     sunStretch: 0.35         // halo radii gained along the sun direction
 };

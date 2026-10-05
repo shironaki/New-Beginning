@@ -13,10 +13,28 @@
  */
 import { CHUNK } from "../world/tilemap.js";
 import { TILE_SIZE, TILES } from "../world/tiles.js";
-import { paintTile, paintEdges, paintProp, paintFlames, paintSpitItem, setSun } from "./tilesart.js";
+import { paintTile, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, propHeight } from "./tilesart.js";
 import { drawCharacter, drawSleeping } from "./character.js";
 import { LightMap } from "./lighting.js";
 import { itemEmoji } from "../sandbox/items.js";
+
+/**
+ * Occlusion fade. A hero who disappears behind a pine is a lost hero: the
+ * player stops steering and starts guessing. So anything tall that covers
+ * him goes part-way transparent — never off, because then the forest loses
+ * its depth, and never instantly, because a popping tree is worse than a
+ * hidden hero.
+ */
+export const OCCLUDE = {
+    minHeight: 22,     // u — only things taller than the hero can hide him
+    spread: 0.34,      // crown half-width as a fraction of the prop's height
+    bodyHalf: 5,       // u — half the hero's own shoulders
+    headroom: 6,       // u above the crown that still counts
+    alpha: 0.35,       // how much of the prop is left when it covers him
+    ramp: 2.2,         // how fast the fade reaches full across the overlap
+    fadeIn: 6.5,       // 1/s — how fast it gets out of the way
+    fadeOut: 3.0       // 1/s — and how slowly it comes back
+};
 
 export class Renderer {
     constructor(canvas, camera) {
@@ -168,7 +186,7 @@ export class Renderer {
      * Objects layer: props + characters, sorted by their base Y so a hero
      * walking behind a pine is actually behind it.
      */
-    drawObjects(state) {
+    drawObjects(state, dt = 0) {
         const { zone, player, fires } = state;
         const cam = this.camera;
         const ctx = this.ctx;
@@ -190,12 +208,15 @@ export class Renderer {
 
         for (const d of drawables) {
             const o = d.obj;
+            if (d.kind === "prop") this._occlude(o, player, dt);
             const s = cam.worldToScreen(o.x, o.y);
             ctx.save();
             ctx.translate(Math.round(s.x), Math.round(s.y));
             ctx.scale(cam.zoom, cam.zoom);
             if (d.kind === "prop") {
+                if (o._fade > 0) ctx.globalAlpha = 1 - (1 - OCCLUDE.alpha) * o._fade;
                 paintProp(ctx, o, this.time, this.season);
+                ctx.globalAlpha = 1;
                 if (o.kind === "campfire") {
                     const fire = fires && fires.get(o.id != null ? o.id : `${o.tx},${o.ty}`);
                     paintFlames(ctx, fire ? fire.intensity : 0, this.time, fire ? fire.stack : []);
@@ -213,12 +234,14 @@ export class Renderer {
                     }
                 }
             } else if (d.kind === "player") {
+                setShadowOrigin(o.x, o.y);
                 drawCharacter(ctx, {
                     dir: o.dir, phase: o.anim, gait: o.gait, runBlend: o.runBlend,
                     slant: o.slant, moving: o.moving, look: state.look,
                     actionTimer: o.actionTimer, tool: state.tool, idleTime: this.time
                 });
             } else {
+                setShadowOrigin(o.x, o.y);
                 drawCharacter(ctx, {
                     // Settlers and travellers share the hero's locomotion contract:
                     // whatever advances their `anim`/`gait` gets the same walk.
@@ -231,6 +254,60 @@ export class Renderer {
             ctx.restore();
         }
         return this;
+    }
+
+    /**
+     * This frame's point lights in WORLD coordinates, pooled. Used twice:
+     * by the shadow painter (before the objects layer) and by the light map
+     * (after it, converted to screen space), so a fire that lights the ground
+     * is always the same fire that throws the shadows.
+     */
+    _collectLights(state) {
+        const out = this._lights || (this._lights = []);
+        let n = 0;
+        const push = (x, y, r, i) => {
+            let L = out[n];
+            if (!L) { L = { x: 0, y: 0, r: 0, i: 1 }; out[n] = L; }
+            L.x = x; L.y = y; L.r = r; L.i = i;
+            n++;
+        };
+        if (state.fires) {
+            for (const [key, fire] of state.fires) {
+                if (!fire.lit) continue;
+                const obj = state.zone.objects.find((o) => (o.id != null ? o.id : `${o.tx},${o.ty}`) === key);
+                if (!obj) continue;
+                push(obj.x, obj.y, fire.lightRadius, 0.55 + fire.intensity * 0.45);
+            }
+        }
+        if (state.playerLight > 0) push(state.player.x, state.player.y - 8, state.playerLight, 0.8);
+        for (const L of state.extraLights || []) push(L.x, L.y, L.r, L.i || 0.7);
+        out.length = n;
+        setFireLights(out);
+        return out;
+    }
+
+    /**
+     * Does this prop stand in front of the hero and cover him? Result is
+     * eased into `obj._fade` (0..1) so the prop never pops.
+     */
+    _occlude(obj, player, dt) {
+        const tall = propHeight(obj.kind, obj.size || 1);
+        let want = 0;
+        if (tall >= OCCLUDE.minHeight && obj.y > player.y) {
+            const dx = Math.abs(obj.x - player.x);
+            const dy = obj.y - player.y;                 // prop is in front
+            // A crown is as wide as the tree is tall, roughly; the overlap
+            // that matters is crown half-width plus the hero's shoulders.
+            const reach = tall * OCCLUDE.spread + OCCLUDE.bodyHalf;
+            // The hero's head reaches ~26 u up; the crown has to be above it.
+            if (dx < reach && dy < tall + OCCLUDE.headroom) {
+                want = Math.min(1, (1 - dx / reach) * OCCLUDE.ramp);
+            }
+        }
+        const cur = obj._fade || 0;
+        const rate = (want > cur ? OCCLUDE.fadeIn : OCCLUDE.fadeOut) * Math.max(0, dt);
+        obj._fade = rate >= 1 ? want : cur + (want - cur) * rate;
+        return obj._fade;
     }
 
     /** Highlight the thing the player is about to interact with. */
@@ -383,9 +460,13 @@ export class Renderer {
         ctx.fillStyle = "#0a0c10";
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
+        // Point lights are collected BEFORE the objects layer: props and
+        // characters read them to throw shadows away from the flame, and the
+        // light map re-uses the same list afterwards in screen space.
+        this._collectLights(state);
         this.drawGround(state.zone);
         this.drawWater(state.zone);
-        this.drawObjects(state);
+        this.drawObjects(state, dt);
         if (state.particles) state.particles.draw(ctx, this.camera);
         if (state.player.sleeping) {
             const s = this.camera.worldToScreen(state.player.x, state.player.y);
@@ -399,31 +480,20 @@ export class Renderer {
         this.drawWeather(state.weather, dt);
 
         // --- lights ---------------------------------------------------------
+        // The very list the shadows were thrown from, now in screen space.
         const cam = this.camera;
         this.lightMap.begin();
-        if (state.fires) {
-            for (const [key, fire] of state.fires) {
-                if (!fire.lit) continue;
-                const obj = state.zone.objects.find((o) => (o.id != null ? o.id : `${o.tx},${o.ty}`) === key);
-                if (!obj || !cam.isVisible(obj.x, obj.y, 200)) continue;
-                const s = cam.worldToScreen(obj.x, obj.y);
-                this.lightMap.add(s.x, s.y, fire.lightRadius * cam.zoom,
-                    { intensity: 0.55 + fire.intensity * 0.45, warmth: 0.9, flicker: 1 });
-            }
+        for (const L of this._lights || []) {
+            if (!cam.isVisible(L.x, L.y, 200)) continue;
+            const s = cam.worldToScreen(L.x, L.y);
+            this.lightMap.add(s.x, s.y, L.r * cam.zoom,
+                { intensity: L.i, warmth: 0.88, flicker: 1 });
         }
         // Underground the eye adjusts: a weak glow so galleries are readable
         // even without a torch (a torch is still far brighter).
         if (state.underground) {
             const s2 = cam.worldToScreen(state.player.x, state.player.y - 8);
             this.lightMap.addPreset(s2.x, s2.y, "caveEye", cam.zoom);
-        }
-        if (state.playerLight > 0) {
-            const s = cam.worldToScreen(state.player.x, state.player.y - 8);
-            this.lightMap.add(s.x, s.y, state.playerLight * cam.zoom, { intensity: 0.8, warmth: 0.85, flicker: 1 });
-        }
-        for (const L of state.extraLights || []) {
-            const s = cam.worldToScreen(L.x, L.y);
-            this.lightMap.add(s.x, s.y, L.r * cam.zoom, { intensity: L.i || 0.7, warmth: L.w !== undefined ? L.w : 0.6 });
         }
         this.lightMap.render(ctx, {
             hour: state.clock ? state.clock.minute / 60 : 12,
