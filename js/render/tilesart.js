@@ -365,45 +365,80 @@ function detailPass(ctx, id, px, py, size, tx, ty, pal) {
                 ctx.stroke();
             }
             if (id === T.CLIFF) {
-                // A rock face seen from above-front: dark mass, stacked
-                // blocks of stone, lichen in the damp cracks. Cap and foot
-                // shadow are added by paintEdges, which knows the neighbours.
-                ctx.fillStyle = "rgba(18,16,15,0.3)";
+                // A rock face, not masonry: irregular facets scattered on a
+                // jittered grid in WORLD space and clipped to the tile by
+                // clamping their corners, so one wall is one wall and the
+                // same four blocks are never stamped per tile.
+                ctx.fillStyle = "rgba(16,14,13,0.34)";
                 ctx.fillRect(px, py, size, size);
-                // Courses of stone, offset like real masonry and jittered so
-                // the wall never turns into a chequerboard.
-                const blocks = 3 + Math.floor(h(tx, ty, 29) * 3);
-                for (let i = 0; i < blocks; i++) {
-                    const row = i % 2, col = Math.floor(i / 2);
-                    const u = h(tx * 7 + i, ty * 13, 31);
-                    const v = h(tx * 11, ty * 17 + i, 47);
-                    const shift = ((ty * 3 + col) % 2) * 0.22 + (u - 0.5) * 0.18;
-                    const bw = size * (0.36 + u * 0.3), bh = size * (0.26 + v * 0.22);
-                    const bx = px + (shift + row * 0.42) * size + (v - 0.5) * 4;
-                    const by = py + (col * 0.38 + (u - 0.5) * 0.12) * size;
-                    ctx.fillStyle = `rgba(${Math.round(96 + u * 44)},${Math.round(92 + u * 42)},${Math.round(86 + u * 40)},0.75)`;
-                    ctx.beginPath();
-                    ctx.moveTo(bx, by + bh * 0.25);
-                    ctx.lineTo(bx + bw * 0.3, by);
-                    ctx.lineTo(bx + bw, by + bh * 0.2);
-                    ctx.lineTo(bx + bw * 0.85, by + bh);
-                    ctx.lineTo(bx + bw * 0.15, by + bh * 0.9);
-                    ctx.closePath(); ctx.fill();
-                    ctx.fillStyle = "rgba(255,255,255,0.12)";          // top facet
-                    ctx.beginPath();
-                    ctx.moveTo(bx, by + bh * 0.25);
-                    ctx.lineTo(bx + bw * 0.3, by);
-                    ctx.lineTo(bx + bw * 0.75, by + bh * 0.15);
-                    ctx.lineTo(bx + bw * 0.35, by + bh * 0.35);
-                    ctx.closePath(); ctx.fill();
-                    ctx.fillStyle = "rgba(0,0,0,0.3)";                 // seam below
-                    ctx.fillRect(bx + bw * 0.15, by + bh * 0.88, bw * 0.7, 1.6);
-                }
-                if (h(tx, ty, 83) > 0.72) {                            // lichen
-                    ctx.fillStyle = "rgba(92,116,64,0.22)";
-                    ctx.beginPath();
-                    ctx.ellipse(px + h(tx, ty, 5) * size, py + h(tx, ty, 7) * size, 5, 3, 0.4, 0, Math.PI * 2);
-                    ctx.fill();
+                const x0 = tx * size, y0 = ty * size;
+                const CELL = 16;
+                const gx0 = Math.floor(x0 / CELL) - 1, gx1 = Math.floor((x0 + size) / CELL) + 1;
+                const gy0 = Math.floor(y0 / CELL) - 1, gy1 = Math.floor((y0 + size) / CELL) + 1;
+                const cl = (x) => Math.max(px, Math.min(px + size, x));
+                const cv = (y) => Math.max(py, Math.min(py + size, y));
+                for (let gy = gy0; gy <= gy1; gy++) {
+                    for (let gx = gx0; gx <= gx1; gx++) {
+                        // Facet centre: a grid point pushed far off the grid.
+                        const jx = (h(gx, gy, 31) - 0.5) * CELL * 0.9;
+                        const jy = (h(gx, gy, 37) - 0.5) * CELL * 0.9;
+                        const cxw = gx * CELL + CELL / 2 + jx;
+                        const cyw = gy * CELL + CELL / 2 + jy;
+                        const r = CELL * (0.52 + h(gx, gy, 41) * 0.55);
+                        const asp = 0.62 + h(gx, gy, 43) * 0.7;
+                        const rot = h(gx, gy, 47) * Math.PI;
+                        const nv = 5 + Math.floor(h(gx, gy, 53) * 2.9);
+                        const tone = Math.round(78 + h(gx, gy, 59) * 56 - h(gx, gy, 61) * 14);
+                        const px0 = px + (cxw - x0), py0 = py + (cyw - y0);
+                        if (px0 < px - r * 2 || px0 > px + size + r * 2) continue;
+                        if (py0 < py - r * 2 || py0 > py + size + r * 2) continue;
+                        const vx = [], vy = [];
+                        for (let i = 0; i < nv; i++) {
+                            const a = rot + (i / nv) * Math.PI * 2;
+                            const k = 0.72 + h(gx * 7 + i, gy * 5, 67) * 0.56;
+                            vx.push(px0 + Math.cos(a) * r * k);
+                            vy.push(py0 + Math.sin(a) * r * k * asp);
+                        }
+                        const poly = (dx, dy, from, to, close) => {
+                            ctx.beginPath();
+                            for (let i = from; i <= to; i++) {
+                                const j = ((i % nv) + nv) % nv;
+                                if (i === from) ctx.moveTo(cl(vx[j] + dx), cv(vy[j] + dy));
+                                else ctx.lineTo(cl(vx[j] + dx), cv(vy[j] + dy));
+                            }
+                            if (close) ctx.lineTo(cl(px0), cv(py0));
+                            ctx.closePath();
+                            ctx.fill();
+                        };
+                        ctx.fillStyle = `rgba(${tone},${tone - 2},${tone - 7},0.82)`;
+                        poly(0, 0, 0, nv - 1, false);
+                        // Light grazes the upper-left of every facet.
+                        ctx.fillStyle = "rgba(255,252,244,0.08)";
+                        poly(0, 0, Math.round(nv * 0.5), Math.round(nv * 0.5) + Math.max(1, Math.round(nv * 0.35)), true);
+                        ctx.fillStyle = "rgba(0,0,0,0.16)";
+                        poly(0, 0, 0, Math.max(1, Math.round(nv * 0.3)), true);
+                        // Deep crevice under the facet.
+                        // A crevice, but only when both ends really are
+                        // inside this tile: a clamped end drags the line
+                        // across the whole tile as a black scar.
+                        const i1 = Math.min(1, nv - 1);
+                        const inside = (x, y) => x > px && x < px + size && y > py && y < py + size;
+                        if (h(gx, gy, 71) > 0.55 && inside(vx[0], vy[0]) && inside(vx[i1], vy[i1])) {
+                            ctx.strokeStyle = "rgba(0,0,0,0.26)";
+                            ctx.lineWidth = 1.2;
+                            ctx.beginPath();
+                            ctx.moveTo(vx[0], vy[0]);
+                            ctx.lineTo(vx[i1], vy[i1]);
+                            ctx.stroke();
+                        }
+                        // Lichen in the damp hollows, spread over metres.
+                        if (soft(cxw, cyw, 22, 93) > 0.66) {
+                            ctx.fillStyle = "rgba(92,116,64,0.18)";
+                            ctx.beginPath();
+                            ctx.ellipse(cl(px0), cv(py0 + r * 0.3), r * 0.5, r * 0.3, 0.4, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                    }
                 }
             }
             break;
@@ -506,14 +541,22 @@ export function paintEdges(ctx, map, tx, ty, px, py, size) {
         if (other === here || other === T.VOID) continue;
         const oi = tileInfo(other), hi = tileInfo(here);
         if (here === T.CLIFF && !(oi.solid && !oi.liquid)) {
-            // The lit top edge of the wall, only where it actually ends.
-            ctx.fillStyle = "rgba(255,255,255,0.14)";
-            if (side === "n") ctx.fillRect(px, py, size, 3);
-            if (side === "w") ctx.fillRect(px, py, 2.5, size);
-            if (side === "e") ctx.fillRect(px + size - 2.5, py, 2.5, size);
+            // The lit top edge of the wall, only where it actually ends —
+            // and ragged, because a rock rim is not a ruler.
+            ctx.fillStyle = "rgba(255,255,255,0.13)";
+            const teeth = 8, seg = size / teeth;
+            for (let i = 0; i < teeth; i++) {
+                const d = 1.6 + h(tx * 5 + i, ty * 7, side.charCodeAt(0)) * 2.6;
+                if (side === "n") ctx.fillRect(px + i * seg, py, seg, d);
+                if (side === "w") ctx.fillRect(px, py + i * seg, d * 0.9, seg);
+                if (side === "e") ctx.fillRect(px + size - d * 0.9, py + i * seg, d * 0.9, seg);
+            }
             if (side === "s") {
-                ctx.fillStyle = "rgba(0,0,0,0.38)";       // the wall's own foot
-                ctx.fillRect(px, py + size - 5, size, 5);
+                // The wall's own foot: a gradient, not a black bar.
+                for (let i = 0; i < 4; i++) {
+                    ctx.fillStyle = `rgba(0,0,0,${0.16 - i * 0.03})`;
+                    ctx.fillRect(px, py + size - 6 + i * 1.5, size, 1.6);
+                }
             }
             continue;
         }
@@ -1170,30 +1213,42 @@ function broadleaf(ctx, obj, season) {
     }
     ctx.globalAlpha = 1;
 
-    // Willow: trailing curtains of leaves.
+    // Willow: curtains that hang from the UNDERSIDE of the crown, longest
+    // at the shoulders and parted over the trunk. A row of equal strands
+    // starting at one height is a mop, not a tree.
     if (willow) {
         ctx.lineCap = "round";
-        for (let i = 0; i < 17; i++) {
+        const strands = 26;
+        for (let i = 0; i < strands; i++) {
+            const t = (i + 0.5) / strands;                  // 0..1 across
+            const u = (t - 0.5) * 2;                        // -1..1
             const n = h(obj.tx + i, obj.ty, 31), n2 = h(obj.tx, obj.ty + i, 37);
-            const x0 = (-17 + i * 2.1) * S;
-            const drop = (16 + n * 16) * S;
-            const sway = (n2 - 0.5) * 5 * S;
-            ctx.strokeStyle = i % 3 === 0 ? lit : (i % 3 === 1 ? mid : dark);
-            ctx.globalAlpha = 0.85;
-            ctx.lineWidth = (1.3 + n * 1.1) * S;
+            const x0 = u * spread * (0.96 + n * 0.1);
+            // Follow the dome: the curtain starts where the crown ends.
+            const dome = Math.sqrt(Math.max(0, 1 - u * u));
+            const yStart = cy + dome * spread * 0.56 + 2;
+            // Longest at the shoulders, parted in the middle over the trunk.
+            const part = Math.abs(u) < 0.16 ? 0.35 : 1;
+            const drop = (9 + dome * 10 + n * 13) * part;
+            const sway = (n2 - 0.5) * 4 + u * 1.5;
+            const shade = Math.abs(u) > 0.45 ? (u > 0 ? dark : lit) : mid;
+            ctx.strokeStyle = n > 0.7 ? lit : shade;
+            ctx.globalAlpha = 0.62 + n2 * 0.3;
+            ctx.lineWidth = (0.9 + n * 0.9) * S;
             ctx.beginPath();
-            ctx.moveTo(x0, (cy + 6) * S);
-            ctx.quadraticCurveTo(x0 + sway * 0.4, (cy + 6) * S + drop * 0.6,
-                                 x0 + sway, (cy + 6) * S + drop);
+            ctx.moveTo(x0 * S, yStart * S);
+            ctx.quadraticCurveTo((x0 + sway * 0.35) * S, (yStart + drop * 0.62) * S,
+                                 (x0 + sway) * S, (yStart + drop) * S);
             ctx.stroke();
-            // leaves hanging off the strand
-            ctx.lineWidth = 0.9 * S;
-            for (let k = 1; k <= 3; k++) {
-                const f = k / 3.4;
-                const lxx = x0 + sway * f * f, lyy = (cy + 6) * S + drop * f;
+            // Leaves: short dashes down the strand, denser near the tip.
+            ctx.lineWidth = 0.75 * S;
+            const leaves = 2 + Math.floor(n2 * 3);
+            for (let k = 1; k <= leaves; k++) {
+                const f = 0.35 + (k / (leaves + 0.6)) * 0.6;
+                const lxx = (x0 + sway * f * f) * S, lyy = (yStart + drop * f) * S;
                 ctx.beginPath();
                 ctx.moveTo(lxx, lyy);
-                ctx.lineTo(lxx + (k % 2 ? 2 : -2) * S, lyy + 2.4 * S);
+                ctx.lineTo(lxx + (k % 2 ? 1.7 : -1.7) * S, lyy + 2.1 * S);
                 ctx.stroke();
             }
         }
@@ -1283,6 +1338,7 @@ export function rockOutline(out, rx, ry, n, tilt, jitter, seedA, seedB) {
 }
 
 const RP = [];              // scratch outline, reused every call
+const ORE_COLORS = { copper: "#d2823c", iron: "#c3cbd4", coal: "#1f1d1c", gem: "#63dcef" };
 
 function facet(ctx, pts, lx, ly, keepLit, alpha, color) {
     ctx.fillStyle = color || (keepLit ? `rgba(255,252,244,${alpha})` : `rgba(0,0,0,${alpha})`);
@@ -1304,18 +1360,23 @@ function facet(ctx, pts, lx, ly, keepLit, alpha, color) {
  * One stone, standing at the origin, already scaled by the caller.
  * @param {number} grade 0..1 — size of this particular stone
  */
-function stoneBody(ctx, seedA, seedB, grade, tone, archetype) {
+function stoneBody(ctx, seedA, seedB, grade, tone, archetype, ore = null) {
     const n = Math.round(ROCK.verts[0] + h(seedA, seedB, 71) * (ROCK.verts[1] - ROCK.verts[0]));
     const asp = ROCK.aspect[archetype] || 0.8;
     const rx = ROCK.radius * grade;
     const ry = rx * asp;
     const tilt = (h(seedA, seedB, 83) - 0.5) * 2 * ROCK.tilt *
                  (archetype === "slab" ? 1.6 : 1);
-    const pts = rockOutline(RP.length ? RP : RP, rx, ry, n, tilt, ROCK.jitter, seedA, seedB);
+    const pts = rockOutline(RP, rx, ry, n, tilt, ROCK.jitter, seedA, seedB);
     const sink = ry * ROCK.buried;
+    // Stand the stone on its OWN lowest vertex, not on the ellipse it was
+    // generated from: the underside is flattened, so an ellipse-based offset
+    // left every boulder hovering a third of its height above its shadow.
+    let bottom = -Infinity;
+    for (const [, y] of pts) if (y > bottom) bottom = y;
 
     ctx.save();
-    ctx.translate(0, -ry + sink);            // stand on the ground line
+    ctx.translate(0, -bottom + sink);        // the lowest point sinks into the soil
     const body = () => {
         ctx.beginPath();
         pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
@@ -1372,15 +1433,41 @@ function stoneBody(ctx, seedA, seedB, grade, tone, archetype) {
             ctx.fill();
         }
     }
+    // An ore vein lives ON the stone's face, inside its outline.
+    if (ore) {
+        ctx.save();
+        body(); ctx.clip();
+        const f = Math.min(1.1, rx / 11);
+        ctx.scale(f, f);
+        const c = ORE_COLORS[ore] || "#c0c0c0";
+        ctx.strokeStyle = c; ctx.lineWidth = 1.7; ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(-5.5, 1);
+        ctx.quadraticCurveTo(-1.5, -3.5 - h(seedA, seedB, 151) * 2, 4, 0.5);
+        ctx.stroke();
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(-2.5, -1.5); ctx.lineTo(-0.8, 2);
+        ctx.moveTo(1.5, -2); ctx.lineTo(3.4, -3.6);
+        ctx.stroke();
+        ctx.fillStyle = c;
+        ctx.beginPath(); ctx.arc(-4.2, -2.2, 1.4, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(2.4, -3.4, 1.1, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,0.55)";
+        ctx.fillRect(-4.8, -2.9, 1, 1);
+        ctx.fillRect(2, -3.9, 0.8, 0.8);
+        ctx.restore();
+    }
     ctx.restore();
     ctx.restore();
 
-    // The soil the stone is sunk into: a dark seam, then a pale lip in front.
-    ctx.fillStyle = "rgba(32,26,20,0.28)";
+    // The seam where stone meets soil: tight, dark, right under the body —
+    // this is the line that says "sunk in" instead of "placed on top".
+    ctx.fillStyle = "rgba(28,23,18,0.34)";
     ctx.beginPath();
-    ctx.ellipse(0, -sink * 0.4, rx * 0.92, Math.max(1.4, ry * 0.2), 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, rx * 0.86, Math.max(1.3, ry * 0.16), 0, 0, Math.PI * 2);
     ctx.fill();
-    return { rx, ry };
+    return { rx, ry, bottom };
 }
 
 export function paintProp(ctx, obj, time = 0, season = "spring") {
@@ -1735,13 +1822,54 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         }
 
                 case "burnt_beam": {
-            shadowEllipse(ctx, 13, 3.5, 0.3, propHeight(kind, s));
-            ctx.save(); ctx.rotate(-0.22);
-            ctx.fillStyle = "#231d1a"; ctx.fillRect(-14, -8, 28, 8);
-            ctx.fillStyle = "#39312b"; ctx.fillRect(-14, -8, 28, 2.5);
-            ctx.fillStyle = "#4a3f36";
-            for (let i = 0; i < 4; i++) ctx.fillRect(-12 + i * 7, -6, 1, 5);
-            ctx.restore();
+            // A fallen roof beam. Length, angle, how deeply it burned and
+            // where it split all come from the tile seed: seven identical
+            // black bricks laid at the same angle was the giveaway that the
+            // ruin was built by a loop.
+            {
+                const n0 = h(obj.tx, obj.ty, 11), n1 = h(obj.tx, obj.ty, 21), n2 = h(obj.tx, obj.ty, 31);
+                const len = 20 + n0 * 16, thick = 5 + n1 * 3.5;
+                const ang = (n2 - 0.5) * 2.4;
+                shadowEllipse(ctx, len * 0.5, thick * 0.6, 0.28, propHeight(kind, s));
+                ctx.save(); ctx.rotate(ang);
+                ctx.fillStyle = "#211b18";                      // charred body
+                ctx.beginPath();
+                ctx.moveTo(-len / 2, -thick);
+                ctx.lineTo(len / 2 - 2 - n0 * 3, -thick + n1);
+                ctx.lineTo(len / 2, 0.6);
+                ctx.lineTo(-len / 2 + 1, 0);
+                ctx.closePath(); ctx.fill();
+                ctx.fillStyle = "#3a322c";                      // dusty top face
+                ctx.beginPath();
+                ctx.moveTo(-len / 2, -thick);
+                ctx.lineTo(len / 2 - 2 - n0 * 3, -thick + n1);
+                ctx.lineTo(len / 2 - 4, -thick + n1 + 2.2);
+                ctx.lineTo(-len / 2 + 1.5, -thick + 2.4);
+                ctx.closePath(); ctx.fill();
+                // Cracks across the char — the grain the fire opened up.
+                ctx.fillStyle = "#4e4239";
+                const cracks = 3 + Math.floor(n1 * 4);
+                for (let i = 0; i < cracks; i++) {
+                    const f = (i + 0.5) / cracks;
+                    const cx = -len / 2 + len * f + (h(obj.tx + i, obj.ty, 41) - 0.5) * 3;
+                    ctx.fillRect(cx, -thick + 1, 0.9, thick - 1.4);
+                }
+                // The splintered end, where it broke off the roof.
+                ctx.fillStyle = "#171210";
+                ctx.beginPath();
+                ctx.moveTo(len / 2 - 2 - n0 * 3, -thick + n1);
+                ctx.lineTo(len / 2 + 2, -thick * 0.5);
+                ctx.lineTo(len / 2, 0.6);
+                ctx.closePath(); ctx.fill();
+                // Ash collected along the lee side.
+                if (n2 > 0.4) {
+                    ctx.fillStyle = "rgba(188,180,168,0.22)";
+                    ctx.beginPath();
+                    ctx.ellipse(-len * 0.1, 1.2, len * 0.42, 2.2, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
             break;
         }
 
@@ -1761,8 +1889,8 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
 
             // The pool belongs to THIS stone: a slab's shadow is wide and
             // thin, a shard's is small. Anything bigger reads as a hole.
-            const foot = ROCK.radius * grow * 0.88;
-            shadowEllipse(ctx, foot, foot * 0.34, 0.19,
+            const foot = ROCK.radius * grow * 0.92;
+            shadowEllipse(ctx, foot, foot * 0.30, 0.30,
                           propHeight(kind, s) * grow * (ROCK.aspect[arch] || 0.8) * 1.2);
             ctx.save();
             ctx.scale(flip, 1);
@@ -1775,7 +1903,7 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
                 stoneBody(ctx, obj.tx + 7, obj.ty * 9 + 2, grow * 0.44, tone, "shard");
                 ctx.restore();
             }
-            const geo = stoneBody(ctx, obj.tx, obj.ty, grow, tone, arch);
+            const geo = stoneBody(ctx, obj.tx, obj.ty, grow, tone, arch, obj.ore || null);
             if (arch === "cluster") {
                 ctx.save(); ctx.translate(6 * grow, 1.5 * grow);
                 stoneBody(ctx, obj.tx * 11, obj.ty + 5, grow * 0.38, tone, "slab");
@@ -1788,32 +1916,6 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
                 ctx.ellipse(-geo.rx * 0.12, -geo.ry * 1.5, geo.rx * 0.74, geo.ry * 0.3,
                             -0.12, Math.PI, Math.PI * 2);
                 ctx.fill();
-            }
-            if (obj.ore) {
-                // A vein running across the face, scaled to this stone.
-                const f = Math.min(1, geo.rx / 12) * 0.8;
-                ctx.save();
-                ctx.translate(0, -geo.ry * 0.9);
-                ctx.scale(f, f);
-                const oreColors = { copper: "#d2823c", iron: "#c3cbd4", coal: "#1f1d1c", gem: "#63dcef" };
-                const c = oreColors[obj.ore] || "#c0c0c0";
-                ctx.strokeStyle = c; ctx.lineWidth = 1.8; ctx.lineCap = "round";
-                ctx.beginPath();
-                ctx.moveTo(-6.5, 0.5);
-                ctx.quadraticCurveTo(-2, -5 - n0 * 2, 3.5, -1);
-                ctx.stroke();
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.moveTo(-3, -2.5); ctx.lineTo(-1, 1.5);
-                ctx.moveTo(1.5, -3); ctx.lineTo(4, -5);
-                ctx.stroke();
-                ctx.fillStyle = c;
-                ctx.beginPath(); ctx.arc(-5, -3, 1.5, 0, Math.PI * 2); ctx.fill();
-                ctx.beginPath(); ctx.arc(2.6, -4.5, 1.2, 0, Math.PI * 2); ctx.fill();
-                ctx.fillStyle = "rgba(255,255,255,0.6)";
-                ctx.fillRect(-5.7, -3.8, 1.1, 1.1);
-                ctx.fillRect(2, -5.1, 0.9, 0.9);
-                ctx.restore();
             }
             // Chips knocked off the bigger stones, lying around the foot.
             if (n0 > 1 - ROCK.chips) {

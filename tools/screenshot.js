@@ -197,6 +197,20 @@ const scenes = [
         }
     },
     {
+        name: "18-rock-closeup",
+        about: "Камни крупно: как они стоят в земле",
+        setup(g) {
+            g.enterZone("highland", null, true);
+            g.clock.minute = 12 * 60;
+            const rock = g.zone.objects.find((o) => o.kind === "rock");
+            if (rock) {
+                g.player.x = rock.x - 40; g.player.y = rock.y + 26;
+                g.camera.zoom = 5;
+                g.camera.snapTo(rock.x, rock.y - 6);
+            }
+        }
+    },
+    {
         name: "08-shore-afternoon",
         about: "Лазурный берег",
         setup(g) {
