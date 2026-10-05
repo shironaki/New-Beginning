@@ -241,6 +241,64 @@ test("you can squeeze between two props that are a tile apart", () => {
     if (pairs) assert.gt(passable / pairs, 0.5, "most gaps of ~2 tiles must be walkable");
 });
 
+test("ore stays underground: no metal lying about on the surface", () => {
+    for (const id of ["meadow", "forest", "highland", "pass", "shore", "ashfall"]) {
+        const z = generateZone(id, 5);
+        const ore = z.objects.filter((o) => o.kind === "ore_rock");
+        assert.eq(ore.length, 0, `${id}: ${ore.length} ore veins on the surface`);
+    }
+    const mine = generateZone("mine", 5);
+    assert.gt(mine.objects.filter((o) => o.kind === "ore_rock").length, 0,
+        "the mine must actually have ore");
+});
+
+test("two blockers one tile apart leave a gap the player fits through", () => {
+    const PLAYER_R = 9;
+    let pairs = 0, passable = 0;
+    for (const id of ["forest", "highland", "meadow"]) {
+        const z = generateZone(id, 9);
+        const solids = z.objects.filter((o) => o.block > 0 && o.kind !== "ruin_wall" &&
+            o.kind !== "tent" && o.kind !== "hearth_ruin");
+        for (let i = 0; i < solids.length; i++) {
+            for (let j = i + 1; j < solids.length; j++) {
+                const a = solids[i], b = solids[j];
+                const d = Math.hypot(a.x - b.x, a.y - b.y);
+                if (d < 28 || d > 40) continue;            // neighbouring tiles
+                pairs++;
+                const half = d / 2;
+                if (half > a.block + PLAYER_R && half > b.block + PLAYER_R) passable++;
+                break;
+            }
+        }
+    }
+    assert.gt(pairs, 0, "no neighbouring pairs to test");
+    assert.gte(passable / pairs, 0.95, `only ${passable}/${pairs} gaps are walkable`);
+});
+
+test("you can walk right up to anything you are meant to pick up", () => {
+    const PLAYER_R = 9, REACH = 18;
+    for (const id of ["shore", "meadow", "swamp"]) {
+        const z = generateZone(id, 3);
+        const loot = z.objects.filter((o) => o.block === 0 &&
+            ["driftwood", "firewood", "herb", "grass_tuft", "reed", "flower"].includes(o.kind));
+        for (const o of loot.slice(0, 40)) {
+            // Somewhere on a ring at arm's length there must be solid ground.
+            let reachable = false;
+            for (let a = 0; a < Math.PI * 2 && !reachable; a += Math.PI / 8) {
+                const x = o.x + Math.cos(a) * REACH, y = o.y + Math.sin(a) * REACH;
+                if (!z.solidAt(x, y) && !z.propSolidAt(x, y)) {
+                    // and the player's body must fit there too
+                    const clear = [[PLAYER_R, 0], [-PLAYER_R, 0], [0, PLAYER_R], [0, -PLAYER_R]]
+                        .every(([dx, dy]) => !z.propSolidAt(x + dx, y + dy));
+                    if (clear) reachable = true;
+                }
+            }
+            assert.ok(reachable, `${id}: ${o.kind} at ${o.tx},${o.ty} is walled off`);
+        }
+    }
+});
+
+
 test("WorldMap caches zones lazily", () => {
     const w = new WorldMap(12);
     assert.eq(w.loadedCount, 0);

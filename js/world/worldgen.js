@@ -342,9 +342,11 @@ function scatterProps(zone, rng, biome) {
             // Rocks, and — only in the mountains and underground — ore veins.
             // Ore does not lie around in meadows: that is what mines are for.
             if (tile !== T.WATER && jitter > 1 - biome.rocks * (0.4 + (1 - forest) * 1.2)) {
-                const oreCountry = !!def.underground || def.id === "highland" ||
-                                   def.id === "pass" || def.id === "mine";
-                const ore = (oreCountry && rng.chance(def.underground ? 0.42 : 0.22))
+                // Ore belongs underground. Surface zones — highland and the
+                // pass included — give plain stone and flint only; metal is a
+                // reason to go into the dark, not a thing you trip over.
+                const oreCountry = !!def.underground || def.id === "mine";
+                const ore = (oreCountry && rng.chance(0.42))
                     ? rng.weighted([["copper", 5], ["iron", 3], ["coal", 4], ["gem", 1]])
                     : null;
                 addProp(zone, ore ? "ore_rock" : "rock", x, y, {

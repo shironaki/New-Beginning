@@ -516,4 +516,31 @@ test("weight is vertical: the body drops on contact, rises on the pass", () => {
 });
 
 
+test("you cannot walk on water", () => {
+    const zone = generateZone("shore", 11);
+    // Find a shallow-water tile with land next to it and try to wade in.
+    let from = null, dir = null;
+    outer:
+    for (let ty = 4; ty < zone.h - 4; ty++) {
+        for (let tx = 4; tx < zone.w - 4; tx++) {
+            const here = zone.map.get(tx, ty);
+            if (here !== 9 && here !== 10) continue;          // T.WATER / T.DEEP
+            for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                const nx = tx + dx, ny = ty + dy;
+                if (zone.isFree(nx, ny)) {
+                    from = { x: nx * 32 + 16, y: ny * 32 + 16 };
+                    dir = { x: -dx, y: -dy };
+                    break outer;
+                }
+            }
+        }
+    }
+    assert.ok(from, "the shore must have a waterline");
+    const p = new Player(from);
+    for (let i = 0; i < 120; i++) p.update(1 / 60, dir, zone, {});
+    const tile = zone.map.get(Math.floor(p.x / 32), Math.floor(p.y / 32));
+    assert.not(tile === 9 || tile === 10, "the hero walked into the water");
+});
+
+
 run("v3 survival");
