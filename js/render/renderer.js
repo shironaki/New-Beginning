@@ -36,8 +36,82 @@ export const OCCLUDE = {
     fadeOut: 3.0       // 1/s — and how slowly it comes back
 };
 
+/**
+ * Water, in numbers. The baked ground gives the colour; everything here is
+ * the movement on top of it. Phases are computed in WORLD space so a swell
+ * crosses tile borders instead of restarting at every seam.
+ */
+export const WATER = {
+    swellLines: 2,          // crests per tile
+    swellSpeed: 0.45,       // 1/s — travel of the first crest
+    swellSpeedStep: 0.2,    // each further crest travels a little faster
+    swellKx: 0.055,         // world-space frequency, x
+    swellKy: 0.085,         // world-space frequency, y
+    swellDark: 0.13,        // α of the trough line
+    swellLight: 0.12,       // α of the crest line
+    glintRows: 2,           // specular dots per water tile
+    glintA: 0.5,            // α of a glint at full daylight
+    glintSize: 1.5,         // u
+    glintSpeed: 1.9,        // 1/s — twinkle rate
+    skyBandA: 0.09,         // α of the sky reflected off the far bank
+    skyBandSteps: 4,        // soft steps of that reflection (no gradients)
+    skyBandH: 0.5,          // fraction of a tile the reflection covers
+    foamBase: 0.22,         // α of surf at rest
+    foamPulse: 0.16,        // ± breathing of the surf
+    foamSpeed: 1.6,         // 1/s
+    foamWobble: 4.6,        // u — how far the foam line wanders
+    foamSeg: 8,             // segments of the foam polyline
+    foamFlecks: 3,          // specks of spray thrown past the foam line
+    foamFleckA: 0.3,
+    shelfA: 0.2             // reserved: the shallow shelf is baked, see paintEdges
+};
+
+/**
+ * Weather, in numbers. Three depth layers so rain and snow have volume, all
+ * of them world-anchored (they drift with the camera) and all drawn from
+ * pools built once — zero allocation per frame.
+ */
+export const SKY = {
+    layers: 3,
+    rainPerLayer: [70, 54, 38],   // near → far
+    rainLen: [16, 11, 7],         // px at zoom 1
+    rainSpeed: [1500, 1080, 760], // px/s
+    rainA: [0.42, 0.3, 0.2],
+    rainW: [1.3, 1, 0.8],
+    stormBoost: 2,              // more drops, harder slant in a storm
+    rainSlant: 0.22,              // base lean, rad
+    splashes: 26,                 // ground hits per frame
+    splashA: 0.22,
+    snowPerLayer: [70, 56, 40],
+    snowSize: [2.6, 1.9, 1.3],
+    snowSpeed: [78, 54, 36],
+    snowSway: [26, 17, 10],       // px of side-to-side drift
+    snowA: [0.85, 0.6, 0.4],
+    fogBands: 6,
+    fogA: 0.17,                    // α per band at the bottom of the screen
+    fogTop: 0.26,                 // fog thins to this factor at the top
+    fogSpeed: 9,                  // px/s drift of the nearest band
+    lightningEvery: 7.5,          // s between strikes in a storm
+    lightningA: 0.34
+};
+
 export class Renderer {
     constructor(canvas, camera) {
+        // Weather pools: positions are fractions of the screen, generated once
+        // from a fixed sequence so the sky looks random but never reallocates
+        // and never flickers when the window is resized.
+        this._sky = [];
+        for (let l = 0; l < SKY.layers; l++) {
+            const n = Math.max(SKY.rainPerLayer[l], SKY.snowPerLayer[l]);
+            const arr = new Float32Array(n * 3);
+            for (let i = 0; i < n; i++) {
+                arr[i * 3] = frac(i * 0.754877 + l * 0.31);      // x
+                arr[i * 3 + 1] = frac(i * 0.569840 + l * 0.17);  // y
+                arr[i * 3 + 2] = frac(i * 0.123456 + l * 0.71);  // personal phase
+            }
+            this._sky.push(arr);
+        }
+        this._flash = 0;
         this.canvas = canvas;
         this.ctx = canvas.getContext("2d", { alpha: false });
         this.ctx.imageSmoothingEnabled = false;
@@ -122,13 +196,19 @@ export class Renderer {
      * travelling swell, glints and foam along the shore. Cheap: only the
      * visible tiles, two strokes each.
      */
-    drawWater(zone) {
+    drawWater(zone, daylight = 1, hour = 12) {
         const cam = this.camera;
         const ctx = this.ctx;
         const t = this.time;
         const x0 = Math.floor(cam.x / TILE_SIZE) - 1, y0 = Math.floor(cam.y / TILE_SIZE) - 1;
         const x1 = Math.ceil((cam.x + cam.viewW) / TILE_SIZE) + 1;
         const y1 = Math.ceil((cam.y + cam.viewH) / TILE_SIZE) + 1;
+        // Glints are the sun on the ripples: gold low in the sky, white at
+        // noon, gone at night.
+        const low = Math.max(0, 1 - Math.abs(hour - 13) / 6.5);
+        const warm = Math.max(0, 1 - Math.min(Math.abs(hour - 7.5), Math.abs(hour - 18.5)) / 3);
+        const glintA = WATER.glintA * daylight * (0.35 + low * 0.65);
+        const glintCol = warm > 0.3 ? "255,228,168" : "255,255,255";
         ctx.save();
         for (let ty = y0; ty <= y1; ty++) {
             for (let tx = x0; tx <= x1; tx++) {
@@ -138,35 +218,74 @@ export class Renderer {
                 if (!info || !info.liquid) continue;
                 const s = cam.worldToScreen(tx * TILE_SIZE, ty * TILE_SIZE);
                 const z = cam.zoom, S = TILE_SIZE * z;
-                // Swell: curved crests drifting across the tile.
+                const wx = tx * TILE_SIZE, wy = ty * TILE_SIZE;
+                // Swell: crests travel across the whole body of water. The
+                // phase is world-space, so nothing breaks at a tile seam.
                 ctx.lineCap = "round";
-                for (let k = 0; k < 2; k++) {
-                    const phase = t * (0.45 + k * 0.2) + tx * 0.35 + ty * 0.7 + k;
-                    const yy = s.y + ((Math.sin(phase) * 0.5 + 0.5) * 0.7 + k * 0.18) * S;
-                    const w = (0.35 + 0.3 * Math.abs(Math.cos(phase * 1.3))) * S;
-                    const x0 = s.x + ((tx * 7 + ty * 3) % 5) * z;
-                    ctx.strokeStyle = k ? "rgba(255,255,255,0.12)" : "rgba(10,40,60,0.13)";
+                for (let k = 0; k < WATER.swellLines; k++) {
+                    const sp = WATER.swellSpeed + k * WATER.swellSpeedStep;
+                    const phase = t * sp + wx * WATER.swellKx + wy * WATER.swellKy + k * 1.7;
+                    const yy = s.y + ((Math.sin(phase) * 0.5 + 0.5) * 0.66 + k * 0.2) * S;
+                    const w = (0.4 + 0.3 * Math.abs(Math.cos(phase * 1.3))) * S;
+                    const sx = s.x + (frac(Math.sin(tx * 12.9898 + ty * 78.233) * 43758.5453)) * 0.4 * S;
+                    ctx.strokeStyle = k
+                        ? `rgba(255,255,255,${WATER.swellLight})`
+                        : `rgba(10,40,60,${WATER.swellDark})`;
                     ctx.lineWidth = Math.max(1, 1.2 * z);
                     ctx.beginPath();
-                    ctx.moveTo(x0, yy);
-                    ctx.quadraticCurveTo(x0 + w * 0.5, yy - 1.6 * z, x0 + w, yy + 0.4 * z);
+                    ctx.moveTo(sx, yy);
+                    ctx.quadraticCurveTo(sx + w * 0.5, yy - 1.6 * z, sx + w, yy + 0.4 * z);
                     ctx.stroke();
                 }
-                // Surf where the water meets land: a wobbling line of foam
-                // that breathes, not a rectangle glued to the tile edge.
+                // Glints: short sparks that wink in and out on the crests.
+                if (glintA > 0.02) {
+                    for (let g = 0; g < WATER.glintRows; g++) {
+                        const ph = t * WATER.glintSpeed + wx * 0.21 + wy * 0.37 + g * 2.3;
+                        const tw = Math.sin(ph);
+                        if (tw < 0.55) continue;
+                        const gx = s.x + (0.2 + frac(Math.sin(tx * 3.7 + ty * 9.1 + g) * 1731.3) * 0.6) * S;
+                        const gy = s.y + (0.2 + frac(Math.sin(tx * 8.3 + ty * 2.9 + g) * 917.7) * 0.6) * S
+                                 + Math.sin(ph * 0.7) * 1.5 * z;
+                        ctx.fillStyle = `rgba(${glintCol},${(glintA * (tw - 0.55) / 0.45).toFixed(3)})`;
+                        ctx.fillRect(gx, gy, WATER.glintSize * z, Math.max(1, 0.8 * z));
+                    }
+                }
+                // The bank reflects the sky: a pale band hugging the shore on
+                // the near side of land that sits above this tile.
+                const above = TILES[zone.map.get(tx, ty - 1)];
+                if (above && !above.liquid) {
+                    const steps = WATER.skyBandSteps;
+                    for (let i = 0; i < steps; i++) {
+                        const a = WATER.skyBandA * daylight * (1 - i / steps);
+                        ctx.fillStyle = `rgba(214,232,246,${a.toFixed(3)})`;
+                        ctx.fillRect(s.x, s.y + (i / steps) * S * WATER.skyBandH,
+                                     S, S * WATER.skyBandH / steps + 1);
+                    }
+                }
+                // Surf. The foam follows the shoreline and rounds off inner
+                // corners instead of stopping dead at the tile border.
                 const neighbours = [[0, -1], [0, 1], [-1, 0], [1, 0]];
                 for (const [dx, dy] of neighbours) {
                     const n = zone.map.get(tx + dx, ty + dy);
                     const ni = TILES[n];
                     if (!ni || ni.liquid) continue;
-                    const pulse = 0.22 + 0.16 * Math.sin(t * 1.6 + tx * 0.8 + ty * 0.5);
-                    ctx.strokeStyle = `rgba(255,255,255,${pulse})`;
+                    // Every stretch of shore breathes at its own rate, so the
+                    // waterline never reads as a drawn rectangle.
+                    const seed = frac(Math.sin(tx * 41.3 + ty * 17.7) * 3571.9);
+                    const pulse = WATER.foamBase + WATER.foamPulse
+                        * Math.sin(t * WATER.foamSpeed * (0.7 + seed * 0.6) + tx * 0.8 + ty * 0.5);
+                    const amp = WATER.foamWobble * (0.6 + seed * 0.8);
+                    ctx.strokeStyle = `rgba(255,255,255,${pulse.toFixed(3)})`;
                     ctx.lineWidth = Math.max(1, 1.6 * z);
                     ctx.beginPath();
-                    const seg = 6;
+                    const seg = WATER.foamSeg;
                     for (let i = 0; i <= seg; i++) {
                         const f = i / seg;
-                        const wob = (Math.sin(t * 1.3 + (tx + f) * 3.1 + ty * 2.3) * 0.5 + 0.5) * 3.2 * z;
+                        // World-space wobble: the line continues into the next
+                        // tile instead of restarting at the seam.
+                        const u = dy ? tx + f : ty + f, v = dy ? ty : tx;
+                        const wob = (Math.sin(t * 1.3 + u * 3.1 + v * 2.3) * 0.34
+                                   + Math.sin(t * 0.7 + u * 7.9 + v * 1.1) * 0.16 + 0.5) * amp * z;
                         let X, Y;
                         if (dy < 0) { X = s.x + f * S; Y = s.y + 1.5 * z + wob; }
                         else if (dy > 0) { X = s.x + f * S; Y = s.y + S - 1.5 * z - wob; }
@@ -175,6 +294,20 @@ export class Renderer {
                         if (i) ctx.lineTo(X, Y); else ctx.moveTo(X, Y);
                     }
                     ctx.stroke();
+                    // Spray: a few specks thrown past the line of foam.
+                    ctx.fillStyle = `rgba(255,255,255,${WATER.foamFleckA})`;
+                    for (let i = 0; i < WATER.foamFlecks; i++) {
+                        const f = frac(seed * 7 + i * 0.37);
+                        const life = frac(t * 0.9 + seed * 5 + i * 0.41);
+                        if (life > 0.5) continue;
+                        const push = (1.5 + life * 5) * z;
+                        let X, Y;
+                        if (dy < 0) { X = s.x + f * S; Y = s.y + push; }
+                        else if (dy > 0) { X = s.x + f * S; Y = s.y + S - push; }
+                        else if (dx < 0) { X = s.x + push; Y = s.y + f * S; }
+                        else { X = s.x + S - push; Y = s.y + f * S; }
+                        ctx.fillRect(X, Y, Math.max(1, z), Math.max(1, z));
+                    }
                 }
             }
         }
@@ -346,37 +479,107 @@ export class Renderer {
         return this;
     }
 
-    /** Screen-space weather. */
-    drawWeather(weather, dt) {
+    /**
+     * Weather, in screen space but anchored to the world: every layer is
+     * offset by the camera times its own parallax, so rain does not slide
+     * sideways when the hero walks. Pools are built in the constructor;
+     * this draws from them and allocates nothing.
+     */
+    drawWeather(weather, dt, windAngle = 0) {
         const ctx = this.ctx;
         const W = this.canvas.width, H = this.canvas.height;
+        const cam = this.camera;
+        const t = this.time;
+        const wind = Math.cos(windAngle);        // -1 … 1, from the west or east
+
         if (weather === "rain" || weather === "storm") {
+            const storm = weather === "storm";
+            const boost = storm ? SKY.stormBoost : 1;
+            const slant = (SKY.rainSlant + (storm ? 0.16 : 0)) * (0.4 + wind * 0.6);
             ctx.save();
-            ctx.strokeStyle = weather === "storm" ? "rgba(170,195,225,0.5)" : "rgba(170,195,225,0.35)";
-            ctx.lineWidth = 1;
-            const n = weather === "storm" ? 220 : 140;
-            for (let i = 0; i < n; i++) {
-                const x = (i * 97 + this.time * 420) % W;
-                const y = (i * 131 + this.time * 900) % H;
+            ctx.lineCap = "round";
+            for (let l = 0; l < SKY.layers; l++) {
+                const pool = this._sky[l];
+                const n = Math.round(SKY.rainPerLayer[l] * boost);
+                const par = 0.25 + l * 0.18;                 // far layers lag behind
+                const len = SKY.rainLen[l] * (storm ? 1.25 : 1);
+                const sp = SKY.rainSpeed[l] * (storm ? 1.2 : 1);
+                ctx.strokeStyle = `rgba(178,202,230,${SKY.rainA[l] * (storm ? 1.15 : 1)})`;
+                ctx.lineWidth = SKY.rainW[l];
                 ctx.beginPath();
-                ctx.moveTo(x, y);
-                ctx.lineTo(x - 3, y + 12);
+                for (let i = 0; i < n; i++) {
+                    const px = pool[i * 3], py = pool[i * 3 + 1], ph = pool[i * 3 + 2];
+                    const y = mod(py * H + t * sp, H + len) - len;
+                    const x = mod(px * W - cam.x * par + y * slant + ph * 13, W);
+                    ctx.moveTo(x, y);
+                    ctx.lineTo(x - len * slant, y + len);
+                }
                 ctx.stroke();
+            }
+            // Splashes: the rain actually lands somewhere.
+            ctx.strokeStyle = `rgba(214,232,246,${SKY.splashA})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            const pool0 = this._sky[0];
+            for (let i = 0; i < SKY.splashes; i++) {
+                const ph = pool0[i * 3 + 2];
+                const life = frac(t * 2.2 + ph * 7);
+                if (life > 0.45) continue;
+                const r = 1 + life * 5;
+                const x = mod(pool0[i * 3] * W - cam.x * 0.4 + ph * 211, W);
+                const y = mod(pool0[i * 3 + 1] * H + Math.floor(t * 2.2 + ph * 7) * 137, H);
+                ctx.moveTo(x - r, y); ctx.lineTo(x + r, y);
+            }
+            ctx.stroke();
+            // Lightning: a short wash over the whole frame, then darkness.
+            if (storm) {
+                const since = frac(t / SKY.lightningEvery) * SKY.lightningEvery;
+                if (since < 0.22) {
+                    const k = (1 - since / 0.22) * (since < 0.07 ? 1 : 0.5);
+                    ctx.fillStyle = `rgba(226,238,255,${(SKY.lightningA * k).toFixed(3)})`;
+                    ctx.fillRect(0, 0, W, H);
+                }
             }
             ctx.restore();
         } else if (weather === "snow") {
             ctx.save();
-            ctx.fillStyle = "rgba(255,255,255,0.75)";
-            for (let i = 0; i < 120; i++) {
-                const x = (i * 83 + Math.sin(this.time * 0.6 + i) * 30 + this.time * 20) % W;
-                const y = (i * 61 + this.time * 60) % H;
-                ctx.fillRect(x, y, 2, 2);
+            for (let l = 0; l < SKY.layers; l++) {
+                const pool = this._sky[l];
+                const n = SKY.snowPerLayer[l];
+                const par = 0.2 + l * 0.16;
+                const size = SKY.snowSize[l];
+                ctx.fillStyle = `rgba(255,255,255,${SKY.snowA[l]})`;
+                for (let i = 0; i < n; i++) {
+                    const px = pool[i * 3], py = pool[i * 3 + 1], ph = pool[i * 3 + 2];
+                    const y = mod(py * H + t * SKY.snowSpeed[l], H + size) - size;
+                    const sway = Math.sin(t * (0.5 + ph) + ph * 11) * SKY.snowSway[l];
+                    const x = mod(px * W - cam.x * par + sway + wind * t * 14 + ph * 29, W);
+                    ctx.fillRect(x, y, size, size);
+                }
             }
             ctx.restore();
         } else if (weather === "fog") {
+            // Fog lies in the hollows: thick along the bottom of the frame,
+            // thin at the top, in slow bands rather than one flat veil.
             ctx.save();
-            ctx.fillStyle = "rgba(190,195,200,0.18)";
-            ctx.fillRect(0, 0, W, H);
+            for (let b = 0; b < SKY.fogBands; b++) {
+                const f = b / (SKY.fogBands - 1);
+                const bandY = H * (0.18 + f * 0.9);
+                const bandH = H * (0.26 + f * 0.2);
+                const depth = SKY.fogTop + (1 - SKY.fogTop) * f;
+                const drift = mod(-cam.x * (0.1 + f * 0.2) + t * SKY.fogSpeed * (0.4 + f), W * 2) - W * 0.5;
+                ctx.fillStyle = `rgba(198,204,208,${(SKY.fogA * depth).toFixed(3)})`;
+                ctx.beginPath();
+                ctx.moveTo(-W * 0.5, bandY + bandH);
+                for (let i = 0; i <= 8; i++) {
+                    const x = -W * 0.5 + (i / 8) * W * 2;
+                    const y = bandY + Math.sin((x + drift) * 0.004 + b * 1.7) * bandH * 0.3
+                            + Math.sin((x + drift) * 0.011 + b) * bandH * 0.12;
+                    ctx.lineTo(x, y);
+                }
+                ctx.lineTo(W * 1.5, bandY + bandH);
+                ctx.closePath(); ctx.fill();
+            }
             ctx.restore();
         }
         return this;
@@ -465,7 +668,9 @@ export class Renderer {
         // light map re-uses the same list afterwards in screen space.
         this._collectLights(state);
         this.drawGround(state.zone);
-        this.drawWater(state.zone);
+        this.drawWater(state.zone,
+                       state.clock ? state.clock.daylight : 1,
+                       state.clock ? state.clock.minute / 60 : 12);
         this.drawObjects(state, dt);
         if (state.particles) state.particles.draw(ctx, this.camera);
         if (state.player.sleeping) {
@@ -477,7 +682,7 @@ export class Renderer {
             ctx.restore();
         }
         this.drawInteractHint(state.interact && state.interact.target, state.interact && state.interact.label);
-        this.drawWeather(state.weather, dt);
+        this.drawWeather(state.weather, dt, state.windAngle || 0);
 
         // --- lights ---------------------------------------------------------
         // The very list the shadows were thrown from, now in screen space.
@@ -508,6 +713,10 @@ export class Renderer {
         return this;
     }
 }
+
+function frac(v) { return v - Math.floor(v); }
+
+function mod(v, m) { const r = v % m; return r < 0 ? r + m : r; }
 
 function roundRect(ctx, x, y, w, h, r) {
     ctx.beginPath();

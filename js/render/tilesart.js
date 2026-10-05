@@ -727,6 +727,23 @@ export function paintEdges(ctx, map, tx, ty, px, py, size) {
                 if (side === "e") ctx.fillRect(px + size - d, py + off, d, len);
             });
         } else if (hi.liquid && !oi.liquid) {
+            // Tongues of the bank poking into the water. Without them the
+            // waterline stays exactly where the tile grid put it, and a pond
+            // reads as a swimming pool however nice the foam is.
+            band((i) => (wobble(i, 37) - 0.95) * 15, (off, len, d) => {
+                ctx.fillStyle = oi.colors[0];
+                if (side === "n") ctx.fillRect(px + off, py, len, d);
+                if (side === "s") ctx.fillRect(px + off, py + size - d, len, d);
+                if (side === "w") ctx.fillRect(px, py + off, d, len);
+                if (side === "e") ctx.fillRect(px + size - d, py + off, d, len);
+            });
+            band((i) => (wobble(i, 37) - 1.25) * 13, (off, len, d) => {
+                ctx.fillStyle = oi.colors[1];                     // their dry crest
+                if (side === "n") ctx.fillRect(px + off, py, len, d);
+                if (side === "s") ctx.fillRect(px + off, py + size - d, len, d);
+                if (side === "w") ctx.fillRect(px, py + off, d, len);
+                if (side === "e") ctx.fillRect(px + size - d, py + off, d, len);
+            });
             band((i) => wobble(i, 17) * 9, (off, len, d) => {
                 ctx.fillStyle = "rgba(190,215,205,0.3)";          // sunlit shallows
                 if (side === "n") ctx.fillRect(px + off, py, len, d);

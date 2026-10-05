@@ -217,6 +217,47 @@ const scenes = [
             g.enterZone("shore", null, true);
             g.clock.minute = 16 * 60;
         }
+    },
+    {
+        name: "19-shore-closeup",
+        about: "Вода крупно: волна, блики, пена на углах",
+        setup(g) {
+            g.enterZone("shore", null, true);
+            g.clock.minute = 17 * 60;
+            g.camera.zoom = 4;
+            g.camera.snapTo(g.player.x, g.player.y - 20);
+        }
+    },
+    {
+        name: "20-rain-storm",
+        about: "Гроза: три слоя дождя, всплески, вспышка",
+        setup(g) {
+            g.enterZone("meadow", null, true);
+            g.clock.minute = 15 * 60;
+            g.weather.current = "storm";
+            g.weather.windAngle = 0.4;
+            g.renderer.time = 0.04;          // inside a lightning flash
+        }
+    },
+    {
+        name: "21-fog-morning",
+        about: "Туман лежит в низинах, а не висит вуалью",
+        setup(g) {
+            g.enterZone("swamp", null, true);
+            g.clock.minute = 7 * 60;
+            g.weather.current = "fog";
+        }
+    },
+    {
+        name: "22-snow-winter",
+        about: "Снег тремя слоями с ветром",
+        setup(g) {
+            g.enterZone("forest", null, true);
+            g.clock.minute = 11 * 60;
+            g.clock.day = 280;
+            g.weather.current = "snow";
+            g.weather.windAngle = 2.6;
+        }
     }
 ];
 

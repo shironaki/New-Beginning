@@ -678,6 +678,7 @@ export class Game {
             player: this.player,
             clock: this.clock,
             weather: this.weather.current,
+            windAngle: this.weather.windAngle,
             particles: this.particles,
             fires: this.localFires,
             look: this.look,
