@@ -543,4 +543,34 @@ test("you cannot walk on water", () => {
 });
 
 
+test("a foot plant fires exactly once per half cycle", () => {
+    // The dust puff hangs off this flag, so it must match the legs: one event
+    // per contact, alternating feet, none while standing still.
+    const z = generateZone("meadow", 4);
+    const p = new Player({ x: z.spawn.x, y: z.spawn.y });
+    let events = 0, lastSide = 0, flips = 0;
+    const startPhaseSteps = () => { };
+    startPhaseSteps();
+    let dist = 0;
+    for (let i = 0; i < 600; i++) {
+        const x0 = p.x, y0 = p.y;
+        p.update(1 / 60, { x: 1, y: 0 }, z, {});
+        dist += Math.hypot(p.x - x0, p.y - y0);
+        if (p.stepEvent) {
+            p.stepEvent = false;
+            events++;
+            if (lastSide && p.stepSide !== lastSide) flips++;
+            lastSide = p.stepSide;
+        }
+    }
+    // One contact per half stride of ground actually covered.
+    const expected = dist / (GAIT.strideWalk / 2);
+    assert.near(events, expected, Math.max(2, expected * 0.15), `${events} steps for ${dist | 0}px`);
+    assert.gte(flips, events - 2, "the feet must alternate");
+
+    const before = p.steps;
+    for (let i = 0; i < 120; i++) p.update(1 / 60, { x: 0, y: 0 }, z, {});
+    assert.eq(p.steps, before, "standing still must not plant feet");
+});
+
 run("v3 survival");

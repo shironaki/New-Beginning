@@ -23,7 +23,11 @@ export class Player {
         this.maxStamina = 100;
         this.bus = bus;
         // --- locomotion state (simulation side, fixed step => FPS independent)
-        this.anim = 0;           // walk cycle phase, radians (alias: `phase`)
+        this.anim = 0;
+        this.stepEvent = false;     // a foot just planted
+        this.stepSide = 1;          // 1 = right foot, -1 = left
+        this.steps = 0;             // total foot plants this session
+        // walk cycle phase lives in `anim`, radians
         this.dist = 0;           // metres of ground actually covered
         this.gait = 0;           // 0 standing .. 1 full stride, blended
         this.runBlend = 0;       // 0 walking .. 1 running, blended
@@ -123,7 +127,18 @@ export class Player {
         const stride = GAIT.strideWalk + (GAIT.strideRun - GAIT.strideWalk) * this.runBlend;
         const step = (moved / stride) * Math.PI * 2;
         const cap = GAIT.cadenceCap * Math.PI * 2 * dt;      // no sewing machine
-        this.anim = (this.anim + Math.min(step, cap)) % (Math.PI * 2);
+        const adv = Math.min(step, cap);
+        // A foot plants every half cycle (phase crosses k·π). Raise a flag the
+        // renderer's owner can turn into dust and a sound, so the effect is
+        // driven by the legs themselves and can never drift from them.
+        const before = this.anim;
+        const after = before + adv;
+        if (adv > 0 && Math.floor(after / Math.PI) > Math.floor(before / Math.PI)) {
+            this.stepEvent = true;
+            this.stepSide = Math.floor(after / Math.PI) % 2 === 0 ? 1 : -1;
+            this.steps++;
+        }
+        this.anim = after % (Math.PI * 2);
         return this;
     }
 

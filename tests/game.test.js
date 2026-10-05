@@ -91,6 +91,50 @@ test("the camera follows and stays inside the zone", () => {
     assert.lte(g.camera.x + g.camera.viewW, g.zone.map.widthPx + 1);
 });
 
+test("a lost keyup never leaves the hero walking by himself", () => {
+    // Reported from play: a click while walking (focus leaves the frame) and
+    // the hero kept going on his own, fighting every other direction.
+    const g = boot();
+    key(dom.win, "KeyW", true);
+    for (let i = 0; i < 60; i++) {
+        if (i % 4 === 0) key(dom.win, "KeyW", true, true);   // the OS auto-repeat
+        g.update(1 / 60);
+    }
+    assert.ok(g.input.pressed("up"), "the key is genuinely held here");
+    // ...and now the keyup is swallowed: no more events of any kind.
+    for (let i = 0; i < 40; i++) g.update(1 / 60);           // inside the grace window
+    assert.ok(g.input.pressed("up"), "must not cut a real hold short");
+    for (let i = 0; i < 60; i++) g.update(1 / 60);           // past it
+    assert.not(g.input.pressed("up"), "the ghost key should have been released");
+    const y = g.player.y;
+    for (let i = 0; i < 60; i++) g.update(1 / 60);
+    assert.near(g.player.y, y, 0.01, "the hero kept walking on his own");
+});
+
+test("losing focus drops every held key", () => {
+    const g = boot();
+    key(dom.win, "KeyD", true);
+    g.update(1 / 60);
+    assert.ok(g.input.pressed("right"));
+    dom.win.dispatch("blur", {});
+    g.update(1 / 60);
+    assert.not(g.input.pressed("right"), "a blurred window cannot hold a key");
+    const x = g.player.x;
+    for (let i = 0; i < 30; i++) g.update(1 / 60);
+    assert.near(g.player.x, x, 0.01);
+});
+
+test("a key with no auto-repeat is never cut off", () => {
+    // Some setups have key repeat disabled; the watchdog must stay disarmed.
+    const g = boot();
+    key(dom.win, "KeyS", true);
+    for (let i = 0; i < 300; i++) g.update(1 / 60);          // five seconds
+    assert.ok(g.input.pressed("down"), "a held key was dropped without cause");
+    key(dom.win, "KeyS", false);
+    g.update(1 / 60);
+    assert.not(g.input.pressed("down"));
+});
+
 test("number keys switch the hotbar slot", () => {
     const g = boot();
     key(dom.win, "Digit2", true);

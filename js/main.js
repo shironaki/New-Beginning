@@ -15,7 +15,7 @@ import { Camera } from "./engine/camera.js";
 import { WorldMap } from "./world/worldgen.js";
 import { WeatherSystem } from "./world/weather.js";
 import { START_ZONE, biomeDef, oppositeEdge } from "./world/regions.js";
-import { TILE_SIZE } from "./world/tiles.js";
+import { TILE_SIZE, tileInfo } from "./world/tiles.js";
 import { bodyBlocked } from "./world/tilemap.js";
 import { Player } from "./entities/player.js";
 import { Inventory } from "./sandbox/inventory.js";
@@ -29,6 +29,16 @@ import { Renderer } from "./render/renderer.js";
 import { Particles } from "./render/particles.js";
 import { StoryEngine } from "./story/acts.js";
 import { HUD, fireRows } from "./ui/hud.js";
+
+/** Dust takes the ground's own mid tone, so sand puffs pale and loam dark. */
+function dustColor(def) {
+    const hex = (def.colors && def.colors[1]) || "#b0a38c";
+    const n = parseInt(hex.slice(1), 16);
+    const r = Math.min(255, ((n >> 16) & 255) + 18);
+    const g = Math.min(255, ((n >> 8) & 255) + 16);
+    const b = Math.min(255, (n & 255) + 14);
+    return `rgba(${r},${g},${b},0.5)`;
+}
 
 export class Game {
     constructor({ canvas, hudRoot, seed = Date.now() & 0xffff } = {}) {
@@ -154,6 +164,10 @@ export class Game {
                 if (t.identifier === id) { id = null; this.input.setStick(0, 0); }
             }
         };
+        // A native drag or a context menu steals the key release that ends a
+        // step; neither does anything useful over the game surface.
+        canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+        canvas.addEventListener("dragstart", (e) => e.preventDefault());
         canvas.addEventListener("touchstart", start, { passive: true });
         canvas.addEventListener("touchmove", move, { passive: false });
         canvas.addEventListener("touchend", end, { passive: true });
@@ -568,7 +582,10 @@ export class Game {
         const minutes = uiBlocking ? 0 : this.clock.update(dt);
         if (minutes > 0) this.simulateMinutes(minutes);
 
-        // Input → movement.
+        // Input → movement. The sanity pass runs first: a key whose `keyup`
+        // never arrived (focus lost to a click outside the frame) is dropped
+        // here instead of walking the hero away on its own.
+        this.input.update(dt);
         const axis = uiBlocking ? { x: 0, y: 0 } : this.input.axis();
         this.player.update(dt, axis, this.zone, {
             speedFactor: this.needs.speedFactor(),
@@ -579,6 +596,20 @@ export class Game {
         // of letting the game wedge.
         if (!this.player.sleeping && !this.fitsAt(this.player.x, this.player.y)) {
             this.placeSafely(this.player.x, this.player.y);
+        }
+
+        // A foot planted: kick up dust the colour of the ground it landed on.
+        // Driven by the leg phase, so the puff is always under the boot.
+        if (this.player.stepEvent) {
+            this.player.stepEvent = false;
+            this.bus.emit("player:footstep", { side: this.player.stepSide });
+            const info = this.zone.map.get(
+                Math.floor(this.player.x / TILE_SIZE), Math.floor(this.player.y / TILE_SIZE));
+            const def = tileInfo(info);
+            if (!def.liquid) {
+                this.particles.dust(this.player.x + this.player.stepSide * 2.5, this.player.y + 3,
+                    this.player.running ? 3 : 2, dustColor(def));
+            }
         }
 
         // Hotbar keys.

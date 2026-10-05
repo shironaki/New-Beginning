@@ -166,6 +166,6 @@ export function installDOM() {
 }
 
 /** Send a keyboard event the way Input expects it. */
-export function key(win, code, down = true) {
-    win.dispatch(down ? "keydown" : "keyup", { code, preventDefault() {} });
+export function key(win, code, down = true, repeat = false) {
+    win.dispatch(down ? "keydown" : "keyup", { code, repeat, preventDefault() {} });
 }
