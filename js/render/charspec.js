@@ -172,6 +172,13 @@ export const GAIT = {
     clothLagPhase: 0.5,      // rad the belt flap trails the pelvis
     heelStrike: 0.6,         // extra dip on contact — this is where weight lives
 
+    // Diagonals. There is no separate three-quarter pose; the side view is
+    // used (it is the only one with a readable stride) and the body is
+    // narrowed slightly, as a figure turning towards or away from the camera
+    // would be. 10 % is enough to read, little enough to never look squashed.
+    slantNarrow: 0.10,       // x scale lost at a full 45° diagonal
+    slantHead: 0.6,          // u the head shifts along the travel direction
+
     breathAmp: 0.35,         // idle
     breathHz: 0.28,
     blinkEvery: 4.1,

@@ -289,26 +289,102 @@ test("a small prop cannot slip between the body probes", () => {
     }
 });
 
+/** The exact round-obstacle test a Zone hands to the mover. */
+function contactFn(props) {
+    return (px, py, r) => {
+        let best = null;
+        for (const p of props) {
+            const dx = px - p.x, dy = py - p.y, sum = p.block + r;
+            const d2 = dx * dx + dy * dy;
+            if (d2 > sum * sum) continue;
+            const d = Math.sqrt(d2) || 1e-4;
+            const depth = sum - d;
+            if (!best || depth > best.depth) best = { nx: dx / d, ny: dy / d, r: p.block, depth };
+        }
+        return best;
+    };
+}
+
 test("walking straight at a trunk slips round it without a second key", () => {
     // The gap exists (previous test), but the player used to stop dead when
     // they clipped the edge of a trunk head-on and had to steer by hand.
     const map = new TileMap(12, 12, "slip");
     for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) map.set(x, y, T.GRASS);
-    const trunk = { x: 6 * 32 + 16, y: 4 * 32 + 16, r: 5 };
-    const extra = (wx, wy) => {
-        const dx = wx - trunk.x, dy = wy - trunk.y;
-        return dx * dx + dy * dy <= trunk.r * trunk.r;
-    };
+    const trunk = { x: 6 * 32 + 16, y: 4 * 32 + 16, block: 5 };
+    const extra = contactFn([trunk]);
     // Start a little off the trunk's axis and walk straight up: no sideways input.
     let x = trunk.x + 6, y = trunk.y + 60, stuck = 0;
     for (let i = 0; i < 70; i++) {
         const before = y;
-        const res = moveAndCollide(map, x, y, 0, -68 / 60, 9, extra);
+        const res = moveAndCollide(map, x, y, 0, -68 / 60, 9, null, extra);
         x = res.x; y = res.y;
         if (before - y < 0.2) stuck++;
     }
     assert.lte(stuck, 4, "straight-on walk should not stall against a round trunk");
     assert.lt(y, trunk.y - 10, "player ends up past the trunk");
+});
+
+test("you can walk past a trunk from any angle, including diagonals", () => {
+    // Reported from play: standing against a burnt stump blocked movement,
+    // squeezing between a stump and a rock stuttered, and holding W+A against
+    // anything stopped the hero dead.
+    const map = new TileMap(20, 20, "angles");
+    for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) map.set(x, y, T.GRASS);
+    const props = [{ x: 10 * 32, y: 8 * 32, block: 4.7 },      // burnt stump
+                   { x: 11 * 32, y: 8 * 32, block: 6.5 }];     // rock, one tile away
+    const body = contactFn(props);
+
+    const run = (sx, sy, ax, ay, steps = 90) => {
+        let x = sx, y = sy, stalls = 0;
+        for (let i = 0; i < steps; i++) {
+            const bx = x, by = y;
+            const res = moveAndCollide(map, x, y, ax * 68 / 60, ay * 68 / 60, 9, null, body);
+            x = res.x; y = res.y;
+            if (Math.hypot(x - bx, y - by) < 0.3) stalls++;
+        }
+        return { x, y, stalls };
+    };
+    const P = props[0], D = Math.SQRT1_2;
+    const cases = [
+        ["head-on", P.x, P.y + 40, 0, -1, 10],
+        ["just off centre", P.x + 1, P.y + 40, 0, -1, 10],
+        ["into the gap", P.x + 16, P.y + 40, 0, -1, 4],
+        // Squeezing diagonally through a 2.8 px corridor is allowed to cost a
+        // few frames of shuffling; it must still come out the other side.
+        ["diagonal into the gap", P.x + 4, P.y + 40, D, -D, 24],
+        ["diagonal at the trunk", P.x - 30, P.y + 30, D, -D, 10],
+        ["diagonal along it", P.x - 40, P.y + 10, D, -D, 4]
+    ];
+    for (const [name, sx, sy, ax, ay, budget] of cases) {
+        const r = run(sx, sy, ax, ay);
+        assert.lte(r.stalls, budget, `${name}: stuck for ${r.stalls} of 90 frames`);
+        assert.gt(Math.hypot(r.x - sx, r.y - sy), 30, `${name}: went nowhere`);
+    }
+});
+
+test("standing flush against a prop you can still leave in every direction", () => {
+    const map = new TileMap(20, 20, "flush");
+    for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) map.set(x, y, T.GRASS);
+    const P = { x: 10 * 32, y: 8 * 32, block: 4.7 };
+    const body = contactFn([P]);
+    const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0], [0.7071, 0.7071], [-0.7071, 0.7071],
+                  [0.7071, -0.7071], [-0.7071, -0.7071]];
+    for (const [ax, ay] of dirs) {
+        // Press up against the prop from below first, then try to leave.
+        let x = P.x, y = P.y + P.block + 9 + 0.2;
+        for (let i = 0; i < 10; i++) {
+            const res = moveAndCollide(map, x, y, 0, -68 / 60, 9, null, body);
+            x = res.x; y = res.y;
+        }
+        const sx = x, sy = y;
+        for (let i = 0; i < 30; i++) {
+            const res = moveAndCollide(map, x, y, ax * 68 / 60, ay * 68 / 60, 9, null, body);
+            x = res.x; y = res.y;
+        }
+        // Four frames' worth of travel is enough to prove it is not wedged;
+        // pushing diagonally into the side of a trunk is meant to be slow.
+        assert.gt(Math.hypot(x - sx, y - sy), 4, `pressed against a prop, [${ax},${ay}] went nowhere`);
+    }
 });
 
 test("corner assist never pushes the player into a solid wall", () => {

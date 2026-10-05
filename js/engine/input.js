@@ -69,6 +69,11 @@ export class Input {
             const actions = this.codeToActions.get(e.code);
             if (!actions) return;
             if (down) {
+                // The OS repeats only the LAST key pressed. So pressing a
+                // second key (W then A for a diagonal) stops the repeats of
+                // the first one — disarm everything else, or the watchdog
+                // would "helpfully" drop the key the player is still holding.
+                for (const [code, h] of this._held) if (code !== e.code) h.armed = false;
                 const h = this._held.get(e.code);
                 if (h) { h.seen = this.time; if (e.repeat) h.armed = true; }
                 else this._held.set(e.code, { seen: this.time, armed: !INPUT_GUARD.armOnRepeat });

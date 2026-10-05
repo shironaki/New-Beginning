@@ -135,77 +135,152 @@ export class TileMap {
  * (a stump, block 3.6) fits entirely between rim probes, and without them the
  * hero walks into it and stands inside it.
  */
-const D = 0.70710678, M = 0.5, MD = 0.46194, MX = 0.19134;
-export const BODY_PROBES = [
-    [0, 0],
-    [1, 0], [-1, 0], [0, 1], [0, -1],
-    [D, D], [D, -D], [-D, D], [-D, -D],
-    [M, 0], [-M, 0], [0, M], [0, -M],
-    [MD, MX], [MD, -MX], [-MD, MX], [-MD, -MX],
-    [MX, MD], [MX, -MD], [-MX, MD], [-MX, -MD]
-];
+function ring(count, radius, offset = 0) {
+    const out = [];
+    for (let i = 0; i < count; i++) {
+        const a = offset + (i / count) * Math.PI * 2;
+        out.push([Math.cos(a) * radius, Math.sin(a) * radius]);
+    }
+    return out;
+}
 
-/** Is the body of `radius` centred on (px, py) overlapping anything solid? */
-export function bodyBlocked(solid, px, py, radius) {
+/**
+ * Centre + an inner ring + a dense rim.
+ *
+ * The spacing is derived, not guessed. The smallest prop that blocks is a
+ * stump at `block 3.6 * size 0.85 = 3.06`. Two conditions must hold:
+ *
+ *   - a prop that small must not fit *between* the rings: the radial gap is
+ *     `radius/2 = 4.5` and the inner chord `3.44`, both under its diameter;
+ *   - a prop touching the body from outside must be caught before it bites
+ *     more than ~0.5 px: with 16 rim probes (every 22.5°) detection starts at
+ *     centre distance 13.2 against the ideal 13.7 for a 4.7-wide trunk.
+ *
+ * Eight rim probes — the old set — left a 1.9 px bite, which is exactly how
+ * the hero ended up welded to the side of a stump.
+ */
+export const BODY_PROBES = [[0, 0], ...ring(8, 0.5), ...ring(16, 1)];
+
+/**
+ * Is the body of `radius` centred on (px, py) overlapping anything solid?
+ *
+ * Tiles are sampled with the probe set (they are big axis-aligned squares, so
+ * points are plenty). Round props are handed to `bodyExtra`, which tests them
+ * exactly — see `Zone.propBlocksBody`.
+ */
+export function bodyBlocked(solid, px, py, radius, bodyExtra = null) {
+    if (bodyExtra && bodyExtra(px, py, radius)) return true;
     for (const [ox, oy] of BODY_PROBES) {
         if (solid(px + ox * radius, py + oy * radius)) return true;
     }
     return false;
 }
 
-export function moveAndCollide(map, x, y, dx, dy, radius = 9, extraSolid = null) {
+/**
+ * Estimate the surface normal the body is pressed against from the probes
+ * that are inside something. Used for tiles, where the surface is flat and a
+ * probe estimate is exact enough; round props report their normal themselves.
+ */
+export function contactNormal(solid, px, py, radius) {
+    let nx = 0, ny = 0, hits = 0;
+    for (const [ox, oy] of BODY_PROBES) {
+        if (ox === 0 && oy === 0) continue;
+        if (solid(px + ox * radius, py + oy * radius)) { nx -= ox; ny -= oy; hits++; }
+    }
+    if (!hits) return null;
+    const len = Math.hypot(nx, ny);
+    if (len < 1e-6) return null;
+    return [nx / len, ny / len];
+}
+
+/**
+ * Move a body of `radius` by (dx, dy), resolving collisions.
+ *
+ *   1. the move as asked, as one vector, so a diagonal stays a diagonal;
+ *   2. split into X and Y, so a surface only eats the component going into it;
+ *   3. a slide ALONG what was hit: the remaining step minus its component into
+ *      the contact normal. Against a flat wall that tangent is zero when you
+ *      walk straight at it (no creeping sideways along walls) and full speed
+ *      when you walk into it at an angle. Around a tree trunk it is what
+ *      carries you past without touching a second key;
+ *   4. if the body walked into something NARROW dead centre — a trunk, a
+ *      stump, a rock — the tangent is zero by symmetry, so it steps round the
+ *      side that is actually open.
+ *
+ * Each attempt binary-searches the largest fraction of the step that fits
+ * (4 iterations). Without it the body stops a whole frame short of what it
+ * touches, which reads as a stutter in tight gaps and makes "stand right next
+ * to it" impossible.
+ *
+ * @param {function(number,number,number):?object} bodyContact
+ *        exact round-obstacle test: returns `{nx, ny, r, depth}` or null
+ */
+export function moveAndCollide(map, x, y, dx, dy, radius = 9, extraSolid = null, bodyContact = null) {
     const solid = (wx, wy) => {
         if (map.solidAt(wx, wy)) return true;
         return extraSolid ? extraSolid(wx, wy) : false;
     };
-    const blockedAt = (px, py) => bodyBlocked(solid, px, py, radius);
-
-    let nx = x, ny = y, hitX = false, hitY = false;
-    if (dx !== 0) {
-        const tx = nx + dx;
-        if (!blockedAt(tx, ny)) nx = tx; else hitX = true;
-    }
-    if (dy !== 0) {
-        const ty = ny + dy;
-        if (!blockedAt(nx, ty)) ny = ty; else hitY = true;
-    }
-
-    // Corner assist. Walking straight at a tree trunk or into the edge of a
-    // gap used to stop you dead until you pressed a second direction by hand.
-    // When the way forward is blocked and the player is NOT steering sideways,
-    // look for clearance a little to either side and slip round the obstacle.
-    // The sideways step is proportional to the frame's own movement, so the
-    // result is identical at 30, 60 and 120 FPS, and it only fires when the
-    // forward step genuinely becomes possible — it can never push you into
-    // geometry or move you when there is a real wall ahead.
-    const slip = (horizontal) => {
-        const along = horizontal ? dx : dy;
-        const step = Math.abs(along) * 0.85;         // gentle: never outruns the player
-        const far = radius * 1.6;                    // how far aside we are willing to look
-        const at = (lat, forward) => (horizontal
-            ? blockedAt(nx + (forward ? dx : 0), ny + lat)
-            : blockedAt(nx + lat, ny + (forward ? dy : 0)));
-        // Commit to a side only if the way forward is genuinely open there.
-        // Against a solid wall both probes are blocked and nothing happens.
-        let best = 0;
-        for (const sgn of [1, -1]) {
-            if (at(sgn * far, true) || at(sgn * far, false)) continue;
-            if (!best) best = sgn;
-            else if (!at(sgn * far * 0.5, true)) { best = sgn; break; }
-        }
-        if (!best) return false;
-        if (!at(best * step, true)) {                // forward is already clear aside
-            if (horizontal) { nx += dx; ny += best * step; } else { ny += dy; nx += best * step; }
-            return true;
-        }
-        if (!at(best * step, false)) {               // still shouldering past: slide only
-            if (horizontal) ny += best * step; else nx += best * step;
-            return true;
-        }
-        return false;
+    const blockedAt = (px, py) => {
+        if (bodyContact && bodyContact(px, py, radius)) return true;
+        return bodyBlocked(solid, px, py, radius);
     };
-    if (hitX && dy === 0 && slip(true)) hitX = false;
-    else if (hitY && dx === 0 && slip(false)) hitY = false;
+
+    let nx = x, ny = y;
+    // Where the body last found something solid: the contact has to be read
+    // there, not at the (free) spot it stopped in, or it reads as no contact.
+    let bx = 0, by = 0, touched = false;
+
+    /** Move as far along (ax, ay) as fits; returns the fraction spent. */
+    const advance = (ax, ay) => {
+        if (ax === 0 && ay === 0) return 1;
+        if (!blockedAt(nx + ax, ny + ay)) { nx += ax; ny += ay; return 1; }
+        bx = nx + ax; by = ny + ay; touched = true;
+        let lo = 0, hi = 1;
+        for (let i = 0; i < 4; i++) {
+            const m = (lo + hi) / 2;
+            if (blockedAt(nx + ax * m, ny + ay * m)) { hi = m; bx = nx + ax * m; by = ny + ay * m; }
+            else lo = m;
+        }
+        if (lo > 0.02) { nx += ax * lo; ny += ay * lo; }
+        return lo;
+    };
+
+    let rx = dx, ry = dy;
+    const f0 = advance(rx, ry);
+    rx *= 1 - f0; ry *= 1 - f0;
+
+    if (f0 < 1) {
+        const fx = advance(rx, 0); rx *= 1 - fx;
+        const fy = advance(0, ry); ry *= 1 - fy;
+
+        if ((rx !== 0 || ry !== 0) && touched) {
+            const prop = bodyContact ? bodyContact(bx, by, radius) : null;
+            let n = null, narrow = 0;
+            if (prop) { n = [prop.nx, prop.ny]; narrow = prop.r; }
+            else n = contactNormal(solid, bx, by, radius);
+            if (n) {
+                const left = Math.hypot(rx, ry);
+                const dot = rx * n[0] + ry * n[1];
+                let tx = rx - n[0] * dot, ty = ry - n[1] * dot;
+                if (Math.hypot(tx, ty) < left * 0.15 && narrow > 0 && narrow <= radius * 1.2) {
+                    // Dead centre on something narrow: step round whichever
+                    // side is open instead of standing there pushing at it.
+                    const px = -n[1], py = n[0];
+                    const reach = radius + narrow + 2;
+                    const okA = !blockedAt(nx + px * reach + dx, ny + py * reach + dy);
+                    const okB = !blockedAt(nx - px * reach + dx, ny - py * reach + dy);
+                    const s = okA === okB ? (okA ? 1 : 0) : (okA ? 1 : -1);
+                    if (s) { tx = px * s * left; ty = py * s * left; }
+                }
+                const f = advance(tx, ty);
+                rx -= tx * f; ry -= ty * f;
+            }
+        }
+    }
+
+    const hitX = dx !== 0 && Math.abs(rx) > Math.abs(dx) * 0.05;
+    const hitY = dy !== 0 && Math.abs(ry) > Math.abs(dy) * 0.05;
+
     // Keep inside the zone rectangle.
     nx = Math.max(radius, Math.min(map.widthPx - radius, nx));
     ny = Math.max(radius, Math.min(map.heightPx - radius, ny));

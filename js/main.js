@@ -210,7 +210,11 @@ export class Game {
      */
     fitsAt(x, y, radius = this.player.radius) {
         const zone = this.zone;
-        return !bodyBlocked((wx, wy) => zone.solidAt(wx, wy), x, y, radius);
+        return !bodyBlocked(
+            (wx, wy) => zone.map.solidAt(wx, wy) ||
+                        zone.isBlockedTile(Math.floor(wx / TILE_SIZE), Math.floor(wy / TILE_SIZE)),
+            x, y, radius,
+            (px, py, r) => zone.propBlocksBody(px, py, r));
     }
 
     /**

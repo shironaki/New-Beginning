@@ -24,6 +24,8 @@ export class Player {
         this.bus = bus;
         // --- locomotion state (simulation side, fixed step => FPS independent)
         this.anim = 0;
+        this.faceX = 0; this.faceY = 1;
+        this.slant = 0;             // vertical share of a diagonal, -1..1
         this.stepEvent = false;     // a foot just planted
         this.stepSide = 1;          // 1 = right foot, -1 = left
         this.steps = 0;             // total foot plants this session
@@ -92,14 +94,22 @@ export class Player {
         const dx = axis.x * speed * dt;
         const dy = axis.y * speed * dt;
 
-        if (Math.abs(axis.x) > Math.abs(axis.y)) this.dir = axis.x > 0 ? "right" : "left";
+        // Facing. On a diagonal the SIDE view wins: it is the only pose with a
+        // readable stride, and a front view sliding sideways is what makes
+        // diagonal movement look like the hero is on rails. The 0.55 bias
+        // means "up" and "down" still win when the input is mostly vertical.
+        this.faceX = axis.x; this.faceY = axis.y;
+        if (Math.abs(axis.x) >= Math.abs(axis.y) * 0.55) this.dir = axis.x > 0 ? "right" : "left";
         else this.dir = axis.y > 0 ? "down" : "up";
+        // How much of the step goes up/down screen, -1..1. The renderer uses
+        // it to tilt the body into a three-quarter pose on diagonals.
+        this.slant = Math.abs(axis.x) < 1e-6 ? 0 : Math.max(-1, Math.min(1, axis.y / Math.abs(axis.x)));
 
         const x0 = this.x, y0 = this.y;
         if (zone) {
             const res = moveAndCollide(zone.map, this.x, this.y, dx, dy, this.radius,
-                (wx, wy) => zone.isBlockedTile(Math.floor(wx / TILE_SIZE), Math.floor(wy / TILE_SIZE)) ||
-                            zone.propSolidAt(wx, wy));
+                (wx, wy) => zone.isBlockedTile(Math.floor(wx / TILE_SIZE), Math.floor(wy / TILE_SIZE)),
+                (px, py, r) => zone.propContact(px, py, r));
             this.x = res.x; this.y = res.y;
         } else {
             this.x += dx; this.y += dy;

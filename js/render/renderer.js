@@ -215,7 +215,7 @@ export class Renderer {
             } else if (d.kind === "player") {
                 drawCharacter(ctx, {
                     dir: o.dir, phase: o.anim, gait: o.gait, runBlend: o.runBlend,
-                    moving: o.moving, look: state.look,
+                    slant: o.slant, moving: o.moving, look: state.look,
                     actionTimer: o.actionTimer, tool: state.tool, idleTime: this.time
                 });
             } else {

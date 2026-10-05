@@ -111,6 +111,21 @@ test("a lost keyup never leaves the hero walking by himself", () => {
     assert.near(g.player.y, y, 0.01, "the hero kept walking on his own");
 });
 
+test("a diagonal keeps both keys: the watchdog must not eat the first one", () => {
+    // W then A: the OS repeats only A, so a naive watchdog drops W after a
+    // second and the hero stops walking diagonally. Reported from play.
+    const g = boot();
+    key(dom.win, "KeyW", true);
+    for (let i = 0; i < 40; i++) { if (i % 4 === 0) key(dom.win, "KeyW", true, true); g.update(1 / 60); }
+    key(dom.win, "KeyA", true);                       // second direction
+    const x0 = g.player.x, y0 = g.player.y;
+    for (let i = 0; i < 200; i++) { if (i % 4 === 0) key(dom.win, "KeyA", true, true); g.update(1 / 60); }
+    assert.ok(g.input.pressed("up"), "the first key was eaten");
+    assert.ok(g.input.pressed("left"), "the second key is gone");
+    assert.lt(g.player.x, x0 - 5, "no westward travel");
+    assert.lt(g.player.y, y0 - 5, "no northward travel");
+});
+
 test("losing focus drops every held key", () => {
     const g = boot();
     key(dom.win, "KeyD", true);

@@ -203,6 +203,15 @@ export function posture(p) {
  *                     actionTimer, tool, idleTime }
  */
 export function drawCharacter(ctx, p) {
+    // A diagonal is drawn as the side view, turned: the body narrows a little
+    // and the head leads the travel direction. Cheap, and it stops diagonal
+    // movement from looking like the hero is sliding on rails.
+    const slant = Math.max(-1, Math.min(1, p.slant || 0));
+    const turning = slant !== 0 && (p.dir === "left" || p.dir === "right");
+    if (turning) {
+        ctx.save();
+        ctx.scale(1 - GAIT.slantNarrow * Math.abs(slant), 1);
+    }
     const look = Object.assign({}, DEFAULT_LOOK, p.look || {});
     const { phase, g, side, back, sideView,
         swingN, swingF, liftN, liftF, bob, sway, counter, flagX,
@@ -374,9 +383,10 @@ export function drawCharacter(ctx, p) {
     paintPauldrons();
 
     /* ---- head ----------------------------------------------------------- */
-    const headY = BODY.headY - bob;
+    let headY = BODY.headY - bob;
     const headH = BODY.headH, headW = BODY.headW;
     const headX = (sideView ? side * 0.5 : 0) + counter * 0.5;
+    if (turning) headY += GAIT.slantHead * slant;      // look where you are going
     rect(ctx, -2.2, headY + headH - 0.5, 4.4, 1.6, PALETTE.ao, false);          // neck
     rect(ctx, headX - headW / 2, headY, headW, headH, skin);
     rect(ctx, headX + headW / 2 - 1.8, headY + 1, 1.8, headH - 1, shadeHex(skin, PALETTE.skinShade), false);
@@ -431,6 +441,7 @@ export function drawCharacter(ctx, p) {
         drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, false);
         paintHand(toolArm, false);
     }
+    if (turning) ctx.restore();
 }
 
 /**

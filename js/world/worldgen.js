@@ -126,6 +126,47 @@ export class Zone {
         return false;
     }
 
+    /**
+     * The prop a BODY of `radius` centred here is pushed into, if any.
+     *
+     * Props are circles and so is the hero, so this is exact: distance of
+     * centres against the sum of radii. Sampling a ring of points around the
+     * body instead (the old way) turns the body into a 16-gon whose corners
+     * poke into the prop and whose edges let it slip through — and a body
+     * whose shape depends on the direction it is tested from gets wedged,
+     * because sliding sideways can take it from "free" to "blocked".
+     *
+     * @returns {null|{nx:number, ny:number, r:number, depth:number}}
+     *          outward normal, the prop's radius, and how deep the overlap is
+     */
+    propContact(wx, wy, radius) {
+        const tx = Math.floor(wx / TILE_SIZE), ty = Math.floor(wy / TILE_SIZE);
+        const reach = Math.ceil((radius + 12) / TILE_SIZE);
+        let best = null;
+        for (let oy = -reach; oy <= reach; oy++) {
+            for (let ox = -reach; ox <= reach; ox++) {
+                const list = this.solidIndex.get(`${tx + ox},${ty + oy}`);
+                if (!list) continue;
+                for (const o of list) {
+                    if (o.removed) continue;
+                    const dx = wx - o.x, dy = wy - o.y;
+                    const sum = o.block + radius;
+                    const d2 = dx * dx + dy * dy;
+                    if (d2 > sum * sum) continue;
+                    const d = Math.sqrt(d2) || 0.0001;
+                    const depth = sum - d;
+                    if (!best || depth > best.depth) {
+                        best = { nx: dx / d, ny: dy / d, r: o.block, depth };
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    /** Boolean form of {@link propContact}. */
+    propBlocksBody(wx, wy, radius) { return this.propContact(wx, wy, radius) !== null; }
+
     /** Combined solidity test in world units: terrain + props. */
     solidAt(wx, wy) {
         if (this.map.solidAt(wx, wy)) return true;
