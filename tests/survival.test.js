@@ -219,9 +219,9 @@ test("fuel burns down and the fire goes out", () => {
     let out = 0;
     bus.on("fire:out", () => out++);
     const f = new Campfire({ bus });
-    f.addFuel("hay");                 // kindling: 4 in-game minutes
+    f.addFuel("hay");                 // kindling: 7 in-game minutes
     f.light();
-    f.update(300);
+    f.update(500);
     assert.not(f.lit);
     assert.eq(out, 1);
     assert.eq(f.lightRadius, 0);
@@ -259,14 +259,14 @@ test("the pit shows what you threw in, and it chars as it burns", () => {
     assert.ok(f.lit);
 });
 
-test("one log burns for over an hour, and a night needs several", () => {
+test("one log burns for over two hours, and a night needs several", () => {
     const f = new Campfire();
     f.addFuel("log");
     f.light();
-    f.update(60 * 60);                      // one in-game hour
-    assert.ok(f.lit, "a log must survive a whole in-game hour");
-    f.update(60 * 30);                      // and a half
-    assert.not(f.lit, "but not two");
+    f.update(60 * 120);                     // two in-game hours
+    assert.ok(f.lit, "a log must survive two whole in-game hours");
+    f.update(60 * 60);                      // and one more
+    assert.not(f.lit, "but not three");
 
     const night = new Campfire();
     for (let i = 0; i < 8; i++) night.addFuel("log");
@@ -280,7 +280,7 @@ test("the fire sinks to embers before it dies", () => {
     const f = new Campfire();
     f.addFuel("firewood");
     f.light();
-    f.update(1000);                         // 200 s of fuel left
+    f.update(1900);                         // 200 s of fuel left
     assert.ok(f.lit);
     assert.lt(f.intensity, 1, "it should be dying down, not at full blaze");
     assert.gt(f.intensity, 0.2);

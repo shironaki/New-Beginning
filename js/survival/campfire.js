@@ -57,7 +57,7 @@ export class Campfire {
         this.bus = bus;
         this.lit = false;
         this.fuel = 0;              // in-game seconds of burn left (sum of pieces)
-        this.maxFuel = 14400;       // four in-game hours of fuel fits in the pit
+        this.maxFuel = 25200;       // seven in-game hours of fuel fits in the pit
         // What is physically lying in the pit, oldest first. The renderer draws
         // these, so a fire full of brushwood looks different from one with a
         // log on it, and you can see your fuel char and shrink as it burns.

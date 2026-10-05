@@ -186,6 +186,30 @@ function detailPass(ctx, id, px, py, size, tx, ty, pal) {
                 }
                 ctx.globalAlpha = 1;
             }
+            // Undergrowth: clover rosettes and dry stalks, placed from a
+            // continuous field so patches drift across tiles instead of
+            // appearing once per tile like a stamp.
+            if (!winter && id !== T.PINE_FLOOR) {
+                const fx = px + h(tx, ty, 123) * size, fy = py + h(tx, ty, 131) * size;
+                const patch = soft(tx * size + (fx - px), ty * size + (fy - py), 26, 137);
+                if (patch > 0.68) {                       // clover
+                    ctx.fillStyle = `rgba(92,142,70,${0.3 + (patch - 0.68) * 1.2})`;
+                    for (let k = 0; k < 3; k++) {
+                        const a = k * 2.1 + patch * 3;
+                        ctx.beginPath();
+                        ctx.ellipse(fx + Math.cos(a) * 1.6, fy + Math.sin(a) * 1.1, 1.5, 1.1, a, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                } else if (patch < 0.3 && id === T.GRASS_DRY) {   // dry stalk
+                    ctx.strokeStyle = "rgba(186,172,110,0.5)";
+                    ctx.lineWidth = 0.8;
+                    ctx.beginPath();
+                    ctx.moveTo(fx, fy);
+                    ctx.quadraticCurveTo(fx + 1.5, fy - 4, fx + 3, fy - 7);
+                    ctx.stroke();
+                }
+            }
+
             // Occasional flower / pebble / fallen needle.
             const spark = h(tx, ty, 77);
             if (id === T.MEADOW && spark > 0.86) {
@@ -455,15 +479,59 @@ function detailPass(ctx, id, px, py, size, tx, ty, pal) {
         }
 
         case T.MUD: {
-            ctx.fillStyle = "rgba(20,24,14,0.3)";
-            for (let i = 0; i < 2; i++) {
-                const a = h(tx, ty, i * 3);
-                ctx.beginPath();
-                ctx.ellipse(px + a * size, py + h(tx, ty, i * 5) * size, 4 + a * 4, 2 + a * 2, 0, 0, Math.PI * 2);
-                ctx.fill();
+            // Peat: hummocks of dark moss, standing water between them and
+            // sedge poking out. A flat brown sheet is what made the swamp
+            // read as "dirt with props on it".
+            const step = 2;
+            for (let yy = 0; yy < size; yy += step) {
+                for (let xx = 0; xx < size; xx += step) {
+                    const wx = tx * size + xx, wy = ty * size + yy;
+                    const hum = soft(wx, wy, 11, 17);          // hummock field
+                    if (hum > 0.62) {                          // raised peat moss
+                        const k = (hum - 0.62) * 1.6;
+                        ctx.fillStyle = `rgba(86,100,56,${k * 0.5})`;
+                        ctx.fillRect(px + xx, py + yy, step, step);
+                    } else if (hum < 0.34) {                   // standing water
+                        const k = (0.34 - hum) * 2.2;
+                        ctx.fillStyle = `rgba(28,40,38,${k * 0.5})`;
+                        ctx.fillRect(px + xx, py + yy, step, step);
+                        if (soft(wx, wy, 4, 23) > 0.74) {      // sky in the pool
+                            ctx.fillStyle = `rgba(150,178,180,${k * 0.3})`;
+                            ctx.fillRect(px + xx, py + yy, step, step);
+                        }
+                    }
+                }
             }
-            ctx.fillStyle = "rgba(140,160,120,0.18)";
-            ctx.fillRect(px + h(tx, ty, 8) * size, py + h(tx, ty, 9) * size, 2, 2);
+            // Sedge on the hummocks, a bubble now and then in the water —
+            // sparse and never twice the same, or the bog turns into a field
+            // of identical glyphs.
+            for (let i = 0; i < 3; i++) {
+                const a = h(tx * 3 + i, ty * 5, i * 13), b2 = h(tx, ty * 7 + i, i * 17 + 3);
+                const roll = h(tx * 11 + i, ty * 13, 29);
+                const gx = px + a * size, gy = py + b2 * size;
+                const wet = soft(tx * size + a * size, ty * size + b2 * size, 11, 17);
+                if (wet > 0.56 && roll > 0.62) {
+                    const blades = 2 + Math.floor(roll * 3);
+                    const scale = 0.7 + a * 0.9;
+                    const tilt = (b2 - 0.5) * 1.1;
+                    ctx.strokeStyle = `rgba(${118 + Math.round(a * 26)},${138 + Math.round(b2 * 24)},84,${0.34 + a * 0.26})`;
+                    ctx.lineWidth = 0.8 + a * 0.4;
+                    for (let k = 0; k < blades; k++) {
+                        const lean = (k - (blades - 1) / 2) * 1.5 + tilt;
+                        const len = (4 + h(tx + k, ty + i, 31) * 3.5) * scale;
+                        ctx.beginPath();
+                        ctx.moveTo(gx, gy);
+                        ctx.quadraticCurveTo(gx + lean * 0.5, gy - len * 0.6, gx + lean, gy - len);
+                        ctx.stroke();
+                    }
+                } else if (wet < 0.3 && roll > 0.86) {
+                    ctx.strokeStyle = "rgba(190,204,196,0.18)";
+                    ctx.lineWidth = 0.7;
+                    ctx.beginPath();
+                    ctx.arc(gx, gy, 0.9 + a * 1.1, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+            }
             break;
         }
 
@@ -1218,7 +1286,7 @@ function broadleaf(ctx, obj, season) {
     // starting at one height is a mop, not a tree.
     if (willow) {
         ctx.lineCap = "round";
-        const strands = 26;
+        const strands = 36;
         for (let i = 0; i < strands; i++) {
             const t = (i + 0.5) / strands;                  // 0..1 across
             const u = (t - 0.5) * 2;                        // -1..1
@@ -1233,15 +1301,15 @@ function broadleaf(ctx, obj, season) {
             const sway = (n2 - 0.5) * 4 + u * 1.5;
             const shade = Math.abs(u) > 0.45 ? (u > 0 ? dark : lit) : mid;
             ctx.strokeStyle = n > 0.7 ? lit : shade;
-            ctx.globalAlpha = 0.62 + n2 * 0.3;
-            ctx.lineWidth = (0.9 + n * 0.9) * S;
+            ctx.globalAlpha = 0.42 + n2 * 0.34;
+            ctx.lineWidth = (0.55 + n * 0.75) * S;
             ctx.beginPath();
             ctx.moveTo(x0 * S, yStart * S);
             ctx.quadraticCurveTo((x0 + sway * 0.35) * S, (yStart + drop * 0.62) * S,
                                  (x0 + sway) * S, (yStart + drop) * S);
             ctx.stroke();
             // Leaves: short dashes down the strand, denser near the tip.
-            ctx.lineWidth = 0.75 * S;
+            ctx.lineWidth = 0.6 * S;
             const leaves = 2 + Math.floor(n2 * 3);
             for (let k = 1; k <= leaves; k++) {
                 const f = 0.35 + (k / (leaves + 0.6)) * 0.6;
@@ -1570,14 +1638,43 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
                 const midX = topX + dirX * len * 0.5, midY = topY + dirY * len * 0.5 - 9 * s;
                 const tipX = topX + dirX * len * 0.88, tipY = topY + dirY * len + 19 * s * scale;
                 const dark = i < 4;
-                ctx.strokeStyle = dark ? "#2d6239" : "#3c8049";
-                ctx.lineWidth = 2.2 * s; ctx.lineCap = "round";
+                // The blade first, as a filled leaf: a frond drawn only with
+                // strokes reads as a feather duster. Mass, then leaflets.
+                const at = (f) => {
+                    const u = 1 - f;
+                    return [u * u * topX + 2 * u * f * midX + f * f * tipX,
+                            u * u * topY + 2 * u * f * midY + f * f * tipY];
+                };
+                const bladeW = (f) => (1.2 + Math.sin(f * Math.PI) * 5.4) * s * scale;
+                const edgeL = [], edgeR = [];
+                for (let k = 0; k <= 8; k++) {
+                    const f = k / 8;
+                    const [bx, by] = at(f);
+                    const [nx2, ny2] = at(Math.min(1, f + 0.08));
+                    const dxT = nx2 - bx, dyT = ny2 - by;
+                    const nl = Math.hypot(dxT, dyT) || 1;
+                    const w = bladeW(f);
+                    edgeL.push([bx - (dyT / nl) * w, by + (dxT / nl) * w]);
+                    edgeR.push([bx + (dyT / nl) * w, by - (dxT / nl) * w]);
+                }
+                ctx.fillStyle = dark ? "#2a5a36" : "#357444";
+                ctx.beginPath();
+                edgeL.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+                for (let k = edgeR.length - 1; k >= 0; k--) ctx.lineTo(edgeR[k][0], edgeR[k][1]);
+                ctx.closePath(); ctx.fill();
+                ctx.fillStyle = dark ? "rgba(120,190,120,0.16)" : "rgba(150,210,140,0.2)";
+                ctx.beginPath();                                   // lit upper half
+                edgeL.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+                for (let k = 8; k >= 0; k--) { const [bx, by] = at(k / 8); ctx.lineTo(bx, by); }
+                ctx.closePath(); ctx.fill();
+                ctx.strokeStyle = dark ? "#23492c" : "#2d6239";    // midrib
+                ctx.lineWidth = 1.8 * s; ctx.lineCap = "round";
                 ctx.beginPath();
                 ctx.moveTo(topX, topY);
                 ctx.quadraticCurveTo(midX, midY, tipX, tipY);
                 ctx.stroke();
-                ctx.strokeStyle = dark ? "#357040" : "#4a9456";
-                ctx.lineWidth = 1.2 * s;
+                ctx.strokeStyle = dark ? "#2f6a3b" : "#428a4e";
+                ctx.lineWidth = 0.9 * s;
                 for (let k = 1; k <= 7; k++) {
                     const f = k / 8;
                     const u = 1 - f;
@@ -1981,37 +2078,89 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         }
 
         case "bush": {
-            shadowEllipse(ctx, 11, 3.6, 0.26, propHeight(kind, s));
+            // A shrub, not a green blob: woody stems, clumps of foliage on a
+            // seeded dome, pointed leaf dabs on the sunward side, berries
+            // hanging where there are leaves to hang from.
+            const n0 = h(obj.tx, obj.ty, 11), n1 = h(obj.tx, obj.ty, 21);
+            const wide = (9 + n0 * 5) * s, high = (11 + n1 * 6) * s;
+            shadowEllipse(ctx, wide * 1.05, wide * 0.34, 0.26, high * 1.1);
+            const winter = season === "winter";
             const autumn = season === "autumn";
             const pal = jitterPalette(autumn ? ["#9a6a28", "#7d551f", "#c08a39"]
                                              : ["#3f6b33", "#30542a", "#6a9c4c"], obj.tx, obj.ty);
-            ctx.strokeStyle = "#4a3a24"; ctx.lineWidth = 1.2;   // woody stems
-            for (let i = -1; i <= 1; i++) {
-                ctx.beginPath(); ctx.moveTo(i * 2, 0); ctx.quadraticCurveTo(i * 3, -4, i * 4, -8); ctx.stroke();
+            // Stems first — they show between the clumps and in winter they
+            // are the whole plant.
+            ctx.strokeStyle = "#4a3a24"; ctx.lineCap = "round";
+            const stems = 3 + Math.floor(h(obj.tx, obj.ty, 31) * 3);
+            for (let i = 0; i < stems; i++) {
+                const a = (i / (stems - 1 || 1) - 0.5) * 1.5 + (h(obj.tx + i, obj.ty, 41) - 0.5) * 0.4;
+                const len = high * (0.55 + h(obj.tx, obj.ty + i, 51) * 0.5);
+                ctx.lineWidth = (1.6 - i * 0.12) * s;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.quadraticCurveTo(Math.sin(a) * len * 0.3, -len * 0.55,
+                                     Math.sin(a) * len * 0.75, -len);
+                ctx.stroke();
             }
-            const clumps = [[0, -8, 9], [-7, -6, 6.5], [7, -6, 6], [-3, -13, 6.5], [4, -12, 6]];
-            ctx.fillStyle = pal[1];
-            for (const [bx, by, br] of clumps) {
-                ctx.beginPath(); ctx.ellipse(bx + 1, by + 1.5, br, br * 0.8, 0, 0, Math.PI * 2); ctx.fill();
-            }
-            ctx.fillStyle = pal[0];
-            for (const [bx, by, br] of clumps) {
-                ctx.beginPath(); ctx.ellipse(bx, by, br * 0.92, br * 0.74, 0, 0, Math.PI * 2); ctx.fill();
-            }
-            ctx.fillStyle = pal[2];
-            ctx.globalAlpha = 0.65;
-            ctx.beginPath(); ctx.ellipse(-4, -12, 4.6, 3.2, -0.3, 0, Math.PI * 2); ctx.fill();
-            ctx.beginPath(); ctx.ellipse(-8, -7, 3, 2.1, -0.2, 0, Math.PI * 2); ctx.fill();
-            ctx.globalAlpha = 1;
-            if (obj.berries) {
-                const spots = [[-6, -9], [3, -8], [0, -14], [7, -8], [-2, -5], [5, -14]];
-                for (const [bx, by] of spots) {
-                    ctx.fillStyle = "#5f1a33";
-                    ctx.beginPath(); ctx.arc(bx, by + 0.6, 1.7, 0, Math.PI * 2); ctx.fill();
-                    ctx.fillStyle = "#a6325f";
-                    ctx.beginPath(); ctx.arc(bx, by, 1.6, 0, Math.PI * 2); ctx.fill();
-                    ctx.fillStyle = "rgba(255,190,210,0.75)";
-                    ctx.fillRect(bx - 0.8, by - 1, 1, 1);
+            if (!winter) {
+                // Clumps on a dome, each its own size and offset.
+                const clumps = 5 + Math.floor(h(obj.tx, obj.ty, 61) * 3);
+                const place = [];
+                for (let i = 0; i < clumps; i++) {
+                    const t = (i + 0.5) / clumps;
+                    const a = Math.PI + t * Math.PI;
+                    const r = wide * (0.52 + h(obj.tx + i, obj.ty, 71) * 0.5);
+                    place.push([
+                        Math.cos(a) * wide * 0.72 + (h(obj.tx, obj.ty + i, 81) - 0.5) * 2.4 * s,
+                        -high * 0.52 + Math.sin(a) * high * 0.4,
+                        r * 0.62
+                    ]);
+                }
+                ctx.fillStyle = pal[1];
+                for (const [bx, by, br] of place) {
+                    ctx.beginPath(); ctx.ellipse(bx + 0.8, by + 1.4, br, br * 0.82, 0, 0, Math.PI * 2); ctx.fill();
+                }
+                ctx.fillStyle = pal[0];
+                for (const [bx, by, br] of place) {
+                    ctx.beginPath(); ctx.ellipse(bx, by, br * 0.9, br * 0.74, 0, 0, Math.PI * 2); ctx.fill();
+                }
+                // Leaf dabs: light on the sunward shoulder, dark in the hollow.
+                for (let i = 0; i < 22; i++) {
+                    const na = h(obj.tx * 5 + i, obj.ty, 91), nb = h(obj.tx, obj.ty * 7 + i, 97);
+                    const a = na * Math.PI * 2, rad = Math.sqrt(nb);
+                    const lx = Math.cos(a) * wide * 0.78 * rad;
+                    const ly = -high * 0.52 + Math.sin(a) * high * 0.38 * rad;
+                    const sun = lx < 0 && ly < -high * 0.45;
+                    ctx.fillStyle = sun ? pal[2] : pal[1];
+                    ctx.globalAlpha = sun ? 0.6 : 0.4;
+                    ctx.beginPath();
+                    ctx.ellipse(lx, ly, (1 + na * 1.3) * s, (0.7 + nb * 0.8) * s, a, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.globalAlpha = 1;
+                if (obj.berries) {
+                    const count = 4 + Math.floor(h(obj.tx, obj.ty, 101) * 6);
+                    for (let i = 0; i < count; i++) {
+                        const na = h(obj.tx + i * 3, obj.ty, 103), nb = h(obj.tx, obj.ty + i * 5, 107);
+                        const bx = (na - 0.5) * wide * 1.5;
+                        const by = -high * (0.3 + nb * 0.55);
+                        ctx.strokeStyle = "rgba(60,44,26,0.6)"; ctx.lineWidth = 0.6 * s;
+                        ctx.beginPath(); ctx.moveTo(bx, by - 2 * s); ctx.lineTo(bx, by); ctx.stroke();
+                        ctx.fillStyle = "#5f1a33";
+                        ctx.beginPath(); ctx.arc(bx, by + 0.6 * s, 1.7 * s, 0, Math.PI * 2); ctx.fill();
+                        ctx.fillStyle = "#a6325f";
+                        ctx.beginPath(); ctx.arc(bx, by, 1.6 * s, 0, Math.PI * 2); ctx.fill();
+                        ctx.fillStyle = "rgba(255,190,210,0.75)";
+                        ctx.fillRect(bx - 0.8 * s, by - 1 * s, 1 * s, 1 * s);
+                    }
+                }
+            } else {
+                // Winter: bare twigs with a little snow caught in the fork.
+                ctx.fillStyle = "rgba(238,246,252,0.7)";
+                for (let i = 0; i < 4; i++) {
+                    const nx = (h(obj.tx + i, obj.ty, 111) - 0.5) * wide;
+                    const ny = -high * (0.4 + h(obj.tx, obj.ty + i, 113) * 0.5);
+                    ctx.beginPath(); ctx.ellipse(nx, ny, 2.2 * s, 1.1 * s, 0, 0, Math.PI * 2); ctx.fill();
                 }
             }
             break;

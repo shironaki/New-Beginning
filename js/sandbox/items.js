@@ -9,19 +9,19 @@
 
 export const ITEMS = {
     /* ---- raw resources ------------------------------------------------ */
-    firewood:  { name: "Хворост",      emoji: "🪵", stack: 50, tags: ["fuel"], burn: 1200, weight: 0.4 },
-    log:       { name: "Бревно",       emoji: "🪵", stack: 20, tags: ["fuel", "build"], burn: 4500, weight: 3 },
-    plank:     { name: "Доска",        emoji: "🪚", stack: 50, tags: ["build"], burn: 2100, weight: 1 },
+    firewood:  { name: "Хворост",      emoji: "🪵", stack: 50, tags: ["fuel"], burn: 2100, weight: 0.4 },
+    log:       { name: "Бревно",       emoji: "🪵", stack: 20, tags: ["fuel", "build"], burn: 8100, weight: 3 },
+    plank:     { name: "Доска",        emoji: "🪚", stack: 50, tags: ["build"], burn: 3600, weight: 1 },
     stone:     { name: "Камень",       emoji: "🪨", stack: 50, tags: ["build"], weight: 2 },
     flint:     { name: "Кремень",      emoji: "🔥", stack: 20, tags: ["tool_part", "firestarter"], weight: 0.2 },
     fiber:     { name: "Волокно",      emoji: "🌾", stack: 50, tags: ["craft"], weight: 0.1 },
-    hay:       { name: "Сено",         emoji: "🌾", stack: 50, tags: ["fuel", "feed"], burn: 240, weight: 0.3 },
-    resin:     { name: "Смола",        emoji: "🟤", stack: 20, tags: ["craft", "fuel"], burn: 1500, weight: 0.3 },
+    hay:       { name: "Сено",         emoji: "🌾", stack: 50, tags: ["fuel", "feed"], burn: 420, weight: 0.3 },
+    resin:     { name: "Смола",        emoji: "🟤", stack: 20, tags: ["craft", "fuel"], burn: 2600, weight: 0.3 },
     copper:    { name: "Медная руда",  emoji: "🟠", stack: 30, tags: ["ore"], weight: 2.5 },
     iron:      { name: "Железная руда",emoji: "⚙️", stack: 30, tags: ["ore"], weight: 3 },
-    coal:      { name: "Уголь",        emoji: "⬛", stack: 40, tags: ["fuel", "ore"], burn: 9000, weight: 1.5 },
+    coal:      { name: "Уголь",        emoji: "⬛", stack: 40, tags: ["fuel", "ore"], burn: 16200, weight: 1.5 },
     gem:       { name: "Самоцвет",     emoji: "💎", stack: 10, tags: ["valuable"], weight: 0.3 },
-    charcoal:  { name: "Древесный уголь", emoji: "◼️", stack: 40, tags: ["fuel"], burn: 5400, weight: 0.8 },
+    charcoal:  { name: "Древесный уголь", emoji: "◼️", stack: 40, tags: ["fuel"], burn: 9600, weight: 0.8 },
     ash_dust:  { name: "Зола",         emoji: "🌫️", stack: 40, tags: ["craft", "fertiliser"], weight: 0.2 },
 
     /* ---- raw food ------------------------------------------------------ */
@@ -61,7 +61,7 @@ export const ITEMS = {
     spear:      { name: "Копьё",        emoji: "🔱", stack: 1, tags: ["weapon", "reach"], tool: "spear", tier: 1, dmg: 11, weight: 1.8 },
     rod:        { name: "Удочка",       emoji: "🎣", stack: 1, tags: ["tool", "rod"], tool: "rod", tier: 1, weight: 1 },
     hoe:        { name: "Мотыга",       emoji: "🧑‍🌾", stack: 1, tags: ["tool", "hoe"], tool: "hoe", tier: 1, weight: 1.6 },
-    torch:      { name: "Факел",        emoji: "🔦", stack: 5, tags: ["light", "fuel"], light: 110, burn: 1800, weight: 0.4 },
+    torch:      { name: "Факел",        emoji: "🔦", stack: 5, tags: ["light", "fuel"], light: 110, burn: 3200, weight: 0.4 },
     bedroll:    { name: "Спальник",     emoji: "🛏️", stack: 1, tags: ["sleep"], weight: 2 },
     cloak:      { name: "Плащ",         emoji: "🧥", stack: 1, tags: ["clothing"], insulation: 6, weight: 1.5 },
     pot:        { name: "Котелок",      emoji: "🫕", stack: 1, tags: ["cookware"], weight: 2 },
