@@ -13,7 +13,7 @@
  */
 import { CHUNK } from "../world/tilemap.js";
 import { TILE_SIZE, TILES } from "../world/tiles.js";
-import { paintTile, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, propHeight } from "./tilesart.js";
+import { paintTile, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, setWalker, propHeight } from "./tilesart.js";
 import { drawCharacter, drawSleeping } from "./character.js";
 import { LightMap, LIGHT } from "./lighting.js";
 import { itemEmoji } from "../sandbox/items.js";
@@ -99,6 +99,27 @@ export const SKY = {
     lightningA: 0.34
 };
 
+/**
+ * Cloud shadows, in numbers. A parallax layer between the sky and the
+ * ground: soft dark patches that drift with the wind slower than the camera
+ * pans, so the clouds read as being high above the valley. Never under
+ * ground, never at night (no sun — no shadow), strongest on a cloudy day.
+ */
+export const CLOUDS = {
+    count: 9,            // patches living in the drifting field
+    sprite: 128,         // px of the baked soft blob
+    rx: 125,             // px of one patch at zoom 1 (half-width)
+    ry: 80,              // px (half-height) — patches are flattened by the 3/4 view
+    sizeVary: 0.5,       // ± size spread between patches
+    alpha: 0.2,          // α of a patch at full daylight on a cloudy day
+    parallax: 0.78,      // <1 — shadows lag behind the ground
+    speed: 30,           // px/s downwind
+    drift: 0.3,          // cross-wind component of that speed
+    field: 2.2,          // wrap period, in screens
+    minDaylight: 0.3,    // below this the sun is too low to print shadows
+    byWeather: { clear: 0.38, wind: 0.72, cloudy: 1, rain: 0.5, storm: 0.34, fog: 0, snow: 0.28 }
+};
+
 /** Grading, in numbers. */
 export const GRADE = {
     vignetteDay: 0.14,
@@ -178,6 +199,69 @@ export class Renderer {
         }
         this.stats.baked++;
         return cv;
+    }
+
+    /** The baked soft patch every cloud shadow is a scaled copy of. */
+    _cloudSprite() {
+        if (this._cloud !== undefined) return this._cloud;
+        this._cloud = null;
+        if (typeof document === "undefined") return null;
+        let cv, c;
+        try {
+            cv = document.createElement("canvas");
+            cv.width = cv.height = CLOUDS.sprite;
+            c = cv.getContext("2d");
+        } catch { return null; }
+        if (!c || typeof c.createRadialGradient !== "function") return null;
+        const S = CLOUDS.sprite;
+        const g = c.createRadialGradient(S / 2, S / 2, S * 0.05, S / 2, S / 2, S / 2);
+        // A long tail: the edge of a cloud shadow has no line, it just fades.
+        for (const [at, a] of [[0, 1], [0.34, 0.82], [0.58, 0.46], [0.78, 0.18], [0.92, 0.04], [1, 0]]) {
+            g.addColorStop(at, `rgba(24,28,38,${a})`);
+        }
+        c.fillStyle = g;
+        c.fillRect(0, 0, S, S);
+        this._cloud = cv;
+        return cv;
+    }
+
+    /**
+     * Cloud shadows: patches of shade crossing the ground downwind. They are
+     * anchored to the world but moved at `parallax` of the camera, which is
+     * what sells the height — everything else on screen slides by faster.
+     */
+    drawCloudShadows(weather, daylight, underground, windAngle = 0) {
+        if (underground) return;
+        const mood = CLOUDS.byWeather[weather] !== undefined ? CLOUDS.byWeather[weather] : 0.5;
+        const sun = (Math.min(1, Math.max(0, daylight)) - CLOUDS.minDaylight) / (1 - CLOUDS.minDaylight);
+        const alpha = CLOUDS.alpha * mood * Math.max(0, sun);
+        if (alpha <= 0.004) return;
+        const spr = this._cloudSprite();
+        if (!spr) return;
+
+        const ctx = this.ctx, cam = this.camera, z = cam.zoom;
+        const W = this.canvas.width, H = this.canvas.height;
+        const Px = W * CLOUDS.field, Py = H * CLOUDS.field;
+        const t = this.time;
+        const vx = Math.cos(windAngle) * CLOUDS.speed + Math.sin(windAngle) * CLOUDS.drift * CLOUDS.speed;
+        const vy = Math.sin(windAngle) * CLOUDS.speed * CLOUDS.drift + CLOUDS.speed * 0.22;
+        const offX = cam.x * z * CLOUDS.parallax - t * vx * z;
+        const offY = cam.y * z * CLOUDS.parallax - t * vy * z;
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        for (let i = 0; i < CLOUDS.count; i++) {
+            const fx = frac(i * 0.754877 + 0.13), fy = frac(i * 0.569840 + 0.41);
+            const size = 1 + (frac(i * 0.123456) * 2 - 1) * CLOUDS.sizeVary;
+            const rx = CLOUDS.rx * size * z, ry = CLOUDS.ry * size * z;
+            let x = (fx * Px - offX) % Px; if (x < 0) x += Px;
+            let y = (fy * Py - offY) % Py; if (y < 0) y += Py;
+            x -= rx; y -= ry;
+            if (x > W + rx || y > H + ry || x + rx * 2 < -rx || y + ry * 2 < -ry) continue;
+            ctx.drawImage(spr, x - rx, y - ry, rx * 2, ry * 2);
+        }
+        ctx.restore();
+        ctx.globalAlpha = 1;
     }
 
     drawGround(zone) {
@@ -750,11 +834,17 @@ export class Renderer {
         // characters read them to throw shadows away from the flame, and the
         // light map re-uses the same list afterwards in screen space.
         this._collectLights(state);
+        // Undergrowth needs to know who is wading through it this frame.
+        setWalker(state.player.x, state.player.y, !state.player.sleeping);
         this.drawGround(state.zone);
         this.drawWater(state.zone,
                        state.clock ? state.clock.daylight : 1,
                        state.clock ? state.clock.minute / 60 : 12,
                        !!state.underground);
+        this.drawCloudShadows(state.weather,
+                              state.clock ? state.clock.daylight : 1,
+                              !!state.underground,
+                              state.windAngle || 0);
         if (state.tracks) state.tracks.draw(ctx, this.camera);
         this.drawObjects(state, dt);
         if (state.particles) state.particles.draw(ctx, this.camera);

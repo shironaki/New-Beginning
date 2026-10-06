@@ -17,3 +17,36 @@ jobs:
         run: npm run check
       - name: Tests
         run: npm test
+
+  frames:
+    name: Screenshots and playtest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # The gallery is rendered by the software canvas in tools/canvas-shim.js.
+      # If a render path throws, allocates nothing, or produces an empty frame,
+      # this job fails before anyone sees a broken build.
+      - name: Render the scene gallery
+        run: npm run shot
+      - name: Frames are non-empty
+        run: |
+          count=$(ls .artifacts/*.png | wc -l)
+          echo "frames: $count"
+          test "$count" -ge 20
+          for f in .artifacts/*.png; do
+            size=$(stat -c%s "$f")
+            echo "$size  $f"
+            test "$size" -ge 2000 || { echo "empty frame: $f"; exit 1; }
+          done
+      # 40 simulated minutes of play: no rule violations, no NaN, no stuck hero.
+      - name: Playtest
+        run: npm run play 40
+      - name: Keep the frames
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames
+          path: .artifacts/*.png
+          retention-days: 14

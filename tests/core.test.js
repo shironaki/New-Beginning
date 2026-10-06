@@ -1,10 +1,11 @@
 /** v3 tests — core: RNG, noise, events, ECS, clock, save, loop. */
 import { suite, test, assert, run } from "./tiny.js";
 import * as cameraMod from "../js/engine/camera.js";
+import * as serveMod from "../serve.js";
 import { LIGHT, ambientAt } from "../js/render/lighting.js";
 import { SUN, SHADOW, setSun, castShadow, setFireLights, setShadowOrigin, propHeight,
-         ROCK, pick, rockOutline } from "../js/render/tilesart.js";
-import { Renderer, OCCLUDE } from "../js/render/renderer.js";
+         ROCK, pick, rockOutline, BEND, setWalker, plantBend } from "../js/render/tilesart.js";
+import { Renderer, OCCLUDE, CLOUDS } from "../js/render/renderer.js";
 import { READ, PALETTE, BODY } from "../js/render/charspec.js";
 import { moonFactor } from "../js/render/lighting.js";
 import { Particles, FX, MATERIAL, materialOf } from "../js/render/particles.js";
@@ -549,6 +550,62 @@ test("reduced motion switches the camera shake off", () => {
     assert.eq(cam.offsetX, 0);
     cam.followReducedMotion({});               // no matchMedia: must not throw
     assert.eq(cam.motionScale, 0);
+});
+
+suite("cloud shadows");
+
+test("cloud shadows follow the weather and the sun", () => {
+    // No sun under ground, none at night, strongest on an overcast day.
+    assert.eq(CLOUDS.byWeather.fog, 0);
+    assert.gt(CLOUDS.byWeather.cloudy, CLOUDS.byWeather.clear);
+    assert.lt(CLOUDS.parallax, 1);                 // shadows must lag the ground
+    assert.gt(CLOUDS.parallax, 0.5);
+    assert.lte(CLOUDS.alpha, 0.25);                // a shadow, not a blackout
+    assert.gte(CLOUDS.minDaylight, 0.2);
+});
+
+suite("plant bending");
+
+test("plants lean away from the walker and spring back", () => {
+    const plant = { x: 100, y: 100, tx: 3, ty: 3 };
+    setWalker(100, 100, false);
+    assert.eq(plantBend(plant, "grass_tuft", 0), 0);         // nobody near
+
+    setWalker(94, 100, true);                                 // walker on the left
+    const lean = plantBend(plant, "grass_tuft", 1);
+    assert.gt(lean, 0);                                       // top goes right, away
+    assert.lte(Math.abs(lean), BEND.maxLean);
+
+    setWalker(0, 0, false);                                   // walker gone
+    const after = plantBend(plant, "grass_tuft", 1 + BEND.releaseTau * 4);
+    assert.lt(Math.abs(after), Math.abs(lean) * 0.2);         // sprang back
+
+    setWalker(100, 100, true);
+    assert.eq(plantBend({ x: 100, y: 100, tx: 1, ty: 1 }, "pine", 0), 0);   // trunks do not bend
+    assert.eq(plantBend({ x: 100, y: 100, tx: 1, ty: 1 }, "rock", 0), 0);
+});
+
+test("the farther the walker the softer the push", () => {
+    const near = { x: 100, y: 100 }, far = { x: 100 + BEND.radius * 0.8, y: 100 };
+    setWalker(100 - 4, 100, true);
+    const a = plantBend(near, "reed", 0);
+    const b = plantBend(far, "reed", 0);
+    assert.gt(Math.abs(a), Math.abs(b));
+    setWalker(0, 0, false);
+});
+
+suite("dev server");
+
+test("parseArgs reads flags, positionals and the environment", () => {
+    const { parseArgs, SERVE } = serveMod;
+    assert.eq(parseArgs([], {}).port, SERVE.port);
+    assert.eq(parseArgs(["8080"], {}).port, 8080);
+    assert.eq(parseArgs(["--port", "4100"], {}).port, 4100);
+    assert.eq(parseArgs([], { PORT: "5050" }).port, 5050);
+    assert.eq(parseArgs(["--host", "0.0.0.0"], {}).host, "0.0.0.0");
+    assert.eq(parseArgs([], {}).reload, true);
+    assert.eq(parseArgs(["--no-reload"], {}).reload, false);
+    assert.eq(parseArgs(["--port", "4100"], { PORT: "5050" }).port, 4100);   // flag wins
 });
 
 run("v3 core");

@@ -1018,6 +1018,62 @@ export function setFireLights(list) {
 export function setShadowOrigin(wx, wy) { ORIGIN.x = wx; ORIGIN.y = wy; }
 
 /**
+ * Soft plants give way when somebody walks through them, in numbers.
+ * The lean is a shear of the whole plant away from the walker; releasing it
+ * is a damped spring, so grass springs back with one small wobble instead of
+ * snapping upright. Per-plant state lives on the prop (`_bend`, `_bendAt`),
+ * so this costs nothing to walk away from and allocates nothing per frame.
+ */
+export const BEND = {
+    radius: 26,        // px — the walker pushes plants this far around them
+    maxLean: 0.42,     // shear at point-blank range (x' = x - lean*y)
+    squash: 0.16,      // the plant also loses this fraction of height, at most
+    falloff: 1.7,      // >1 — the push is concentrated near the walker
+    releaseTau: 0.26,  // s — decay of the spring once the walker leaves
+    wobbleHz: 3.4,     // Hz of the spring-back wobble
+    kinds: {           // only things with stems bend; trunks and rocks do not
+        grass_tuft: 1, reed: 1, herb: 1, fern: 1, wheat: 1,
+        flower: 1, sapling: 0.7, bush: 0.45, berry_bush: 0.45
+    }
+};
+
+const WALKER = { x: 0, y: 0, on: false };
+
+/** Who is pushing through the undergrowth this frame (world coords). */
+export function setWalker(wx, wy, on = true) {
+    WALKER.x = wx; WALKER.y = wy; WALKER.on = !!on;
+}
+
+/**
+ * Signed lean for one plant: positive bends the top to the right. Keeps the
+ * strongest recent push on the prop and lets it spring back from there.
+ */
+export function plantBend(obj, kind, time) {
+    const weight = BEND.kinds[kind];
+    if (!weight) return 0;
+    let push = 0;
+    if (WALKER.on) {
+        const dx = obj.x - WALKER.x, dy = (obj.y - WALKER.y) * 1.4;  // 3/4 view: vertical reach is shorter
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < BEND.radius) {
+            const k = Math.pow(1 - d / BEND.radius, BEND.falloff);
+            push = BEND.maxLean * weight * k * (dx >= 0 ? 1 : -1);
+        }
+    }
+    const held = obj._bend || 0;
+    if (Math.abs(push) >= Math.abs(held) || (push !== 0 && Math.sign(push) !== Math.sign(held))) {
+        obj._bend = push;
+        obj._bendAt = time;
+        return push;
+    }
+    if (!held) return 0;
+    const age = time - (obj._bendAt || 0);
+    const live = held * Math.exp(-age / BEND.releaseTau) * Math.cos(age * BEND.wobbleHz * Math.PI * 2 * 0.25);
+    if (Math.abs(live) < 0.004) { obj._bend = 0; return 0; }
+    return live;
+}
+
+/**
  * Cast shadows only (no contact pool): one from the sun, one per fire.
  * Shared by props and characters so a settler by the fire throws the same
  * shadow a barrel does.
@@ -1667,6 +1723,13 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         const flip = h(obj.tx, obj.ty, 43) > 0.5 ? -1 : 1;
         ctx.scale(flip, 1);
         ctx.scale(grow, grow);
+    }
+
+    // Undergrowth gives way to whoever walks through it.
+    const lean = plantBend(obj, kind, time);
+    if (lean) {
+        ctx.transform(1, 0, -lean, 1, 0, 0);
+        ctx.scale(1, 1 - Math.abs(lean) / BEND.maxLean * BEND.squash);
     }
 
     switch (kind) {
