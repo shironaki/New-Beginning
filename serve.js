@@ -119,13 +119,23 @@ export function noteStem(note, n) {
 
 /** Markdown for one note — written so it reads fine straight in a diff. */
 export function noteMarkdown(note, shotName) {
+    const area = note.kind === "area" && note.w > 0;
+    // For an area the interesting point is its middle: that is what the
+    // scene tool should centre on.
+    const cx = area ? Math.round(note.x + note.w / 2) : note.x;
+    const cy = area ? Math.round(note.y + note.h / 2) : note.y;
+    const where = area
+        ? `- **область:** ${note.w}×${note.h} px от (${note.x}, ${note.y}) `
+          + `— тайлы ${Math.floor(note.x / 32)},${Math.floor(note.y / 32)}`
+          + ` … ${Math.floor((note.x + note.w) / 32)},${Math.floor((note.y + note.h) / 32)}\n`
+        : `- **точка:** x ${note.x}, y ${note.y} (тайл ${Math.floor(note.x / 32)},${Math.floor(note.y / 32)})\n`;
     return `# ${note.text}\n\n`
         + `- **зона:** ${note.zoneName || note.zone} (\`${note.zone}\`)\n`
-        + `- **место:** x ${note.x}, y ${note.y} (тайл ${Math.floor(note.x / 32)},${Math.floor(note.y / 32)})\n`
+        + where
         + `- **время:** день ${note.day}, ${note.time}, ${note.season}\n`
         + `- **погода:** ${note.weather}\n`
         + `- **зум:** ${note.zoom}\n`
-        + `- **повторить:** \`node tools/scene.js --zone ${note.zone} --at ${note.x},${note.y} `
+        + `- **повторить:** \`node tools/scene.js --zone ${note.zone} --at ${cx},${cy} `
         + `--hour ${(note.time || "12:00").split(":")[0]} --weather ${note.weather} --zoom ${note.zoom}\`\n`
         + (shotName ? `\n![кадр](${shotName})\n` : "")
         + `\n<!-- ${note.at} -->\n`;

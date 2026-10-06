@@ -2,6 +2,7 @@
 import { suite, test, assert, run } from "./tiny.js";
 import * as cameraMod from "../js/engine/camera.js";
 import * as serveMod from "../serve.js";
+import { DEV } from "../js/dev/devtools.js";
 import { Tracks, TRACK } from "../js/render/tracks.js";
 import { MOVE, GAIT as gaitSpec } from "../js/render/charspec.js";
 import { LIGHT, ambientAt } from "../js/render/lighting.js";
@@ -743,6 +744,36 @@ test("prints land under the boots, not below them", () => {
     const p = t.items.find((q) => q.alive);
     assert.ok(p, "a print on sand");
     assert.lt(Math.abs(p.y - 100), TRACK.sideGap);   // squashed, not full offset
+});
+
+suite("notes from the game");
+
+test("an area note keeps its size and points the scene tool at its middle", () => {
+    const note = { text: "рамка вокруг пруда", kind: "area", zone: "shore", zoneName: "Берег",
+                   x: 1200, y: 1400, w: 260, h: 180, day: 1, time: "14:00",
+                   season: "spring", weather: "clear", zoom: 2.4, at: "2026-10-06T12:00:00.000Z" };
+    const md = serveMod.noteMarkdown(note, "shot.png");
+    assert.ok(md.includes("260×180"), "the size of the area");
+    assert.ok(md.includes("--at 1330,1490"), "the scene tool aims at the middle");
+    assert.ok(md.includes("тайлы 37,43"), "tiles, for looking at the map");
+    assert.ok(md.includes("![кадр](shot.png)"));
+    const point = serveMod.noteMarkdown({ ...note, kind: "point", w: 0, h: 0 }, "");
+    assert.ok(point.includes("**точка:** x 1200"));
+    assert.not(point.includes("область"));
+});
+
+test("a note file name is sortable, safe and says where it came from", () => {
+    const stem = serveMod.noteStem({ text: "Вода у пруда — квадрат!", zone: "shore",
+                                     at: "2026-10-06T12:00:00.000Z" }, 7);
+    assert.ok(stem.startsWith("2026-10-06-007-shore-"), stem);
+    assert.not(/[\s/\\:*?"<>|]/.test(stem), "no character a filesystem hates");
+});
+
+test("notes queue instead of raining files when there is no server", () => {
+    assert.gt(DEV.queueMax, 10);           // a session of bug hunting fits
+    assert.gt(DEV.shotMax, 600);           // the frame is still readable
+    assert.gt(DEV.dragMin, 2);             // a click is not a tiny drag
+    assert.ok(DEV.queueKey.startsWith("minirpg"));
 });
 
 run("v3 core");

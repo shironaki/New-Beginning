@@ -22,6 +22,7 @@
     "scene": "node tools/scene.js",
     "replay": "node tools/replay.js check",
     "balance": "node tools/balance.js",
-    "pages": "node tools/pagescheck.js"
+    "pages": "node tools/pagescheck.js",
+    "notes": "node tools/notes-import.js"
   }
 }

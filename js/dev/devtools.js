@@ -37,6 +37,12 @@ export const DEV = {
     presets: {
         "Рассвет": 5.5, "Утро": 8, "Полдень": 12.5, "Закат": 19, "Ночь": 1.5
     },
+    // Notes that cannot reach a server wait in a queue instead of raining
+    // files into the Downloads folder.
+    queueKey: "minirpg_v3_notes",
+    queueMax: 40,
+    shotMax: 1280,           // px — the saved frame is scaled down to this
+    dragMin: 8,              // px of movement that turns a click into an area
     kits: {
         "Инструменты": [["knife", 1], ["axe", 1], ["pickaxe", 1], ["shovel", 1], ["flint", 1], ["torch", 3]],
         "Еда": [["berry", 10], ["mushroom", 10], ["meat_raw", 5], ["fish_raw", 5], ["root", 5]],
@@ -76,6 +82,10 @@ const CSS = `
  background:rgba(20,18,14,.95);border:1px solid #d6aa68;color:#f0e6d2;padding:8px 14px;border-radius:6px;
  font:12px ui-monospace,monospace;pointer-events:none;transition:opacity .3s}
 body.devPicking #game{cursor:crosshair}
+#devSelect{position:fixed;z-index:10000;border:1.5px dashed #f0cc8c;background:rgba(240,204,140,.14);
+ pointer-events:none;border-radius:2px}
+#devSelect .size{position:absolute;right:2px;bottom:2px;font:10px ui-monospace,monospace;color:#f0cc8c;
+ background:rgba(10,9,7,.7);padding:1px 3px;border-radius:2px}
 `;
 
 /* ----------------------------------------------------------------- utils */
@@ -356,12 +366,22 @@ export function installDevTools(game, win = window) {
         add("Заметки для правок");
         p.append(el("div", { className: "hint",
             textContent: "Отметь место на экране и опиши, что не так — заметка со скриншотом уедет в docs/notes/." }));
-        const noteBtn = btn("📍 Отметить место", () => startPicking());
-        const listBtn = btn("Список", async () => {
-            const r = await apiGet("/__dev/notes");
-            toast(r && r.ok ? `заметок: ${r.count}` : "сервер недоступен");
+        const noteBtn = btn("📍 Отметить место / область", () => startPicking(),
+                            "клик — точка, протянуть мышь — область");
+        row(noteBtn);
+        const queueLabel = el("span", { className: "val" });
+        const sendBtn = btn("Отправить очередь", () => flushQueue(true),
+                            "попробовать ещё раз, когда dev-сервер доступен");
+        const saveBtn = btn("Выгрузить файлом", () => downloadQueue(),
+                            "один файл со всеми заметками сразу");
+        const dropBtn = btn("Очистить", () => {
+            if (confirm("Удалить все заметки из очереди?")) { queue.clear(); state.refresh(); }
         });
-        row(noteBtn, listBtn);
+        row(queueLabel);
+        row(sendBtn, saveBtn, dropBtn);
+        p.append(el("div", { className: "hint",
+            textContent: "Без dev-сервера (например, на GitHub Pages) заметки копятся здесь, "
+                + "а не сыплются файлами в «Загрузки». Выгрузи их одним файлом и пришли мне." }));
 
         // ---- lock
         add("Доступ");
@@ -410,6 +430,9 @@ export function installDevTools(game, win = window) {
             gridBtn.classList.toggle("on", state.grid);
             hitBtn.classList.toggle("on", state.hitboxes);
             statBtn.classList.toggle("on", state.stats);
+            const n = queue.read().length;
+            queueLabel.textContent = n ? `в очереди: ${n}` : "очередь пуста";
+            sendBtn.classList.toggle("on", n > 0);
         }
         state.refresh = refresh;
         refresh();
@@ -443,17 +466,10 @@ export function installDevTools(game, win = window) {
 
     /* ------------------------------------------------------------- notes */
 
-    async function apiGet(path) {
-        try {
-            const r = await fetch(path, { headers: { "x-dev-token": state.token } });
-            return r.ok ? await r.json() : null;
-        } catch { return null; }
-    }
-
     function startPicking() {
         state.picking = true;
         document.body.classList.add("devPicking");
-        toast("кликни по месту, которое надо поправить (Esc — отмена)");
+        toast("клик — точка, протяни мышь — область (Esc — отмена)");
     }
 
     function screenToWorld(ev) {
@@ -465,11 +481,50 @@ export function installDevTools(game, win = window) {
         return { x: cam.x + sx / cam.zoom, y: cam.y + sy / cam.zoom, sx, sy };
     }
 
+    /**
+     * The frame as it was, with the mark drawn on it. A screenshot of the
+     * whole screen with no indication of WHERE the problem is only moves the
+     * guessing from you to me.
+     */
+    function markedShot(spot) {
+        const src = game.renderer.canvas;
+        try {
+            const scale = Math.min(1, DEV.shotMax / src.width);
+            const c = document.createElement("canvas");
+            c.width = Math.round(src.width * scale);
+            c.height = Math.round(src.height * scale);
+            const g = c.getContext("2d");
+            g.drawImage(src, 0, 0, c.width, c.height);
+            g.strokeStyle = "#ff4d4d";
+            g.lineWidth = Math.max(2, 2 * scale);
+            if (spot.kind === "area") {
+                g.strokeRect(spot.sx * scale, spot.sy * scale, spot.sw * scale, spot.sh * scale);
+                g.fillStyle = "rgba(255,77,77,0.12)";
+                g.fillRect(spot.sx * scale, spot.sy * scale, spot.sw * scale, spot.sh * scale);
+            } else {
+                const x = spot.sx * scale, y = spot.sy * scale, r = 16 * scale;
+                g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.stroke();
+                g.beginPath();
+                g.moveTo(x - r * 1.7, y); g.lineTo(x - r * 0.4, y);
+                g.moveTo(x + r * 0.4, y); g.lineTo(x + r * 1.7, y);
+                g.moveTo(x, y - r * 1.7); g.lineTo(x, y - r * 0.4);
+                g.moveTo(x, y + r * 0.4); g.lineTo(x, y + r * 1.7);
+                g.stroke();
+            }
+            return c.toDataURL("image/png");
+        } catch {
+            return "";
+        }
+    }
+
     function noteForm(spot) {
+        const where = spot.kind === "area"
+            ? `область ${Math.round(spot.w)}×${Math.round(spot.h)} от ${Math.round(spot.x)},${Math.round(spot.y)}`
+            : `точка ${Math.round(spot.x)},${Math.round(spot.y)}`;
         const ta = el("textarea", { placeholder: "что здесь не так и как должно быть" });
         const box = el("div", { id: "devNoteForm" }, [
             el("div", { className: "hint",
-                textContent: `${game.zone.def.name} · ${Math.round(spot.x)},${Math.round(spot.y)} · `
+                textContent: `${game.zone.def.name} · ${where} · `
                     + `день ${game.clock.day} ${game.clock.clockString()} · ${game.weather.current}` }),
             ta
         ]);
@@ -490,15 +545,79 @@ export function installDevTools(game, win = window) {
         ta.focus();
     }
 
+    /* ---- the queue ---------------------------------------------------- */
+
+    const queue = {
+        read() {
+            try { return JSON.parse(localStorage.getItem(DEV.queueKey) || "[]"); }
+            catch { return []; }
+        },
+        write(list) {
+            try { localStorage.setItem(DEV.queueKey, JSON.stringify(list.slice(-DEV.queueMax))); }
+            catch { toast("очередь переполнена — выгрузи её файлом"); }
+        },
+        push(note) {
+            const list = this.read();
+            list.push(note);
+            this.write(list);
+            return list.length;
+        },
+        clear() { localStorage.removeItem(DEV.queueKey); }
+    };
+
+    /** Try the dev server once. Returns the saved file name, or null. */
+    async function postNote(note) {
+        try {
+            const r = await fetch("/__dev/note", {
+                method: "POST",
+                headers: { "content-type": "application/json", "x-dev-token": state.token },
+                body: JSON.stringify(note)
+            });
+            if (!r.ok) return null;
+            const j = await r.json();
+            return j.file || "ok";
+        } catch { return null; }
+    }
+
+    /** Send everything that is waiting. Quiet when there is nothing to do. */
+    async function flushQueue(loud = false) {
+        const list = queue.read();
+        if (!list.length) { if (loud) toast("очередь пуста"); return 0; }
+        const left = [];
+        let sent = 0;
+        for (const note of list) {
+            // eslint-disable-next-line no-await-in-loop — order matters, these are notes
+            const file = await postNote(note);
+            if (file) sent++; else left.push(note);
+        }
+        queue.write(left);
+        if (sent) toast(`отправлено заметок: ${sent}` + (left.length ? `, осталось ${left.length}` : ""));
+        else if (loud) toast("сервер недоступен — заметки ждут в очереди");
+        if (state.refresh) state.refresh();
+        return sent;
+    }
+
+    /** One file with everything in it, instead of a file per note. */
+    function downloadQueue() {
+        const list = queue.read();
+        if (!list.length) { toast("очередь пуста"); return; }
+        const bundle = { kind: "minirpg-notes", version: 1, at: new Date().toISOString(), notes: list };
+        const blob = new Blob([JSON.stringify(bundle)], { type: "application/json" });
+        const a = el("a", { href: URL.createObjectURL(blob),
+                            download: `notes-${new Date().toISOString().slice(0, 10)}-${list.length}.json` });
+        document.body.append(a); a.click(); a.remove();
+        toast(`выгружено заметок: ${list.length} (одним файлом)`);
+    }
+
     async function sendNote(spot, text) {
-        // A note without a picture is half a note: grab the frame as it is.
-        let shot = "";
-        try { shot = game.renderer.canvas.toDataURL("image/png"); } catch { /* tainted canvas */ }
         const note = {
             text,
+            kind: spot.kind || "point",
             zone: game.zone.id,
             zoneName: game.zone.def.name,
             x: Math.round(spot.x), y: Math.round(spot.y),
+            w: spot.kind === "area" ? Math.round(spot.w) : 0,
+            h: spot.kind === "area" ? Math.round(spot.h) : 0,
             screenX: Math.round(spot.sx), screenY: Math.round(spot.sy),
             day: game.clock.day, time: game.clock.clockString(),
             season: game.clock.season.key,
@@ -506,28 +625,15 @@ export function installDevTools(game, win = window) {
             zoom: Number(game.camera.zoom.toFixed(2)),
             seed: game.seed,
             at: new Date().toISOString(),
-            shot
+            shot: markedShot(spot)
         };
-        try {
-            const r = await fetch("/__dev/note", {
-                method: "POST",
-                headers: { "content-type": "application/json", "x-dev-token": state.token },
-                body: JSON.stringify(note)
-            });
-            if (r.ok) {
-                const j = await r.json();
-                toast("заметка сохранена: " + j.file);
-                return;
-            }
-            toast("сервер отказал (" + r.status + "), скачиваю файлом");
-        } catch {
-            toast("нет dev-сервера, скачиваю файлом");
-        }
-        // Fallback: hand the note to the browser as a download.
-        const blob = new Blob([JSON.stringify(note, null, 2)], { type: "application/json" });
-        const a = el("a", { href: URL.createObjectURL(blob),
-                            download: `note-${Date.now()}.json` });
-        document.body.append(a); a.click(); a.remove();
+        const file = await postNote(note);
+        if (file) { toast("заметка сохранена: " + file); return; }
+        // No server (GitHub Pages, a file:// page): the note waits in the
+        // browser instead of landing in Downloads as yet another file.
+        const n = queue.push(note);
+        toast(`сервера нет — заметка ${n} в очереди, выгрузишь одним файлом`);
+        if (state.refresh) state.refresh();
     }
 
     /* ------------------------------------------------------------ wiring */
@@ -536,6 +642,9 @@ export function installDevTools(game, win = window) {
         state.open = on === undefined ? !state.open : on;
         if (state.panel) state.panel.style.display = state.open ? "block" : "none";
         if (state.open && state.refresh) state.refresh();
+        // Opening the panel is a good moment to try the server again: notes
+        // written on Pages get saved the next time you play through serve.js.
+        if (state.open && state.unlocked) flushQueue(false);
     }
 
     async function unlock() {
@@ -565,17 +674,64 @@ export function installDevTools(game, win = window) {
         }
         if (e.key === "Escape" && state.picking) {
             state.picking = false;
+            dragFrom = null;
+            hideBox();
             document.body.classList.remove("devPicking");
         }
     });
+
+    // Click = a point, drag = an area. The box follows the mouse so you can
+    // see exactly what you are about to mark.
+    let dragFrom = null, dragBox = null;
+
+    const showBox = (a, b) => {
+        if (!dragBox) {
+            dragBox = el("div", { id: "devSelect" }, [el("div", { className: "size" })]);
+            document.body.append(dragBox);
+        }
+        const x = Math.min(a.cx, b.cx), y = Math.min(a.cy, b.cy);
+        const w = Math.abs(a.cx - b.cx), h = Math.abs(a.cy - b.cy);
+        dragBox.style.left = x + "px"; dragBox.style.top = y + "px";
+        dragBox.style.width = w + "px"; dragBox.style.height = h + "px";
+        dragBox.firstChild.textContent = `${Math.round(w)}×${Math.round(h)}`;
+    };
+    const hideBox = () => { if (dragBox) { dragBox.remove(); dragBox = null; } };
 
     win.addEventListener("mousedown", (ev) => {
         if (!state.picking) return;
         if (state.panel && state.panel.contains(ev.target)) return;
         ev.preventDefault(); ev.stopPropagation();
+        const w = screenToWorld(ev);
+        dragFrom = { ...w, cx: ev.clientX, cy: ev.clientY };
+    }, true);
+
+    win.addEventListener("mousemove", (ev) => {
+        if (!state.picking || !dragFrom) return;
+        const d = Math.hypot(ev.clientX - dragFrom.cx, ev.clientY - dragFrom.cy);
+        if (d >= DEV.dragMin) showBox(dragFrom, { cx: ev.clientX, cy: ev.clientY });
+    }, true);
+
+    win.addEventListener("mouseup", (ev) => {
+        if (!state.picking || !dragFrom) return;
+        ev.preventDefault(); ev.stopPropagation();
+        const to = screenToWorld(ev);
+        const moved = Math.hypot(ev.clientX - dragFrom.cx, ev.clientY - dragFrom.cy);
+        const from = dragFrom;
+        dragFrom = null;
+        hideBox();
         state.picking = false;
         document.body.classList.remove("devPicking");
-        noteForm(screenToWorld(ev));
+        if (moved < DEV.dragMin) {
+            noteForm({ kind: "point", x: to.x, y: to.y, sx: to.sx, sy: to.sy });
+            return;
+        }
+        noteForm({
+            kind: "area",
+            x: Math.min(from.x, to.x), y: Math.min(from.y, to.y),
+            w: Math.abs(to.x - from.x), h: Math.abs(to.y - from.y),
+            sx: Math.min(from.sx, to.sx), sy: Math.min(from.sy, to.sy),
+            sw: Math.abs(to.sx - from.sx), sh: Math.abs(to.sy - from.sy)
+        });
     }, true);
 
     // An already-unlocked session gets its panel back without asking again.
