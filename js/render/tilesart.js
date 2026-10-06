@@ -325,14 +325,18 @@ function detailPass(ctx, id, px, py, size, tx, ty, pal) {
             const deep = id === T.DEEP;
             // Depth: the open water sinks towards blue-black, the shallows
             // keep a sandy glow. Continuous noise, so no tile steps.
-            const q = size / 4;
-            for (let cy2 = 0; cy2 < 4; cy2++) {
-                for (let cx2 = 0; cx2 < 4; cx2++) {
-                    const gx = tx * 4 + cx2, gy = ty * 4 + cy2;
-                    const d = soft(gx, gy, 9, 13);
+            // Eight cells a side, not four: at four the depth noise shows as
+            // chequerboard patches two tiles wide on open water.
+            const CELLS = 8, q = size / CELLS;
+            for (let cy2 = 0; cy2 < CELLS; cy2++) {
+                for (let cx2 = 0; cx2 < CELLS; cx2++) {
+                    const gx = tx * CELLS + cx2, gy = ty * CELLS + cy2;
+                    const d = soft(gx, gy, 6, 13) * 0.6 + soft(gx, gy, 2.5, 29) * 0.4;
+                    // Small amplitude on purpose: strong depth noise at this
+                    // scale turns open water into a chequerboard of tiles.
                     ctx.fillStyle = deep
-                        ? `rgba(8,26,44,${0.18 + d * 0.3})`
-                        : `rgba(16,54,78,${0.06 + d * 0.22})`;
+                        ? `rgba(8,26,44,${0.26 + d * 0.08})`
+                        : `rgba(16,54,78,${0.08 + d * 0.08})`;
                     // Exact, non-overlapping cells: translucent fills that
                     // overlap by half a pixel leave a grid of dark seams.
                     ctx.fillRect(px + cx2 * q, py + cy2 * q, q, q);
@@ -744,9 +748,19 @@ export function paintEdges(ctx, map, tx, ty, px, py, size) {
             });
         } else if (hi.liquid && oi.liquid) {
             // Shallow meeting deep: a soft lip instead of a hard rectangle.
+            // A wide, ragged blend — the step from shallow to deep is the
+            // biggest colour jump on the map and a straight tile edge there
+            // reads as a painted rectangle.
             const lighter = here === T.WATER;
-            band((i) => wobble(i, 29) * 8, (off, len, d) => {
-                ctx.fillStyle = lighter ? "rgba(10,34,56,0.18)" : "rgba(120,170,190,0.16)";
+            band((i) => 4 + wobble(i, 29) * 9, (off, len, d) => {
+                ctx.fillStyle = lighter ? "rgba(10,34,56,0.16)" : "rgba(104,160,184,0.16)";
+                if (side === "n") ctx.fillRect(px + off, py, len, d);
+                if (side === "s") ctx.fillRect(px + off, py + size - d, len, d);
+                if (side === "w") ctx.fillRect(px, py + off, d, len);
+                if (side === "e") ctx.fillRect(px + size - d, py + off, d, len);
+            });
+            band((i) => 1.5 + wobble(i, 37) * 4, (off, len, d) => {
+                ctx.fillStyle = lighter ? "rgba(10,34,56,0.14)" : "rgba(104,160,184,0.14)";
                 if (side === "n") ctx.fillRect(px + off, py, len, d);
                 if (side === "s") ctx.fillRect(px + off, py + size - d, len, d);
                 if (side === "w") ctx.fillRect(px, py + off, d, len);
@@ -822,8 +836,7 @@ export function paintEdges(ctx, map, tx, ty, px, py, size) {
         const seed = tx * 7 + ty * 13 + sx + sy * 2;
         // Each corner bites a different amount — a pond rounded by the same
         // quarter circle four times is just a rectangle with cut corners.
-        const bite = size * (0.16 + h(tx + sx, ty + sy, 23) * 0.3);
-        if (isPuddle) continue;
+        const bite = size * ((isPuddle ? 0.3 : 0.16) + h(tx + sx, ty + sy, 23) * 0.3);
         if (hereLiquid && !a.liquid && !b.liquid) {
             const land = tileInfo(a.id).colors;
             cornerPath(ctx, px, py, size, sx, sy, bite, seed);
@@ -835,11 +848,14 @@ export function paintEdges(ctx, map, tx, ty, px, py, size) {
             cornerPath(ctx, px, py, size, sx, sy, bite * 0.7, seed + 3);
             ctx.fill();
             ctx.restore();
-            // Foam follows the carved line, not the tile edge.
-            ctx.strokeStyle = "rgba(236,252,255,0.45)";
-            ctx.lineWidth = 1.6;
-            cornerPath(ctx, px, py, size, sx, sy, bite, seed);
-            ctx.stroke();
+            // Foam follows the carved line, not the tile edge — but a lone
+            // puddle has no surf, only a shape.
+            if (!isPuddle) {
+                ctx.strokeStyle = "rgba(236,252,255,0.45)";
+                ctx.lineWidth = 1.6;
+                cornerPath(ctx, px, py, size, sx, sy, bite, seed);
+                ctx.stroke();
+            }
         } else if (!hereLiquid && a.liquid && b.liquid && d.liquid) {
             // A headland sticking into the water gets its point rounded off.
             const sea = tileInfo(a.id).colors;

@@ -2,7 +2,7 @@
 import { suite, test, assert, run } from "./tiny.js";
 import { T, TILES, tileInfo, isSolidTile, TILE_SIZE } from "../js/world/tiles.js";
 import { TileMap, moveAndCollide, bodyBlocked, CHUNK } from "../js/world/tilemap.js";
-import { generateZone, WorldMap, Zone } from "../js/world/worldgen.js";
+import { generateZone, WorldMap, Zone, SHORE } from "../js/world/worldgen.js";
 import { ZONES, BIOMES, valleyTileCount, oppositeEdge, zoneDef } from "../js/world/regions.js";
 import { WeatherSystem, WEATHER } from "../js/world/weather.js";
 import { GameClock } from "../js/core/time.js";
@@ -17,6 +17,33 @@ test("every tile has a complete definition", () => {
         assert.ok(typeof def.solid === "boolean");
         assert.gte(def.speed, 0);
     }
+});
+
+test("water has depth: a wading rim, deep in the middle", () => {
+    const zone = generateZone("shore", "ashes-and-grain");
+    const map = zone.map;
+    let shallow = 0, deep = 0, farShallow = 0;
+    for (let y = 1; y < map.h - 1; y++) {
+        for (let x = 1; x < map.w - 1; x++) {
+            const id = map.get(x, y);
+            if (id !== T.WATER && id !== T.DEEP) continue;
+            if (id === T.DEEP) { deep++; continue; }
+            shallow++;
+            // A shallow tile must be able to see the bank within the band.
+            let near = false;
+            const R = Math.ceil(SHORE.maxBand) + 1;
+            for (let dy = -R; dy <= R && !near; dy++) {
+                for (let dx = -R; dx <= R; dx++) {
+                    const t = tileInfo(map.get(x + dx, y + dy));
+                    if (!t.liquid) { near = true; break; }
+                }
+            }
+            if (!near) farShallow++;
+        }
+    }
+    assert.gt(shallow, 20);
+    assert.gt(deep, shallow);          // the sea is mostly sea
+    assert.eq(farShallow, 0);          // no shallows out in the open water
 });
 
 test("the shallows are wadeable, the deep is not; paths beat mud", () => {

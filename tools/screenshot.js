@@ -272,6 +272,73 @@ const scenes = [
         }
     },
     {
+        name: "24-wade-tracks",
+        about: "Брод: следы на песке, ватерлиния, брызги",
+        setup(g) {
+            g.enterZone("shore", null, true);
+            g.clock.minute = 10 * 60;
+            // Find a piece of shallow water with four tiles of dry beach
+            // straight above it — that is the walk we want to record.
+            const map = g.zone.map;
+            let best = null;
+            for (let ty = 6; ty < map.h - 6 && !best; ty++) {
+                for (let tx = 6; tx < map.w - 6; tx++) {
+                    if (map.get(tx, ty) !== 9) continue;         // T.WATER
+                    let dry = true;
+                    for (let k = 1; k <= 5; k++) {
+                        const id = map.get(tx, ty - k);
+                        if (id !== 8 && id !== 1 && id !== 3) { dry = false; break; }
+                    }
+                    // Clear of props, so nothing pops an interaction prompt
+                    // over the very thing the frame is about.
+                    const cx = (tx + 0.5) * 32, cy = (ty - 2) * 32;
+                    if (dry && !g.zone.objects.some((o) => !o.removed &&
+                        Math.hypot(o.x - cx, o.y - cy) < 96)) { best = { tx, ty }; break; }
+                }
+            }
+            if (!best) return;
+            g.placeSafely((best.tx + 0.5) * 32, (best.ty - 4.5) * 32);
+            g.input.axis = () => ({ x: 0, y: 1 });               // walk south
+            g.input.pressed = () => false;
+            frames(g, 130);                                      // ~2.2 s of walking
+            g.input.axis = () => ({ x: 0, y: 0 });
+            // Finish the walk standing in the shallows, boots under water.
+            const wet = [];
+            for (let k = -2; k <= 3; k++) for (let m = 0; m <= 3; m++) {
+                if (map.get(best.tx + k, best.ty + m) === 9) wet.push([best.tx + k, best.ty + m]);
+            }
+            g.findInteractable = () => null;        // no prompt over the frame
+            if (wet.length) {
+                const pick = wet[Math.floor(wet.length / 2)];
+                g.placeSafely((pick[0] + 0.5) * 32, (pick[1] + 0.5) * 32);
+                g.particles.splash(g.player.x, g.player.y + 2, 1);
+            }
+            g.camera.zoom = 3.4;
+            g.camera.snapTo(g.player.x, g.player.y - 10);
+        }
+    },
+    {
+        name: "25-open-water",
+        about: "Открытая вода: глубина против отмели",
+        setup(g) {
+            g.enterZone("shore", null, true);
+            g.clock.minute = 13 * 60;
+            const map = g.zone.map;
+            let best = null, bestN = -1;
+            for (let ty = 4; ty < map.h - 4; ty++) {
+                for (let tx = 4; tx < map.w - 4; tx++) {
+                    if (map.get(tx, ty) !== 10) continue;    // T.DEEP
+                    let n = 0;
+                    for (let k = -3; k <= 3; k++) for (let m = -3; m <= 3; m++)
+                        if (map.get(tx + k, ty + m) === 10) n++;
+                    if (n > bestN) { bestN = n; best = { tx, ty }; }
+                }
+            }
+            if (best) g.camera.snapTo((best.tx + 0.5) * 32, (best.ty + 0.5) * 32);
+            g.camera.zoom = 2.2;
+        }
+    },
+    {
         name: "22-snow-winter",
         about: "Снег тремя слоями с ветром",
         setup(g) {

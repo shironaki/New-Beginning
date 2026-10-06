@@ -740,6 +740,7 @@ export class Renderer {
         this.drawWater(state.zone,
                        state.clock ? state.clock.daylight : 1,
                        state.clock ? state.clock.minute / 60 : 12);
+        if (state.tracks) state.tracks.draw(ctx, this.camera);
         this.drawObjects(state, dt);
         if (state.particles) state.particles.draw(ctx, this.camera);
         if (state.player.sleeping) {

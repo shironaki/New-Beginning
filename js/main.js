@@ -28,6 +28,7 @@ import { Campfire } from "./survival/campfire.js";
 import { CookingJournal, isCookable } from "./survival/cooking.js";
 import { Renderer } from "./render/renderer.js";
 import { Particles, FX, materialOf } from "./render/particles.js";
+import { Tracks } from "./render/tracks.js";
 import { propHeight } from "./render/tilesart.js";
 import { StoryEngine } from "./story/acts.js";
 import { HUD, fireRows } from "./ui/hud.js";
@@ -55,6 +56,7 @@ export class Game {
         this.inventory = new Inventory({ bus: this.bus });
         this.cookJournal = new CookingJournal({ bus: this.bus });
         this.particles = new Particles();
+        this.tracks = new Tracks();
         this.fires = new Map();          // `${zoneId}:${tx},${ty}` -> Campfire
         this.look = { skin: "#e2b48a", hair: "#3f2d20", shirt: "#77684a", pants: "#524636", accent: "#8a4b32" };
 
@@ -245,6 +247,7 @@ export class Game {
     enterZone(zoneId, fromEdge = null, silent = false) {
         const zone = this.world.get(zoneId);
         this.zone = zone;
+        this.tracks.clear();        // prints belong to the ground we left
         this._prepareZone(zone);
         this.camera.setBounds(zone.map.widthPx, zone.map.heightPx);
         if (fromEdge) {
@@ -632,6 +635,10 @@ export class Game {
                 this.particles.splash(this.player.x + this.player.stepSide * 2.5, this.player.y + 2,
                                       this.player.running ? 1.25 : 0.85);
             } else {
+                // Soft ground keeps the boot: sand, snow, mud, ash.
+                this.tracks.add(this.player.x, this.player.y + 2,
+                                this.player.faceX, this.player.faceY,
+                                this.player.stepSide, info);
                 this.particles.dust(this.player.x + this.player.stepSide * 2.5, this.player.y + 3,
                     this.player.running ? FX.dust.run : FX.dust.walk, dustColor(def));
             }
@@ -689,6 +696,7 @@ export class Game {
             if (now < was) this.camera.shake(FX.shake.thunder, FX.shake.thunderTime);
         }
         this.particles.update(dt);
+        this.tracks.update(dt);
         this.camera.update(dt);
         this.camera.follow(this.player.x, this.player.y - 8, dt);
         this.input.consume();
@@ -714,6 +722,7 @@ export class Game {
             weather: this.weather.current,
             windAngle: this.weather.windAngle,
             particles: this.particles,
+            tracks: this.tracks,
             fires: this.localFires,
             look: this.look,
             tool: activeDef && (activeDef.tool || activeDef.tags.includes("light"))

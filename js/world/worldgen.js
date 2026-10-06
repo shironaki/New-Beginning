@@ -8,7 +8,7 @@
  * browser and in tests.
  */
 import { RNG, mixSeeds, hashSeed, fbm2D } from "../core/rng.js";
-import { T, TILE_SIZE } from "./tiles.js";
+import { T, TILE_SIZE, tileInfo } from "./tiles.js";
 import { TileMap } from "./tilemap.js";
 import { ZONES, BIOMES, biomeDef, zoneDef } from "./regions.js";
 import { propDef } from "../sandbox/gather.js";
@@ -192,6 +192,78 @@ export class Zone {
 }
 
 /** Generate a whole zone from its definition. */
+/**
+ * How far from the bank you can still feel the bottom.
+ * Wading is a thing you do at the edge of the water, not a way to cross a
+ * lake on foot: everything deeper than this band becomes `T.DEEP`, which
+ * stops you.
+ */
+export const SHORE = {
+    wade: 1.7,          // base width of the shallows, tiles
+    vary: 1.1,          // noise adds up to this many tiles to the band
+    scale: 22,          // noise scale of that variation (big, slow waves)
+    maxBand: 3,         // hard cap, tiles
+    smooth: 3           // a tile surrounded by the other depth flips over
+};
+
+/**
+ * Second pass over the water: depth by distance to the nearest bank.
+ * Multi-source BFS from every piece of land, so a pond keeps its rim of
+ * shallows and the middle of a lake stays deep whatever the height noise did.
+ */
+function deepenWater(zone, seed) {
+    const map = zone.map, W = map.w, H = map.h;
+    const dist = new Int16Array(W * H).fill(-1);
+    const queue = new Int32Array(W * H);
+    let head = 0, tail = 0;
+    for (let i = 0; i < W * H; i++) {
+        if (!tileInfo(map.data[i]).liquid) { dist[i] = 0; queue[tail++] = i; }
+    }
+    if (tail === 0) return zone;        // a zone that is all water: leave it
+    while (head < tail) {
+        const i = queue[head++];
+        const x = i % W, y = (i / W) | 0, d = dist[i] + 1;
+        for (let k = 0; k < 4; k++) {
+            const nx = x + (k === 0 ? 1 : k === 1 ? -1 : 0);
+            const ny = y + (k === 2 ? 1 : k === 3 ? -1 : 0);
+            if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+            const j = ny * W + nx;
+            if (dist[j] !== -1) continue;
+            dist[j] = d;
+            queue[tail++] = j;
+        }
+    }
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            if (!tileInfo(map.data[i]).liquid) continue;
+            // A wobbly edge: a straight band of shallows around every lake
+            // would read as a drawn outline.
+            const n = fbm2D(seed + 733, x, y, { octaves: 2, scale: SHORE.scale });
+            const band = Math.min(SHORE.maxBand, SHORE.wade + n * SHORE.vary);
+            map.data[i] = dist[i] <= band ? T.WATER : T.DEEP;
+        }
+    }
+    // Clean the edge: a lone shallow tile out at sea (or a lone deep hole in
+    // the shallows) reads as a bright square, not as depth.
+    for (let pass = 0; pass < 2; pass++) {
+        const copy = map.data.slice();
+        for (let y = 1; y < H - 1; y++) {
+            for (let x = 1; x < W - 1; x++) {
+                const i = y * W + x, id = copy[i];
+                if (id !== T.WATER && id !== T.DEEP) continue;
+                const other = id === T.WATER ? T.DEEP : T.WATER;
+                let n = 0;
+                for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                    if (copy[(y + ddy) * W + x + ddx] === other) n++;
+                }
+                if (n >= SHORE.smooth) map.data[i] = other;
+            }
+        }
+    }
+    return zone;
+}
+
 export function generateZone(zoneId, worldSeed = 1) {
     const def = zoneDef(zoneId);
     if (!def) throw new Error(`Unknown zone: ${zoneId}`);
@@ -232,6 +304,7 @@ export function generateZone(zoneId, worldSeed = 1) {
         }
     }
 
+    if (!biome.cave) deepenWater(zone, seed);
     if (biome.cave) carveGallery(zone, rng);
     carveMainPath(zone, rng);
     sealBorders(zone);
