@@ -61,6 +61,19 @@ export const LIGHT = {
     /** Fog also lays a pale veil, otherwise it reads as "night at noon". */
     fogVeil: 0.06,
     fogHex: "#b9c2c8",
+    /**
+     * Moonlight. Night must READ as night, not as a switched-off monitor:
+     * a cool additive lift keeps silhouettes visible while staying clearly
+     * colder and dimmer than any flame. Clouds eat it, the phase paces it.
+     */
+    moon: {
+        hex: [150, 176, 226],
+        peak: 0.21,        // α of the lift at a clear full moon, deep night
+        rise: 0.42,        // ambient alpha where moonlight starts to count
+        phaseDays: 29,     // synodic month, for the waxing/waning cycle
+        phaseFloor: 0.5,  // even a new moon leaves this much skyglow
+        cloud: { clear: 1, wind: 0.95, cloudy: 0.45, fog: 0.3, snow: 0.35, rain: 0.2, storm: 0.08 }
+    },
     /** Caves: a torch is still far brighter, but the eye adjusts. */
     underground: { hex: "#0a0b10", a: 0.72 },
     /** Never crush the frame to black: the darkest pixel keeps this much. */
@@ -71,15 +84,17 @@ export const LIGHT = {
     sprite: 128,
     /** Named sources, so callers stop inventing radii. */
     presets: {
-        campfire: { r: 150, i: 1.0, warmth: 0.85, flicker: 1 },
-        torch: { r: 95, i: 0.9, warmth: 0.8, flicker: 1 },
+        campfire: { r: 118, i: 1.0, warmth: 0.85, flicker: 1 },
+        torch: { r: 84, i: 0.9, warmth: 0.8, flicker: 1 },
         window: { r: 60, i: 0.7, warmth: 0.5, flicker: 0 },
         caveEye: { r: 70, i: 0.42, warmth: 0.35, flicker: 0 }
     },
     /** Warm halo pass. */
-    halo: { alpha: 0.42, scale: 0.85, warm: [255, 150, 72], cool: [196, 216, 255] },
+    halo: { alpha: 0.3, scale: 0.58, warm: [255, 150, 72], cool: [196, 216, 255] },
+    /** The hot core right over the embers: small, bright, always warm. */
+    core: { alpha: 0.26, scale: 0.2 },
     /** Flicker: two detuned sines, never a random jitter (that reads as noise). */
-    flicker: { depth: 0.06, depth2: 0.05, speed: 9, speed2: 15.7 }
+    flicker: { depth: 0.06, depth2: 0.05, speed: 9, speed2: 15.7, intensity: 0.07 }
 };
 
 /* ========================= helpers ========================= */
@@ -154,8 +169,10 @@ function bakeAll() {
     if (BAKED) return;
     BAKED = true;
     CUTOUT = bakeSprite([
-        [0, "rgba(0,0,0,0.99)"], [0.3, "rgba(0,0,0,0.78)"],
-        [0.58, "rgba(0,0,0,0.38)"], [0.82, "rgba(0,0,0,0.12)"], [1, "rgba(0,0,0,0)"]
+        // Steep: a fire lights a circle, it does not fog half the valley.
+        [0, "rgba(0,0,0,1)"], [0.22, "rgba(0,0,0,0.86)"],
+        [0.46, "rgba(0,0,0,0.5)"], [0.7, "rgba(0,0,0,0.18)"],
+        [0.88, "rgba(0,0,0,0.05)"], [1, "rgba(0,0,0,0)"]
     ]);
     const warm = LIGHT.halo.warm, cool = LIGHT.halo.cool;
     HALO_WARM = bakeSprite([
@@ -168,6 +185,18 @@ function bakeAll() {
         [0.5, `rgba(${cool[0]},${cool[1]},${cool[2]},0.4)`],
         [1, `rgba(${cool[0]},${cool[1]},${cool[2]},0)`]
     ]);
+}
+
+/**
+ * How much moonlight a given night gets: 0 at a new moon, 1 at a full one,
+ * never below `phaseFloor` because the sky itself glows a little.
+ * Purely visual — the simulation never reads this.
+ */
+export function moonFactor(day = 0) {
+    const m = LIGHT.moon;
+    const ph = (((day % m.phaseDays) + m.phaseDays) % m.phaseDays) / m.phaseDays;
+    const lit = 0.5 - Math.cos(ph * Math.PI * 2) / 2;      // 0 → 1 → 0
+    return m.phaseFloor + (1 - m.phaseFloor) * lit;
 }
 
 /* ========================= the light map ========================= */
@@ -195,38 +224,42 @@ export class LightMap {
      * `warmth` 0..1 shifts the glow from pale to firelight-orange.
      * Entries come from a pool: queueing a light allocates nothing.
      */
-    add(x, y, radius, { intensity = 1, warmth = 0.7, flicker = 0 } = {}) {
+    add(x, y, radius, { intensity = 1, warmth = 0.7, flicker = 0, phase = 0 } = {}) {
         const n = this.lights.length;
         let L = this._pool[n];
-        if (!L) { L = { x: 0, y: 0, radius: 0, intensity: 1, warmth: 0.7, flicker: 0 }; this._pool[n] = L; }
+        if (!L) { L = { x: 0, y: 0, radius: 0, intensity: 1, warmth: 0.7, flicker: 0, phase: 0 }; this._pool[n] = L; }
         L.x = x; L.y = y; L.radius = radius;
         L.intensity = intensity; L.warmth = warmth; L.flicker = flicker;
+        // The phase must come from the WORLD, not from the screen: keyed off
+        // L.x the flicker changed speed whenever the camera moved.
+        L.phase = phase;
         this.lights.push(L);
         return this;
     }
 
     /** Same, by name: `addPreset(x, y, "campfire", zoom)`. */
-    addPreset(x, y, name, zoom = 1, intensity = null) {
+    addPreset(x, y, name, zoom = 1, intensity = null, phase = 0) {
         const p = LIGHT.presets[name];
         if (!p) return this;
         return this.add(x, y, p.r * zoom, {
             intensity: intensity === null ? p.i : intensity,
-            warmth: p.warmth, flicker: p.flicker
+            warmth: p.warmth, flicker: p.flicker, phase
         });
     }
 
-    _flick(L, time, phase) {
+    _flick(L, time, salt = 0) {
         if (!L.flicker) return 1;
         const f = LIGHT.flicker;
-        return 1 - f.depth + Math.sin(time * f.speed + phase) * f.depth
-                 + Math.sin(time * f.speed2) * f.depth2;
+        const p = L.phase + salt;
+        return 1 - f.depth + Math.sin(time * f.speed + p) * f.depth
+                 + Math.sin(time * f.speed2 + p * 1.7) * f.depth2;
     }
 
     /**
      * Composite darkness + lights onto the main context.
      * @param {CanvasRenderingContext2D} target
      */
-    render(target, { daylight = 1, hour = null, weather = "clear", underground = false, time = 0 } = {}) {
+    render(target, { daylight = 1, hour = null, weather = "clear", underground = false, time = 0, day = 0 } = {}) {
         const amb = hour === null
             ? (() => { const a = ambientFor(daylight, weather, underground); const rgb = parseHex(a.color); return { rgb, alpha: a.alpha }; })()
             : ambientAt(hour, weather, underground);
@@ -251,8 +284,9 @@ export class LightMap {
         c.globalCompositeOperation = "destination-out";
         if (CUTOUT) {
             for (const L of this.lights) {
-                const rad = Math.max(4, L.radius * this._flick(L, time, L.x));
-                c.globalAlpha = Math.min(1, L.intensity);
+                const fl = this._flick(L, time);
+                const rad = Math.max(4, L.radius * fl);
+                c.globalAlpha = Math.min(1, L.intensity * (1 - LIGHT.flicker.intensity * (1 - fl) * 8));
                 c.drawImage(CUTOUT, L.x - rad, L.y - rad, rad * 2, rad * 2);
             }
         }
@@ -271,12 +305,36 @@ export class LightMap {
             if (L.warmth <= 0) continue;
             const sprite = L.warmth > 0.5 ? HALO_WARM : HALO_COOL;
             if (!sprite) break;
-            const rad = L.radius * LIGHT.halo.scale * this._flick(L, time, L.y);
+            const rad = L.radius * LIGHT.halo.scale * this._flick(L, time, 1.3);
             target.globalAlpha = Math.min(0.85, LIGHT.halo.alpha * L.intensity * amb.alpha * 1.3);
             target.drawImage(sprite, L.x - rad, L.y - rad, rad * 2, rad * 2);
         }
+        // The hot core: a small bright disc over the embers themselves.
+        for (const L of this.lights) {
+            if (L.warmth <= 0.5 || !HALO_WARM) continue;
+            const rad = L.radius * LIGHT.core.scale * this._flick(L, time, 2.1);
+            target.globalAlpha = Math.min(0.9, LIGHT.core.alpha * L.intensity * amb.alpha * 1.4);
+            target.drawImage(HALO_WARM, L.x - rad, L.y - rad, rad * 2, rad * 2);
+        }
         target.globalAlpha = 1;
         target.restore();
+
+        // Moonlight: a cool, even lift so the night is dark BLUE and legible
+        // instead of a black screen with one orange hole in it.
+        const m = LIGHT.moon;
+        if (!underground && amb.alpha > m.rise) {
+            const nightK = Math.min(1, (amb.alpha - m.rise) / (0.86 - m.rise));
+            const cloud = m.cloud[weather] === undefined ? 1 : m.cloud[weather];
+            const a = m.peak * nightK * cloud * moonFactor(day);
+            if (a > 0.004) {
+                target.save();
+                target.globalCompositeOperation = "lighter";
+                target.globalAlpha = a;
+                target.fillStyle = `rgb(${m.hex[0]},${m.hex[1]},${m.hex[2]})`;
+                target.fillRect(0, 0, this.width, this.height);
+                target.restore();
+            }
+        }
 
         // Fog is a pale veil, not extra night.
         if (weather === "fog") {

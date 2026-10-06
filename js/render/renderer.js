@@ -63,7 +63,10 @@ export const WATER = {
     foamSeg: 8,             // segments of the foam polyline
     foamFlecks: 3,          // specks of spray thrown past the foam line
     foamFleckA: 0.3,
-    shelfA: 0.2             // reserved: the shallow shelf is baked, see paintEdges
+    shelfA: 0.2,            // reserved: the shallow shelf is baked, see paintEdges
+    fireStreakA: 0.4,       // α of a flame reflected in the water
+    fireStreakSeg: 3,       // broken pieces of that reflection
+    fireStreakLen: 0.5      // fraction of a tile each piece covers
 };
 
 /**
@@ -95,6 +98,13 @@ export const SKY = {
     lightningA: 0.34
 };
 
+/** Grading, in numbers. */
+export const GRADE = {
+    vignetteDay: 0.14,
+    vignetteNight: 0.26,
+    sunWashA: 0.1
+};
+
 export class Renderer {
     constructor(canvas, camera) {
         // Weather pools: positions are fractions of the screen, generated once
@@ -112,6 +122,7 @@ export class Renderer {
             this._sky.push(arr);
         }
         this._flash = 0;
+        this._gradCache = { key: "", vignette: null, sun: null };
         this.canvas = canvas;
         this.ctx = canvas.getContext("2d", { alpha: false });
         this.ctx.imageSmoothingEnabled = false;
@@ -248,6 +259,23 @@ export class Renderer {
                                  + Math.sin(ph * 0.7) * 1.5 * z;
                         ctx.fillStyle = `rgba(${glintCol},${(glintA * (tw - 0.55) / 0.45).toFixed(3)})`;
                         ctx.fillRect(gx, gy, WATER.glintSize * z, Math.max(1, 0.8 * z));
+                    }
+                }
+                // Fire reflected in the water: a broken warm streak that
+                // wobbles with the swell. Night by the lake should look wet.
+                for (const L of this._lights || []) {
+                    const d = Math.hypot(L.x - (wx + 16), L.y - (wy + 16));
+                    if (d > L.r * 0.9) continue;
+                    const fade = (1 - d / (L.r * 0.9)) * WATER.fireStreakA * L.i * (1 - daylight * 0.8);
+                    if (fade < 0.02) continue;
+                    const ls = cam.worldToScreen(L.x, L.y);
+                    ctx.fillStyle = `rgba(255,186,96,${fade.toFixed(3)})`;
+                    for (let i = 0; i < WATER.fireStreakSeg; i++) {
+                        const f = (i + 0.5) / WATER.fireStreakSeg;
+                        const yy = s.y + f * S;
+                        const sway = Math.sin(t * 2.1 + f * 6 + wy * 0.2) * 2.2 * z;
+                        const len = WATER.fireStreakLen * S * (0.5 + 0.5 * Math.abs(Math.cos(t + f * 3)));
+                        ctx.fillRect(ls.x - len / 2 + sway, yy, len, Math.max(1, 1.1 * z));
                     }
                 }
                 // The bank reflects the sky: a pale band hugging the shore on
@@ -400,8 +428,11 @@ export class Renderer {
         let n = 0;
         const push = (x, y, r, i) => {
             let L = out[n];
-            if (!L) { L = { x: 0, y: 0, r: 0, i: 1 }; out[n] = L; }
+            if (!L) { L = { x: 0, y: 0, r: 0, i: 1, phase: 0 }; out[n] = L; }
             L.x = x; L.y = y; L.r = r; L.i = i;
+            // Flicker phase keyed to the world, so two fires are out of step
+            // with each other and neither changes beat when the camera moves.
+            L.phase = (x * 0.013 + y * 0.029) % 6.283;
             n++;
         };
         if (state.fires) {
@@ -485,6 +516,29 @@ export class Renderer {
      * sideways when the hero walks. Pools are built in the constructor;
      * this draws from them and allocates nothing.
      */
+    /**
+     * Cached full-screen gradients. Rebuilt only when the canvas changes
+     * size — `createRadialGradient` per frame is an allocation per frame.
+     */
+    _grads(W, H) {
+        const key = W + "x" + H;
+        const c = this._gradCache;
+        if (c.key === key || !this.ctx.createRadialGradient) return c;
+        const g = this.ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.34,
+                                                W / 2, H / 2, Math.max(W, H) * 0.75);
+        g.addColorStop(0, "rgba(0,0,0,0)");
+        g.addColorStop(1, "rgb(6,6,10)");
+        const sun = this.ctx.createLinearGradient(0, 0, W * 0.9, H);
+        sun.addColorStop(0, `rgba(255,236,186,${GRADE.sunWashA})`);
+        sun.addColorStop(0.55, "rgba(255,236,186,0)");
+        c.key = key; c.vignette = g; c.sun = sun;
+        return c;
+    }
+
+    _vignette(W, H) { return this._grads(W, H).vignette || "rgba(0,0,0,0)"; }
+
+    _sunWash(W, H) { return this._grads(W, H).sun || "rgba(0,0,0,0)"; }
+
     drawWeather(weather, dt, windAngle = 0) {
         const ctx = this.ctx;
         const W = this.canvas.width, H = this.canvas.height;
@@ -616,11 +670,11 @@ export class Renderer {
             ctx.fillStyle = `rgba(112,96,56,${0.11 * noon})`;
             ctx.fillRect(0, 0, W, H);
             // Sunlight comes from the upper left: let the frame feel it.
-            const sun = ctx.createLinearGradient(0, 0, W * 0.9, H);
-            sun.addColorStop(0, `rgba(255,236,186,${0.1 * noon})`);
-            sun.addColorStop(0.55, "rgba(255,236,186,0)");
-            ctx.fillStyle = sun;
+            // Cached: building a gradient every frame is an allocation.
+            ctx.fillStyle = this._sunWash(W, H);
+            ctx.globalAlpha = noon;
             ctx.fillRect(0, 0, W, H);
+            ctx.globalAlpha = 1;
         }
         // Daylight itself: a bright sky bounce that makes noon read as noon
         // instead of "grey and gloomy".
@@ -633,19 +687,16 @@ export class Renderer {
             ctx.fillRect(0, 0, W, H);
         }
         ctx.globalCompositeOperation = "source-over";
-        if (daylight < 0.6) {                      // moonlight cools the shadows
-            ctx.fillStyle = `rgba(20,30,60,${0.1 * (1 - daylight)})`;
-            ctx.fillRect(0, 0, W, H);
-        }
+        // (The cool wash the night used to get lives in lighting.js now, as
+        // moonlight: it belongs with the rest of the light budget.)
 
-        // Vignette — barely there in daylight, heavy at night.
-        const vig = 0.16 + 0.26 * (1 - daylight);
-        const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.34,
-                                           W / 2, H / 2, Math.max(W, H) * 0.75);
-        g.addColorStop(0, "rgba(0,0,0,0)");
-        g.addColorStop(1, `rgba(6,6,10,${vig})`);
-        ctx.fillStyle = g;
+        // Vignette — barely there in daylight, present but gentle at night;
+        // the old 0.42 at midnight ate the corners of the frame whole.
+        const vig = GRADE.vignetteDay + (GRADE.vignetteNight - GRADE.vignetteDay) * (1 - daylight);
+        ctx.fillStyle = this._vignette(W, H);
+        ctx.globalAlpha = vig;
         ctx.fillRect(0, 0, W, H);
+        ctx.globalAlpha = 1;
         ctx.restore();
         return this;
     }
@@ -692,7 +743,7 @@ export class Renderer {
             if (!cam.isVisible(L.x, L.y, 200)) continue;
             const s = cam.worldToScreen(L.x, L.y);
             this.lightMap.add(s.x, s.y, L.r * cam.zoom,
-                { intensity: L.i, warmth: 0.88, flicker: 1 });
+                { intensity: L.i, warmth: 0.88, flicker: 1, phase: L.phase || 0 });
         }
         // Underground the eye adjusts: a weak glow so galleries are readable
         // even without a torch (a torch is still far brighter).
@@ -705,7 +756,8 @@ export class Renderer {
             daylight: state.clock ? state.clock.daylight : 1,
             weather: state.weather,
             underground: !!(state.zone.def && state.zone.def.underground),
-            time: this.time
+            time: this.time,
+            day: state.clock ? state.clock.day : 0
         });
 
         this.grade(state.clock, state.weather);

@@ -5,6 +5,7 @@ import { SUN, SHADOW, setSun, castShadow, setFireLights, setShadowOrigin, propHe
          ROCK, pick, rockOutline } from "../js/render/tilesart.js";
 import { Renderer, OCCLUDE } from "../js/render/renderer.js";
 import { READ, PALETTE, BODY } from "../js/render/charspec.js";
+import { moonFactor } from "../js/render/lighting.js";
 import { Particles } from "../js/render/particles.js";
 import { RNG, hashSeed, mixSeeds, valueNoise2D, fbm2D } from "../js/core/rng.js";
 import { EventBus } from "../js/core/events.js";
@@ -435,6 +436,26 @@ test("the hero stays readable: seams, edges and far limbs", () => {
     assert.lt(PALETTE.pantsFar, -30, "the far leg must be clearly darker");
     assert.lt(PALETTE.shirtFar, -30, "the far arm must be clearly darker");
     assert.lt(PALETTE.skinDeep, PALETTE.skinShade, "the far hand must be the darkest skin");
+});
+
+test("night is dark blue and legible, never a black screen", () => {
+    const night = ambientAt(1, "clear");
+    const noon = ambientAt(12, "clear");
+    assert.gt(night.alpha, 0.8, "midnight must be dark");
+    assert.lte(night.alpha, 0.9, "…but never opaque");
+    assert.lt(night.rgb[0], night.rgb[2], "night tints blue, not brown");
+    assert.near(noon.alpha, 0, 0.001, "noon is untouched daylight");
+    assert.gt(LIGHT.floor, 0.1, "the darkest pixel keeps some of its colour");
+    // Moonlight: paced by the phase, present even at a new moon, gone in a storm.
+    const phases = [];
+    for (let d = 0; d < LIGHT.moon.phaseDays; d++) phases.push(moonFactor(d));
+    assert.gte(Math.min(...phases), LIGHT.moon.phaseFloor - 1e-9, "a new moon still glows");
+    assert.near(Math.max(...phases), 1, 0.01, "a full moon reaches full strength");
+    assert.lt(LIGHT.moon.cloud.storm, LIGHT.moon.cloud.clear, "clouds eat the moon");
+    // Fires light a circle, they do not fog the valley.
+    assert.lt(LIGHT.presets.campfire.r, 130);
+    assert.lt(LIGHT.presets.torch.r, LIGHT.presets.campfire.r);
+    assert.lt(LIGHT.halo.scale, 1, "the warm halo stays inside the lit circle");
 });
 
 test("particles never allocate once the pool is warm", () => {
