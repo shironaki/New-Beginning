@@ -4,7 +4,8 @@ import * as cameraMod from "../js/engine/camera.js";
 import * as serveMod from "../serve.js";
 import { LIGHT, ambientAt } from "../js/render/lighting.js";
 import { SUN, SHADOW, setSun, castShadow, setFireLights, setShadowOrigin, propHeight,
-         ROCK, pick, rockOutline, BEND, setWalker, plantBend } from "../js/render/tilesart.js";
+         ROCK, pick, rockOutline, BEND, setWalker, plantBend, BREEZE, setBreeze, windLean,
+         ASH, PUDDLE, puddleGeom, loneWaterFloor } from "../js/render/tilesart.js";
 import { Renderer, OCCLUDE, CLOUDS } from "../js/render/renderer.js";
 import { READ, PALETTE, BODY } from "../js/render/charspec.js";
 import { moonFactor } from "../js/render/lighting.js";
@@ -606,6 +607,63 @@ test("parseArgs reads flags, positionals and the environment", () => {
     assert.eq(parseArgs([], {}).reload, true);
     assert.eq(parseArgs(["--no-reload"], {}).reload, false);
     assert.eq(parseArgs(["--port", "4100"], { PORT: "5050" }).port, 4100);   // flag wins
+});
+
+suite("wind");
+
+test("one wind field drives every plant", () => {
+    setBreeze(0, 1.4);                                   // a storm blowing east
+    const a = windLean(0, 0, 0);
+    const b = windLean(0, 0, 0, BREEZE.treeScale);
+    assert.lte(Math.abs(a), BREEZE.maxLean);
+    assert.lt(Math.abs(b), Math.abs(a));                 // trunks give less than stems
+    // The gust travels: two plants far apart are not at the same point of it.
+    assert.not(Math.abs(windLean(0, 0, 0) - windLean(900, 0, 0)) < 1e-6);
+    setBreeze(Math.PI, 1.4);                             // the other way round
+    assert.lt(windLean(0, 0, 0) * a, 0);
+    setBreeze(0, 0);
+    assert.eq(windLean(0, 0, 0), 0);                     // dead calm, nothing moves
+    setBreeze(0, 0.35);
+});
+
+test("a run flattens grass harder than a stroll", () => {
+    const plant = { x: 100, y: 100 };
+    setWalker(94, 100, true, 0);
+    const slow = plantBend(plant, "grass_tuft", 0);
+    const plant2 = { x: 100, y: 100 };
+    setWalker(94, 100, true, BEND.runAt);
+    const fast = plantBend(plant2, "grass_tuft", 0);
+    assert.gt(fast, slow);
+    assert.lte(fast, BEND.maxLean);
+    setWalker(0, 0, false, 0);
+});
+
+suite("the burn and the puddles");
+
+test("ash has warm and cold patches, not one grey", () => {
+    // Scorched earth keeps the fire in it, cold ash goes blue: red minus blue
+    // must point opposite ways for the two.
+    assert.gt(ASH.scorch[0] - ASH.scorch[2], 40);
+    assert.lt(ASH.coldAsh[0] - ASH.coldAsh[2], -20);
+    assert.gt(ASH.washA, 0);
+    assert.lt(ASH.washFrom, 1);
+    assert.eq(ASH.cells, 8);
+});
+
+test("a lone tile of water is a puddle on the floor", () => {
+    const W = 5, H = 5, floor = 4, water = 9;
+    const data = new Uint8Array(W * H).fill(floor);
+    data[2 * W + 2] = water;                              // one tile of water
+    const map = { w: W, h: H, get: (x, y) => (x < 0 || y < 0 || x >= W || y >= H ? 0 : data[y * W + x]) };
+    assert.eq(loneWaterFloor(map, 2, 2), floor);          // it is a puddle, on dirt
+    assert.eq(loneWaterFloor(map, 1, 1), -1);             // dry ground is not
+    data[2 * W + 3] = water;                              // give it a neighbour
+    assert.eq(loneWaterFloor(map, 2, 2), -1);             // now it is a pond
+
+    const g = puddleGeom(3, 7, 32);
+    assert.gt(g.rx, 0); assert.lt(g.rx, 32);              // the blob fits its tile
+    assert.lt(g.ry, g.rx);                                // flattened by the 3/4 view
+    assert.near(g.cx, 16, 32 * PUDDLE.offset + 0.01);
 });
 
 run("v3 core");

@@ -253,14 +253,35 @@ function detailPass(ctx, id, px, py, size, tx, ty, pal) {
             // patches where the ground burned through, and pale drifts where
             // the ash settled. Without this the whole valley is one flat tone.
             {
-                const CELLS = 8, q = size / CELLS;
+                const CELLS = ASH.cells, q = size / CELLS;
                 for (let cy2 = 0; cy2 < CELLS; cy2++) {
                     for (let cx2 = 0; cx2 < CELLS; cx2++) {
                         const gx = tx * CELLS + cx2, gy = ty * CELLS + cy2;
                         const n = soft(gx, gy, 26, 71) * 0.7 + soft(gx, gy, 9, 17) * 0.3;
-                        if (n > 0.56) ctx.fillStyle = `rgba(22,18,16,${(n - 0.56) * 0.5})`;
-                        else ctx.fillStyle = `rgba(214,206,194,${(0.56 - n) * 0.28})`;
+                        // A second, slower field decides what KIND of burn this
+                        // patch is: scorched earth still holds the fire's rust,
+                        // cold ash has gone blue-grey. Lightness alone made the
+                        // whole burn read as one grey photograph.
+                        const kind = Math.max(-1, Math.min(1, (soft(gx, gy, 38, 7) - 0.5) * ASH.kindGain));
+                        if (n > ASH.charAt) {
+                            const k = Math.min(1, (n - ASH.charAt) * ASH.charGain);
+                            ctx.fillStyle = mixRGBA(ASH.char, kind > 0 ? ASH.scorch : ASH.coldChar,
+                                                    Math.abs(kind) * ASH.tint, k);
+                        } else {
+                            const k = Math.min(1, (ASH.charAt - n) * ASH.drift);
+                            ctx.fillStyle = mixRGBA(ASH.ash, kind > 0 ? ASH.emberAsh : ASH.coldAsh,
+                                                    Math.abs(kind) * ASH.tint, k);
+                        }
                         ctx.fillRect(px + cx2 * q, py + cy2 * q, q, q);
+                        // A wash of colour on top of the lightness: rust where
+                        // the fire cooked the earth, cold blue where the ash
+                        // lay wet. Without it the burn is a grey photograph.
+                        const hue = Math.abs(kind) - ASH.washFrom;
+                        if (hue > 0) {
+                            const c = kind > 0 ? ASH.scorch : ASH.coldAsh;
+                            ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},${(hue * ASH.washA).toFixed(3)})`;
+                            ctx.fillRect(px + cx2 * q, py + cy2 * q, q, q);
+                        }
                     }
                 }
             }
@@ -631,9 +652,163 @@ function cornerPath(ctx, px, py, size, sx, sy, radius, seed) {
     ctx.closePath();
 }
 
-export function paintEdges(ctx, map, tx, ty, px, py, size) {
-    const here = map.get(tx, ty);
+/**
+ * The burn, in numbers. The fire that took the valley did not leave one grey:
+ * where it sat longest the earth is scorched rust, where it only passed the
+ * ash settled cold and blue. Two noise fields — one for lightness, one for
+ * the kind of burn — keep the ground from reading as a grey photograph.
+ */
+export const ASH = {
+    cells: 8,               // sub-cells per tile side
+    charAt: 0.56,           // noise above this is burned-through ground
+    charGain: 0.5,          // α ramp of the dark patches
+    drift: 0.28,            // α ramp of the pale drifts
+    tint: 0.85,             // how far a patch may travel from neutral
+    kindGain: 2.6,          // contrast of the warm/cold field
+    washFrom: 0.15,         // below this the patch stays neutral
+    washA: 0.34,             // α of the colour wash at full warm/cold
+    char: [22, 18, 16],     // neutral charcoal
+    scorch: [96, 48, 20],   // warm: earth cooked by the fire
+    coldChar: [30, 34, 44], // cold: wet soot in the shade
+    ash: [214, 206, 194],   // neutral ash drift
+    emberAsh: [216, 188, 150], // warm drift, still holding the ember colour
+    coldAsh: [168, 184, 202]   // cold drift, blue by the morning
+};
+
+/** Mix two rgb triplets and hand back an rgba() string. */
+function mixRGBA(a, b, t, alpha) {
+    const r = Math.round(a[0] + (b[0] - a[0]) * t);
+    const g = Math.round(a[1] + (b[1] - a[1]) * t);
+    const bl = Math.round(a[2] + (b[2] - a[2]) * t);
+    return `rgba(${r},${g},${bl},${alpha.toFixed(3)})`;
+}
+
+/**
+ * A lone tile of water, in numbers. Mine galleries are full of them, and a
+ * tile painted edge to edge is a square pond however nicely the rim wobbles.
+ * So the tile is given back to the floor and the water is drawn inside it as
+ * a closed, uneven blob.
+ */
+export const PUDDLE = {
+    lobes: 9,            // control points around the rim
+    rMin: 0.2,           // of a tile — the pinched side
+    rMax: 0.4,           // of a tile — the wide side
+    offset: 0.07,        // how far the blob may sit off-centre
+    rimA: 0.42,          // α of the damp ring around it
+    rimW: 2.0,           // px of that ring
+    deepA: 0.5,          // α of the darker middle
+    sheen: 0.45,         // size of the highlight, as a fraction of the blob
+    sheenA: 0.16
+};
+
+/** Trace the uneven rim of one puddle; the path is left open for fill/stroke. */
+function puddlePath(ctx, tx, ty, cx, cy, rx, ry) {
+    const N = PUDDLE.lobes;
+    const px2 = [], py2 = [];
+    for (let i = 0; i < N; i++) {
+        const a = (i / N) * Math.PI * 2;
+        const k = PUDDLE.rMin + h(tx * 7 + i, ty * 11 + i * 3, 29) * (PUDDLE.rMax - PUDDLE.rMin);
+        const kk = k / PUDDLE.rMax;
+        px2.push(cx + Math.cos(a) * rx * kk);
+        py2.push(cy + Math.sin(a) * ry * kk);
+    }
+    ctx.beginPath();
+    // Through the midpoints, with the control points as the corners: a closed
+    // curve with no kinks and no straight tile edge anywhere on it.
+    ctx.moveTo((px2[N - 1] + px2[0]) / 2, (py2[N - 1] + py2[0]) / 2);
+    for (let i = 0; i < N; i++) {
+        const j = (i + 1) % N;
+        ctx.quadraticCurveTo(px2[i], py2[i], (px2[i] + px2[j]) / 2, (py2[i] + py2[j]) / 2);
+    }
+    ctx.closePath();
+}
+
+/** Where the blob sits inside its tile, in units of the tile. */
+export function puddleGeom(tx, ty, size) {
+    return {
+        cx: size / 2 + (h(tx, ty, 17) - 0.5) * size * PUDDLE.offset * 2,
+        cy: size / 2 + (h(tx, ty, 19) - 0.5) * size * PUDDLE.offset * 2,
+        rx: size * PUDDLE.rMax,
+        ry: size * PUDDLE.rMax * 0.86          // flattened by the 3/4 view
+    };
+}
+
+/** Trace the puddle of tile (tx,ty) whose top-left corner is at (px,py). */
+export function puddleScreenPath(ctx, tx, ty, px, py, size, grow = 0) {
+    const g = puddleGeom(tx, ty, size);
+    puddlePath(ctx, tx, ty, px + g.cx, py + g.cy, g.rx + grow, g.ry + grow);
+}
+
+/**
+ * A lone tile of water and the floor it lies on, or -1. Majority vote, not
+ * the first neighbour: a gallery floor is a mix of rock and spoil, and
+ * picking the odd tile out would leave a pale square.
+ */
+export function loneWaterFloor(map, tx, ty) {
+    if (!tileInfo(map.get(tx, ty)).liquid) return -1;
+    for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        if (tileInfo(map.get(tx + ddx, ty + ddy)).liquid) return -1;
+    }
+    let floorId = -1, bestVotes = 0;
+    const votes = new Map();
+    for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
+        const id = map.get(tx + ddx, ty + ddy);
+        const info = tileInfo(id);
+        if (info.liquid || info.solid || !info.colors) continue;
+        const v = (votes.get(id) || 0) + 1;
+        votes.set(id, v);
+        if (v > bestVotes) { bestVotes = v; floorId = id; }
+    }
+    return floorId;
+}
+
+/** Paint the water of one puddle on top of an already-painted floor tile. */
+function paintPuddle(ctx, map, tx, ty, px, py, size, floorId) {
+    // Whatever the puddle lies on: the first dry neighbour wins.
+    const floor = tileInfo(floorId);
+    const water = tileInfo(map.get(tx, ty)).colors;
+    const g = puddleGeom(tx, ty, size);
+    const cx = px + g.cx, cy = py + g.cy, rx = g.rx, ry = g.ry;
+
+    // 2. Damp ground soaked around the rim.
+    ctx.save();
+    ctx.globalAlpha = PUDDLE.rimA;
+    ctx.fillStyle = floor.colors[2] || floor.colors[1];
+    puddlePath(ctx, tx, ty, cx, cy, rx + PUDDLE.rimW, ry + PUDDLE.rimW);
+    ctx.fill();
+    ctx.restore();
+
+    // 3. The water itself, with a darker middle and one flat highlight.
+    ctx.fillStyle = water[0];
+    puddlePath(ctx, tx, ty, cx, cy, rx, ry);
+    ctx.fill();
+    ctx.save();
+    ctx.globalAlpha = PUDDLE.deepA;
+    ctx.fillStyle = water[1] || water[0];
+    puddlePath(ctx, tx, ty, cx + 0.5, cy + 1, rx * 0.62, ry * 0.58);
+    ctx.fill();
+    ctx.globalAlpha = PUDDLE.sheenA;
+    ctx.fillStyle = "#dff0f6";
+    ctx.beginPath();
+    ctx.ellipse(cx - rx * 0.22, cy - ry * 0.3, rx * PUDDLE.sheen * 0.5, ry * PUDDLE.sheen * 0.26,
+                -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    return true;
+}
+
+export function paintEdges(ctx, map, tx, ty, px, py, size, season = "spring") {
+    let here = map.get(tx, ty);
     const dirs = [[0, -1, "n"], [1, 0, "e"], [0, 1, "s"], [-1, 0, "w"]];
+    // A single tile of water is a puddle, not a pond. The tile is handed back
+    // to the floor — edges, scree and contact shadows included, otherwise the
+    // clean tile shows as a bright square — and the water is drawn at the end
+    // as a closed blob lying on top of it.
+    const puddleFloor = loneWaterFloor(map, tx, ty);
+    if (puddleFloor >= 0) {
+        paintTile(ctx, puddleFloor, px, py, size, tx, ty, season);
+        here = puddleFloor;
+    }
     for (const [dx, dy, side] of dirs) {
         const other = map.get(tx + dx, ty + dy);
         if (other === here || other === T.VOID) continue;
@@ -757,6 +932,9 @@ export function paintEdges(ctx, map, tx, ty, px, py, size) {
                 if (!tileInfo(map.get(tx + dx + ddx, ty + dy + ddy)).liquid) landRound++;
             }
             const puddle = landRound >= 3;
+            // A lone puddle is drawn as a blob; a band hugging the tile
+            // border would put a square halo right back around it.
+            if (landRound >= 4) continue;
             band((i) => wobble(i, 11) * (puddle ? 4 : 7), (off, len, d) => {
                 ctx.fillStyle = "rgba(96,78,52,0.32)";            // wet ground
                 if (side === "n") ctx.fillRect(px + off, py, len, d);
@@ -890,6 +1068,7 @@ export function paintEdges(ctx, map, tx, ty, px, py, size) {
         }
     }
 
+    if (puddleFloor >= 0) paintPuddle(ctx, map, tx, ty, px, py, size, puddleFloor);
 }
 
 /* ======================================================================= */
@@ -1029,6 +1208,8 @@ export const BEND = {
     maxLean: 0.42,     // shear at point-blank range (x' = x - lean*y)
     squash: 0.16,      // the plant also loses this fraction of height, at most
     falloff: 1.7,      // >1 — the push is concentrated near the walker
+    runBoost: 0.5,     // + this fraction of the lean at full running speed
+    runAt: 118,        // px/s that counts as "full speed" (the run speed)
     releaseTau: 0.26,  // s — decay of the spring once the walker leaves
     wobbleHz: 3.4,     // Hz of the spring-back wobble
     kinds: {           // only things with stems bend; trunks and rocks do not
@@ -1037,11 +1218,50 @@ export const BEND = {
     }
 };
 
-const WALKER = { x: 0, y: 0, on: false };
+/**
+ * The wind as the plants feel it, in numbers. One field for the whole frame:
+ * a steady lean downwind plus a gust that travels across the valley, so a
+ * squall bends the whole meadow the same way at the same moment instead of
+ * every tuft wobbling on its own private timer.
+ */
+export const BREEZE = {
+    leanPerStrength: 0.085,   // shear of the steady lean at strength 1
+    gustPerStrength: 0.075,   // extra shear at the crest of a gust
+    gustHz: 0.37,             // how often a gust rolls through
+    gustWave: 0.013,          // rad per px — the gust travels, it does not pulse
+    treeScale: 0.45,          // trunks give less than stems
+    maxLean: 0.3              // nothing bends past this, however hard it blows
+};
+
+const BREEZE_STATE = { ang: 0, str: 0.35, cos: 1, sin: 0 };
+
+/** The sky tells the painter how hard it blows, once per frame. */
+export function setBreeze(angle, strength) {
+    BREEZE_STATE.ang = angle || 0;
+    BREEZE_STATE.str = strength === undefined ? 0.35 : strength;
+    BREEZE_STATE.cos = Math.cos(BREEZE_STATE.ang);
+    BREEZE_STATE.sin = Math.sin(BREEZE_STATE.ang);
+}
+
+/**
+ * Signed shear the wind puts on a plant standing at (wx, wy) this frame.
+ * Positive leans the top to the right (downwind is +x when the wind blows east).
+ */
+export function windLean(wx, wy, time, scale = 1) {
+    const B = BREEZE_STATE;
+    if (!B.str) return 0;
+    const phase = time * BREEZE.gustHz * Math.PI * 2 - (wx * B.cos + wy * B.sin) * BREEZE.gustWave;
+    const gust = (Math.sin(phase) * 0.6 + Math.sin(phase * 2.3 + 1.1) * 0.4);
+    const lean = (BREEZE.leanPerStrength + BREEZE.gustPerStrength * gust) * B.str * B.cos * scale;
+    return Math.max(-BREEZE.maxLean, Math.min(BREEZE.maxLean, lean));
+}
+
+const WALKER = { x: 0, y: 0, on: false, speed: 0 };
 
 /** Who is pushing through the undergrowth this frame (world coords). */
-export function setWalker(wx, wy, on = true) {
+export function setWalker(wx, wy, on = true, speed = 0) {
     WALKER.x = wx; WALKER.y = wy; WALKER.on = !!on;
+    WALKER.speed = speed || 0;
 }
 
 /**
@@ -1057,7 +1277,11 @@ export function plantBend(obj, kind, time) {
         const d = Math.sqrt(dx * dx + dy * dy);
         if (d < BEND.radius) {
             const k = Math.pow(1 - d / BEND.radius, BEND.falloff);
-            push = BEND.maxLean * weight * k * (dx >= 0 ? 1 : -1);
+            // A run flattens grass harder than a stroll does.
+            const fast = 1 + Math.min(1, WALKER.speed / BEND.runAt) * BEND.runBoost;
+            push = BEND.maxLean * weight * k * fast * (dx >= 0 ? 1 : -1);
+            if (push > BEND.maxLean) push = BEND.maxLean;
+            else if (push < -BEND.maxLean) push = -BEND.maxLean;
         }
     }
     const held = obj._bend || 0;
@@ -1716,7 +1940,9 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
 
     // Wind: only foliage sways, and each tree on its own phase.
     if (TREE_COLORS[kind]) {
-        const sway = Math.sin(time * 0.8 + obj.tx * 0.7 + obj.ty * 0.37) * 0.02;
+        // Own phase per tree, plus the gust the whole valley shares.
+        const own = Math.sin(time * 0.8 + obj.tx * 0.7 + obj.ty * 0.37) * 0.02;
+        const sway = own - windLean(obj.x, obj.y, time, BREEZE.treeScale);
         ctx.transform(1, 0, sway, 1, 0, 0);
         // No two trees the same height: ±18 %, and a slight horizontal flip.
         const grow = 0.84 + h(obj.tx, obj.ty, 41) * 0.36;
@@ -1725,8 +1951,10 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
         ctx.scale(grow, grow);
     }
 
-    // Undergrowth gives way to whoever walks through it.
-    const lean = plantBend(obj, kind, time);
+    // Undergrowth gives way to whoever walks through it — and to the wind.
+    const weight = BEND.kinds[kind] || 0;
+    const lean = plantBend(obj, kind, time)
+               + (weight ? windLean(obj.x, obj.y, time, weight) : 0);
     if (lean) {
         ctx.transform(1, 0, -lean, 1, 0, 0);
         ctx.scale(1, 1 - Math.abs(lean) / BEND.maxLean * BEND.squash);

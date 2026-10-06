@@ -41,6 +41,9 @@ export const FX = {
     dust: { spread: 5, drift: 10, rise: 4, riseVar: 6, life: 0.3, lifeVar: 0.25,
             size: 2, sizeVar: 2.4, walk: 2, run: 4, runBoost: 1.5 },
     /** Leaves shaken loose when a crown comes down. */
+    // Brushing through undergrowth: a couple of torn leaves per step, and
+    // only when the hero is actually moving through a plant.
+    rustle: { every: 0.22, leaves: 2, up: 7 },
     leaf: { spread: 26, rise: 10, riseVar: 18, life: 1.4, lifeVar: 1.1,
             gravity: 16, size: 2, sizeVar: 1.6, sway: 2.4 },
     /** Wading: droplets thrown up by a boot, and the ring it leaves behind. */
@@ -61,7 +64,8 @@ export const FX = {
     },
     /** Water finding its way through the roof of a mine. */
     ceilingDrip: {
-        rate: 0.5,          // drops per second near the hero
+        rate: 1.7,          // drops per second near the hero
+        rateVary: 0.75,     // ± of the interval, so drips never tick like a metronome
         spread: 170,
         fall: 70,           // px/s at birth
         gravity: 320,

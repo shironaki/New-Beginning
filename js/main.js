@@ -27,11 +27,20 @@ import { ambientTemperature } from "./survival/temperature.js";
 import { Campfire } from "./survival/campfire.js";
 import { CookingJournal, isCookable } from "./survival/cooking.js";
 import { Renderer } from "./render/renderer.js";
-import { Particles, FX, materialOf } from "./render/particles.js";
+import { Particles, FX, MATERIAL, materialOf } from "./render/particles.js";
 import { Tracks, TRACK } from "./render/tracks.js";
-import { propHeight } from "./render/tilesart.js";
+import { propHeight, BEND } from "./render/tilesart.js";
 import { StoryEngine } from "./story/acts.js";
 import { HUD, fireRows } from "./ui/hud.js";
+
+/**
+ * How hard it blows, by weather. One number feeds everything the wind
+ * touches: smoke, rain slant, the sway of the trees and the lean of the
+ * grass — so a gust looks like one gust and not four unrelated animations.
+ */
+export const WIND_BY_WEATHER = {
+    clear: 0.35, cloudy: 0.5, fog: 0.15, rain: 0.7, snow: 0.45, wind: 1.1, storm: 1.4
+};
 
 /** Dust takes the ground's own mid tone, so sand puffs pale and loam dark. */
 function dustColor(def) {
@@ -647,6 +656,21 @@ export class Game {
             }
         }
 
+        // Brushing through the undergrowth: the plants bend (renderer side)
+        // and give up a leaf or two. Throttled, and only while moving.
+        this._rustleAt = (this._rustleAt || 0) - dt;
+        if (this.player.moving && !this.player.sleeping && this._rustleAt <= 0) {
+            this._rustleAt = FX.rustle.every;
+            const R = BEND.radius;
+            for (const o of this.zone.objects) {
+                if (!BEND.kinds[o.kind]) continue;
+                const dx = o.x - this.player.x, dy = (o.y - this.player.y) * 1.4;
+                if (dx * dx + dy * dy > R * R) continue;
+                this.particles.leaves(o.x, o.y - FX.rustle.up, MATERIAL.plant.leaf, FX.rustle.leaves);
+                break;                                   // one plant per tick is plenty
+            }
+        }
+
         // Hotbar keys.
         for (let i = 1; i <= 6; i++) {
             if (this.input.justPressed("slot" + i)) this.inventory.setActive(i - 1);
@@ -686,10 +710,9 @@ export class Game {
         }
 
         // The sky drives the smoke: one call per frame, no per-particle wind.
-        this.particles.setWind(this.weather.windAngle,
-                               this.weather.current === "storm" ? 1.4
-                             : this.weather.current === "wind" ? 1.1
-                             : this.weather.current === "rain" ? 0.7 : 0.35);
+        this.windStrength = WIND_BY_WEATHER[this.weather.current] !== undefined
+            ? WIND_BY_WEATHER[this.weather.current] : WIND_BY_WEATHER.clear;
+        this.particles.setWind(this.weather.windAngle, this.windStrength);
         // Thunder: the flash is drawn by the renderer, the ground answers here.
         if (this.weather.current === "storm") {
             const period = 7.5;                     // same beat as the flash
@@ -743,7 +766,7 @@ export class Game {
         }
         this._dropAt = (this._dropAt || 0) - dt;
         if (this._dropAt <= 0) {
-            this._dropAt = 1 / D.rate;
+            this._dropAt = (1 / D.rate) * (1 + (Math.random() * 2 - 1) * D.rateVary);
             // Pick a floor tile near the hero: a drop needs somewhere to land.
             const x = this.player.x + (Math.random() - 0.5) * D.spread;
             const y = this.player.y + (Math.random() - 0.5) * D.spread * 0.7;
@@ -775,6 +798,7 @@ export class Game {
             clock: this.clock,
             weather: this.weather.current,
             windAngle: this.weather.windAngle,
+            windStrength: this.windStrength === undefined ? WIND_BY_WEATHER.clear : this.windStrength,
             particles: this.particles,
             tracks: this.tracks,
             fires: this.localFires,

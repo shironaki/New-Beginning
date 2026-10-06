@@ -14,6 +14,7 @@
  *   --zone <id>        zone to enter (default: the starting valley)
  *   --at x,y           world position for the hero (default: the zone spawn)
  *   --near <kind>      stand next to the closest prop of that kind (--gap px)
+ *   --puddle           stand by the closest lone tile of water
  *   --hour <0..24>     clock, fractional hours allowed        (default 12)
  *   --day <n>          day number — picks the season          (default 1)
  *   --weather <key>    clear|wind|cloudy|rain|storm|fog|snow  (default clear)
@@ -91,6 +92,26 @@ if (near && near !== true) {
     }
     if (!best) { console.error(`no "${want}" in zone ${game.zone.id}`); process.exit(1); }
     game.placeSafely(best.x - num("gap", 11), best.y + 1);
+}
+
+// --puddle: stand next to the closest lone tile of water (mine puddles).
+if (flag("puddle", false)) {
+    const { TILES, TILE_SIZE } = await import("../js/world/tiles.js");
+    const map = game.zone.map;
+    const liquid = (x, y) => { const t = TILES[map.get(x, y)]; return !!(t && t.liquid); };
+    let best = null, bd = Infinity;
+    for (let y = 1; y < map.h - 1; y++) {
+        for (let x = 1; x < map.w - 1; x++) {
+            if (!liquid(x, y)) continue;
+            if (liquid(x + 1, y) || liquid(x - 1, y) || liquid(x, y + 1) || liquid(x, y - 1)) continue;
+            const wx = x * TILE_SIZE + 16, wy = y * TILE_SIZE + 16;
+            const d = (wx - game.player.x) ** 2 + (wy - game.player.y) ** 2;
+            if (d < bd) { bd = d; best = [wx, wy]; }
+        }
+    }
+    if (!best) { console.error("no lone puddle in " + game.zone.id); process.exit(1); }
+    console.error(`puddle at ${best[0]},${best[1]}`);
+    game.placeSafely(best[0] - num("gap", 26), best[1] + 10);
 }
 
 const at = flag("at", null);

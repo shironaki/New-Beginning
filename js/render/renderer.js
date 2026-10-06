@@ -13,7 +13,7 @@
  */
 import { CHUNK } from "../world/tilemap.js";
 import { TILE_SIZE, TILES } from "../world/tiles.js";
-import { paintTile, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, setWalker, propHeight } from "./tilesart.js";
+import { paintTile, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, setWalker, setBreeze, propHeight, puddleScreenPath } from "./tilesart.js";
 import { drawCharacter, drawSleeping } from "./character.js";
 import { LightMap, LIGHT } from "./lighting.js";
 import { itemEmoji } from "../sandbox/items.js";
@@ -194,7 +194,7 @@ export class Renderer {
             for (let tx = 0; tx < CHUNK; tx++) {
                 const wx = cx * CHUNK + tx, wy = cy * CHUNK + ty;
                 if (!zone.map.inBounds(wx, wy)) continue;
-                paintEdges(c, zone.map, wx, wy, tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE);
+                paintEdges(c, zone.map, wx, wy, tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, this.season);
             }
         }
         this.stats.baked++;
@@ -312,6 +312,28 @@ export class Renderer {
                 const id = zone.map.get(tx, ty);
                 const info = TILES[id];
                 if (!info || !info.liquid) continue;
+                // A lone tile of water is a puddle: the baked art already
+                // drew it as a blob lying on the floor, and anything painted
+                // here tile-wide would put the square straight back.
+                let wetAround = 0;
+                for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                    const nb = TILES[zone.map.get(tx + ddx, ty + ddy)];
+                    if (nb && nb.liquid) wetAround++;
+                }
+                if (wetAround === 0) {
+                    // …except under ground, where the only thing a puddle
+                    // reflects is the dark: tint it, but along the blob's own
+                    // outline, never across the tile.
+                    if (underground) {
+                        const s2 = cam.worldToScreen(tx * TILE_SIZE, ty * TILE_SIZE);
+                        ctx.save();
+                        ctx.fillStyle = `rgba(10,16,24,${WATER.caveTint})`;
+                        puddleScreenPath(ctx, tx, ty, s2.x, s2.y, TILE_SIZE * cam.zoom);
+                        ctx.fill();
+                        ctx.restore();
+                    }
+                    continue;
+                }
                 const s = cam.worldToScreen(tx * TILE_SIZE, ty * TILE_SIZE);
                 const z = cam.zoom, S = TILE_SIZE * z;
                 const wx = tx * TILE_SIZE, wy = ty * TILE_SIZE;
@@ -835,7 +857,11 @@ export class Renderer {
         // light map re-uses the same list afterwards in screen space.
         this._collectLights(state);
         // Undergrowth needs to know who is wading through it this frame.
-        setWalker(state.player.x, state.player.y, !state.player.sleeping);
+        const pv = Math.hypot(state.player.vx || 0, state.player.vy || 0);
+        setWalker(state.player.x, state.player.y, !state.player.sleeping, pv);
+        // …and how hard it blows on them.
+        setBreeze(state.windAngle || 0,
+                  state.windStrength === undefined ? 0.35 : state.windStrength);
         this.drawGround(state.zone);
         this.drawWater(state.zone,
                        state.clock ? state.clock.daylight : 1,
