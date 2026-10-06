@@ -630,6 +630,25 @@ export function paintEdges(ctx, map, tx, ty, px, py, size) {
             continue;
         }
         if (oi.solid && !oi.liquid) {
+            // A skirt of scree: the rock does not end on the tile border, it
+            // spills a ragged fringe of rubble onto the floor. Without this
+            // every gallery wall and every cliff is a straight line on the
+            // grid, and the mine reads as a tiled dungeon.
+            const teeth = 16, seg = size / teeth;
+            for (let layer = 0; layer < 2; layer++) {
+                ctx.fillStyle = oi.colors[layer === 0 ? 1 : 2];
+                ctx.globalAlpha = layer === 0 ? 0.72 : 0.4;
+                for (let i = 0; i < teeth; i++) {
+                    const n = h(tx * 19 + i, ty * 23 + layer, side.charCodeAt(0));
+                    const n2 = h(tx * 7 + i * 3, ty * 13 + layer, side.charCodeAt(0) + 7);
+                    const d = (layer === 0 ? 3.2 : 6.5) * (0.25 + n * 1.2) * (0.55 + n2 * 0.8);
+                    if (side === "n") ctx.fillRect(px + i * seg, py, seg, d);
+                    if (side === "s") ctx.fillRect(px + i * seg, py + size - d, seg, d);
+                    if (side === "w") ctx.fillRect(px, py + i * seg, d, seg);
+                    if (side === "e") ctx.fillRect(px + size - d, py + i * seg, d, seg);
+                }
+            }
+            ctx.globalAlpha = 1;
             // Contact shadow cast by a cliff onto the neighbouring ground.
             ctx.fillStyle = "rgba(0,0,0,0.20)";
             if (side === "n") ctx.fillRect(px, py, size, 4);
@@ -702,14 +721,21 @@ export function paintEdges(ctx, map, tx, ty, px, py, size) {
             return 0.3 + n * 1.0 + n2 * 0.45;
         };
         if (oi.liquid && !hi.liquid) {
-            band((i) => wobble(i, 11) * 7, (off, len, d) => {
+            // Is that water a puddle? Then no dried foam line on our side —
+            // a white rim around one tile of water looks like a light box.
+            let landRound = 0;
+            for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                if (!tileInfo(map.get(tx + dx + ddx, ty + dy + ddy)).liquid) landRound++;
+            }
+            const puddle = landRound >= 3;
+            band((i) => wobble(i, 11) * (puddle ? 4 : 7), (off, len, d) => {
                 ctx.fillStyle = "rgba(96,78,52,0.32)";            // wet ground
                 if (side === "n") ctx.fillRect(px + off, py, len, d);
                 if (side === "s") ctx.fillRect(px + off, py + size - d, len, d);
                 if (side === "w") ctx.fillRect(px, py + off, d, len);
                 if (side === "e") ctx.fillRect(px + size - d, py + off, d, len);
             });
-            band((i) => wobble(i, 23) * 2.6, (off, len, d) => {
+            if (!puddle) band((i) => wobble(i, 23) * 2.6, (off, len, d) => {
                 ctx.fillStyle = "rgba(255,255,255,0.3)";          // dried foam line
                 if (side === "n") ctx.fillRect(px + off, py, len, d);
                 if (side === "s") ctx.fillRect(px + off, py + size - d, len, d);
@@ -727,6 +753,24 @@ export function paintEdges(ctx, map, tx, ty, px, py, size) {
                 if (side === "e") ctx.fillRect(px + size - d, py + off, d, len);
             });
         } else if (hi.liquid && !oi.liquid) {
+            // A puddle is not a coast: a tile of water ringed by land gets a
+            // plain damp rim, not surf and sand tongues. (Mine galleries are
+            // full of them, and a foaming square reads as a glowing bug.)
+            let landAround = 0;
+            for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                const nb = tileInfo(map.get(tx + ddx, ty + ddy));
+                if (!nb.liquid) landAround++;
+            }
+            if (landAround >= 3) {
+                band((i) => wobble(i, 17) * 3.5, (off, len, d) => {
+                    ctx.fillStyle = "rgba(40,54,58,0.35)";           // damp rim
+                    if (side === "n") ctx.fillRect(px + off, py, len, d);
+                    if (side === "s") ctx.fillRect(px + off, py + size - d, len, d);
+                    if (side === "w") ctx.fillRect(px, py + off, d, len);
+                    if (side === "e") ctx.fillRect(px + size - d, py + off, d, len);
+                });
+                continue;
+            }
             // Tongues of the bank poking into the water. Without them the
             // waterline stays exactly where the tile grid put it, and a pond
             // reads as a swimming pool however nice the foam is.
@@ -759,6 +803,15 @@ export function paintEdges(ctx, map, tx, ty, px, py, size) {
     // Where two neighbours on the same corner are the other medium, that
     // corner gets rounded off with their ground.
     const hereLiquid = tileInfo(here).liquid === true;
+    // How much water is this tile part of? A single puddle gets no coastline
+    // at all — carving bays and foam into one tile draws a bright frame.
+    let liquidAround = 0;
+    if (hereLiquid) {
+        for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            if (tileInfo(map.get(tx + ddx, ty + ddy)).liquid) liquidAround++;
+        }
+    }
+    const isPuddle = hereLiquid && liquidAround <= 1;
     const atSide = (dx, dy) => {
         const id = map.get(tx + dx, ty + dy);
         return { id, liquid: tileInfo(id).liquid === true, void: id === T.VOID };
@@ -770,6 +823,7 @@ export function paintEdges(ctx, map, tx, ty, px, py, size) {
         // Each corner bites a different amount — a pond rounded by the same
         // quarter circle four times is just a rectangle with cut corners.
         const bite = size * (0.16 + h(tx + sx, ty + sy, 23) * 0.3);
+        if (isPuddle) continue;
         if (hereLiquid && !a.liquid && !b.liquid) {
             const land = tileInfo(a.id).colors;
             cornerPath(ctx, px, py, size, sx, sy, bite, seed);

@@ -18,7 +18,7 @@
  * Body frame: origin between the feet, on the ground; up is negative Y.
  */
 import { SUN, castShadow } from "./tilesart.js";
-import { BODY, GEAR, TONE, PALETTE, READ, SHADOW, GAIT, ACTION, clamp01, easeInOutSine, q } from "./charspec.js";
+import { BODY, GEAR, TONE, PALETTE, READ, SHADOW, WADE, GAIT, ACTION, clamp01, easeInOutSine, q } from "./charspec.js";
 
 export const DEFAULT_LOOK = {
     skin: "#e2b48a",
@@ -235,8 +235,12 @@ export function drawCharacter(ctx, p) {
     // below still sits strictly under the feet — that is what keeps him
     // planted while the cast part stretches away from the light.
     ctx.save();
-    castShadow(ctx, SHADOW.coreRX * shrink, SHADOW.coreRY * shrink, 0.9,
-               SHADOW.castHeight, idle);
+    // In the shallows the water takes the shadow; drawing one under a boot
+    // that is underwater reads as a hole in the lake.
+    if (!p.wading) {
+        castShadow(ctx, SHADOW.coreRX * shrink, SHADOW.coreRY * shrink, 0.9,
+                   SHADOW.castHeight, idle);
+    }
     ctx.restore();
     // Halo: leans with the sun like every other shadow in the world.
     const sunLean = Math.min(1, SUN.alpha * SUN.len / 1.2);
@@ -471,6 +475,30 @@ export function drawCharacter(ctx, p) {
         drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, false);
         paintHand(toolArm, false);
     }
+    // --- the waterline -------------------------------------------------
+    if (p.wading) {
+        const t = idle * WADE.breatheHz;
+        const grow = 1 + Math.sin(t) * (WADE.breathe / WADE.ringRX);
+        ctx.globalAlpha = 1;
+        // Ring on the surface around the legs.
+        ctx.strokeStyle = `rgba(226,246,255,${WADE.ringA})`;
+        ctx.lineWidth = 0.7;
+        ctx.beginPath();
+        ctx.ellipse(0, WADE.lineY, WADE.ringRX * grow, WADE.ringRY * grow, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        // The water itself over the boots…
+        ctx.fillStyle = `rgba(79,143,168,${WADE.bodyA})`;
+        ctx.beginPath();
+        ctx.ellipse(0, WADE.lineY, WADE.rx, WADE.ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // …and the collar of foam where body meets surface.
+        ctx.strokeStyle = `rgba(236,252,255,${WADE.foamA})`;
+        ctx.lineWidth = WADE.foamW;
+        ctx.beginPath();
+        ctx.ellipse(0, WADE.lineY, WADE.rx, WADE.ry, 0, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+
     if (turning) ctx.restore();
 }
 

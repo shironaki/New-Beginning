@@ -75,7 +75,9 @@ export const LIGHT = {
         cloud: { clear: 1, wind: 0.95, cloudy: 0.45, fog: 0.3, snow: 0.35, rain: 0.2, storm: 0.08 }
     },
     /** Caves: a torch is still far brighter, but the eye adjusts. */
-    underground: { hex: "#0a0b10", a: 0.72 },
+    /** Caves: dark, but the gallery must still be legible without a torch —
+     *  a black screen is not atmosphere, it is a bug report. */
+    underground: { hex: "#0c1018", a: 0.54 },
     /** Never crush the frame to black: the darkest pixel keeps this much. */
     floor: 0.14,
     /** Below this the buffer is not even built. */
@@ -87,7 +89,7 @@ export const LIGHT = {
         campfire: { r: 118, i: 1.0, warmth: 0.85, flicker: 1 },
         torch: { r: 84, i: 0.9, warmth: 0.8, flicker: 1 },
         window: { r: 60, i: 0.7, warmth: 0.5, flicker: 0 },
-        caveEye: { r: 70, i: 0.42, warmth: 0.35, flicker: 0 }
+        caveEye: { r: 130, i: 0.8, warmth: 0.3, flicker: 0 }
     },
     /** Warm halo pass. */
     halo: { alpha: 0.3, scale: 0.58, warm: [255, 150, 72], cool: [196, 216, 255] },

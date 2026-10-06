@@ -43,6 +43,11 @@ export const FX = {
     /** Leaves shaken loose when a crown comes down. */
     leaf: { spread: 26, rise: 10, riseVar: 18, life: 1.4, lifeVar: 1.1,
             gravity: 16, size: 2, sizeVar: 1.6, sway: 2.4 },
+    /** Wading: droplets thrown up by a boot, and the ring it leaves behind. */
+    splash: { drops: 7, spread: 26, rise: 22, riseVar: 18, gravity: 150,
+              life: 0.3, lifeVar: 0.25, size: 1.2, sizeVar: 1.3,
+              color: "rgba(226,246,255,0.9)",
+              ringLife: 0.65, ringGrow: 26, ringA: 0.5 },
     /** A prop hitting the ground: a low ring of dust plus a thud of shake. */
     impact: { ring: 16, ringVar: 10, life: 0.5, lifeVar: 0.35, size: 3, sizeVar: 3 },
 
@@ -229,6 +234,32 @@ export class Particles {
     }
 
     /**
+     * A boot going into the shallows: a spray of droplets and an expanding
+     * ring on the surface. The ring is its own kind — it is drawn as an
+     * outline, so it reads as water and not as smoke.
+     */
+    splash(x, y, power = 1) {
+        const C = FX.splash;
+        const n = Math.max(2, Math.round(C.drops * power));
+        for (let i = 0; i < n; i++) {
+            const o = this._claim();
+            o.x = x + (Math.random() - 0.5) * 4; o.y = y;
+            o.vx = (Math.random() - 0.5) * C.spread * power;
+            o.vy = -(C.rise + Math.random() * C.riseVar) * power;
+            o.life = C.life + Math.random() * C.lifeVar; o.maxLife = C.life + C.lifeVar;
+            o.gravity = C.gravity;
+            o.size = C.size + Math.random() * C.sizeVar; o.alpha = 1; o.glyph = "";
+            o.color = C.color; o.kind = "spark";
+        }
+        const r = this._claim();
+        r.x = x; r.y = y; r.vx = 0; r.vy = 0; r.gravity = 0;
+        r.life = C.ringLife; r.maxLife = C.ringLife;
+        r.size = 2; r.alpha = C.ringA; r.glyph = "";
+        r.color = "rgba(226,246,255,"; r.kind = "ripple";
+        return this;
+    }
+
+    /**
      * Something heavy hit the ground: a low ring of dust pushed outward from
      * the point of impact. Paired with a camera shake by the caller.
      */
@@ -277,6 +308,7 @@ export class Particles {
             if (p.kind === "smoke") { p.size += dt * FX.smokeGrowth; p.vx *= FX.smokeDrag; }
             // A leaf does not fall straight: it slips side to side.
             if (p.kind === "leaf") p.x += Math.sin(p.life * 6) * FX.leaf.sway * dt * 6;
+            if (p.kind === "ripple") p.size += dt * FX.splash.ringGrow;
         }
         for (let i = this.tn - 1; i >= 0; i--) {
             const t = this.textPool[i];
@@ -330,7 +362,14 @@ export class Particles {
                     ctx.fillStyle = p.color;
                 }
                 const sz = p.size * cam.zoom * 0.5;
-                if (p.kind === "smoke") {
+                if (p.kind === "ripple") {
+                    // Flattened: we look at the water at an angle.
+                    ctx.strokeStyle = `rgba(226,246,255,${(a * p.alpha).toFixed(3)})`;
+                    ctx.lineWidth = Math.max(1, cam.zoom * 0.5);
+                    ctx.beginPath();
+                    ctx.ellipse(sx, sy, sz, sz * 0.42, 0, 0, Math.PI * 2);
+                    ctx.stroke();
+                } else if (p.kind === "smoke") {
                     ctx.beginPath(); ctx.arc(sx, sy, sz, 0, Math.PI * 2); ctx.fill();
                 } else {
                     ctx.fillRect(sx - sz / 2, sy - sz / 2, sz, sz);

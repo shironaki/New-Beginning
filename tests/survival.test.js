@@ -516,7 +516,7 @@ test("weight is vertical: the body drops on contact, rises on the pass", () => {
 });
 
 
-test("you cannot walk on water", () => {
+test("you can wade the shallows but the deep stops you", () => {
     const zone = generateZone("shore", 11);
     // Find a shallow-water tile with land next to it and try to wade in.
     let from = null, dir = null;
@@ -539,7 +539,20 @@ test("you cannot walk on water", () => {
     const p = new Player(from);
     for (let i = 0; i < 120; i++) p.update(1 / 60, dir, zone, {});
     const tile = zone.map.get(Math.floor(p.x / 32), Math.floor(p.y / 32));
-    assert.not(tile === 9 || tile === 10, "the hero walked into the water");
+    assert.not(tile === 10, "the hero swam into deep water");
+
+    // And wading is slow: the same push over the same time covers less
+    // ground in the shallows than on dry land.
+    const dry = new Player({ x: from.x, y: from.y });
+    const land = { x: -dir.x, y: -dir.y };
+    for (let i = 0; i < 60; i++) dry.update(1 / 60, land, zone, {});
+    const wet = new Player({ x: from.x, y: from.y });
+    for (let i = 0; i < 60; i++) wet.update(1 / 60, dir, zone, {});
+    const dryDist = Math.hypot(dry.x - from.x, dry.y - from.y);
+    const wetDist = Math.hypot(wet.x - from.x, wet.y - from.y);
+    if (zone.map.get(Math.floor(wet.x / 32), Math.floor(wet.y / 32)) === 9) {
+        assert.lt(wetDist, dryDist, "wading must cost you speed");
+    }
 });
 
 

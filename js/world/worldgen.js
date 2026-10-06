@@ -209,9 +209,10 @@ export function generateZone(zoneId, worldSeed = 1) {
             const wet = fbm2D(seed + 1013, x, y, { octaves: 3, scale: 18 });
             let tile;
             if (biome.cave) {
-                // Underground: galleries of rock floor between walls of stone.
-                tile = hgt > 0.62 ? T.CLIFF : (wet > 0.62 ? T.GRAVEL : T.STONE);
-                map.data[y * def.w + x] = tile;
+                // Underground starts as SOLID rock. The galleries are cut out
+                // of it afterwards by `carveGallery` — noise thresholds gave
+                // open fields with boulders, which is not a mine.
+                map.data[y * def.w + x] = T.CLIFF;
                 continue;
             }
             if (hgt < biome.water * 0.55) tile = T.DEEP;
@@ -231,6 +232,7 @@ export function generateZone(zoneId, worldSeed = 1) {
         }
     }
 
+    if (biome.cave) carveGallery(zone, rng);
     carveMainPath(zone, rng);
     sealBorders(zone);
     makePortals(zone);
@@ -246,6 +248,130 @@ export function generateZone(zoneId, worldSeed = 1) {
  * A worn path threading the zone between its links — keeps big maps readable
  * and gives the eye somewhere to go.
  */
+/**
+ * A mine is a NETWORK, not a cavern: chambers joined by tunnels two or three
+ * tiles wide, cut from solid rock. The player should always be able to see a
+ * wall on at least one side and a way on at the end — that is what makes the
+ * dark feel like a mine instead of a field at night.
+ *
+ * Layout, in numbers:
+ *   rooms      5…7, each 5…11 × 4…8 tiles
+ *   tunnels    L-shaped between consecutive rooms, 2…3 wide
+ *   floor      STONE, with GRAVEL spoil along the walls
+ *   water      puddles in the lowest corners — wadeable, now that the
+ *              shallows are
+ */
+export const MINE = {
+    rooms: [5, 7], roomW: [5, 11], roomH: [4, 8],
+    tunnel: [2, 3], margin: 4,
+    spoil: 0.22,        // chance a floor tile touching rock is spoil
+    puddle: 0.18,       // chance a chamber grows a puddle
+    rough: 0.3,         // chance a wall tile on the rim is bitten back
+    erode: 0.4,         // chance a corner of rock sticking into a room goes
+    pillars: [2, 5],    // rock pillars left standing in the big chambers
+    pillarRoom: 30      // a chamber needs this many floor tiles to get one
+};
+
+function carveGallery(zone, rng) {
+    const { map, def } = zone;
+    const W = def.w, H = def.h, M = MINE.margin;
+    const put = (x, y, tile) => {
+        if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return;
+        map.data[y * W + x] = tile;
+    };
+    const box = (x0, y0, x1, y1, tile) => {
+        for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) put(x, y, tile);
+    };
+
+    // Chambers, spread across the map so tunnels have to travel.
+    const rooms = [];
+    const n = rng.int(MINE.rooms[0], MINE.rooms[1]);
+    for (let i = 0; i < n; i++) {
+        const w = rng.int(MINE.roomW[0], MINE.roomW[1]);
+        const h = rng.int(MINE.roomH[0], MINE.roomH[1]);
+        const x = rng.int(M, Math.max(M + 1, W - M - w));
+        const y = rng.int(M, Math.max(M + 1, H - M - h));
+        rooms.push({ x, y, w, h, cx: x + (w >> 1), cy: y + (h >> 1) });
+        box(x, y, x + w - 1, y + h - 1, T.STONE);
+    }
+    // The entrance chamber is always the middle of the map, so the portal and
+    // the spawn have somewhere to be.
+    const hub = { cx: W >> 1, cy: H >> 1 };
+    box(hub.cx - 4, hub.cy - 3, hub.cx + 4, hub.cy + 3, T.STONE);
+    rooms.unshift(Object.assign({ x: hub.cx - 4, y: hub.cy - 3, w: 9, h: 7 }, hub));
+
+    // Tunnels: every chamber is joined to the previous one, and the last one
+    // back to the hub, so nothing is ever walled off.
+    const dig = (ax, ay, bx, by) => {
+        const wide = rng.int(MINE.tunnel[0], MINE.tunnel[1]);
+        const half = wide >> 1;
+        let x = ax, y = ay;
+        while (x !== bx) {
+            x += Math.sign(bx - x);
+            for (let o = -half; o <= half; o++) put(x, y + o, T.STONE);
+        }
+        while (y !== by) {
+            y += Math.sign(by - y);
+            for (let o = -half; o <= half; o++) put(x + o, y, T.STONE);
+        }
+    };
+    for (let i = 1; i < rooms.length; i++) dig(rooms[i - 1].cx, rooms[i - 1].cy, rooms[i].cx, rooms[i].cy);
+    dig(rooms[rooms.length - 1].cx, rooms[rooms.length - 1].cy, rooms[0].cx, rooms[0].cy);
+
+    // Erode the corners: a rectangle of rock with four right angles is a
+    // room in a dungeon crawler, not a gallery cut by hand.
+    for (let pass = 0; pass < 2; pass++) {
+        const eaten = [];
+        for (let y = 2; y < H - 2; y++) {
+            for (let x = 2; x < W - 2; x++) {
+                if (map.get(x, y) !== T.CLIFF) continue;
+                let floor = 0;
+                for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                    const t = map.get(x + dx, y + dy);
+                    if (t === T.STONE || t === T.GRAVEL) floor++;
+                }
+                if (floor >= 3 || (floor === 2 && rng.chance(MINE.erode))) eaten.push(x, y);
+            }
+        }
+        for (let i = 0; i < eaten.length; i += 2) put(eaten[i], eaten[i + 1], T.STONE);
+    }
+
+    // Pillars: rock left standing so the roof has something to sit on. They
+    // break the sight line and make a chamber read as a working.
+    const pillars = rng.int(MINE.pillars[0], MINE.pillars[1]);
+    for (let i = 0; i < pillars; i++) {
+        const r = rooms[rng.int(0, rooms.length - 1)];
+        if (r.w * r.h < MINE.pillarRoom) continue;
+        const px0 = r.x + rng.int(1, Math.max(1, r.w - 2));
+        const py0 = r.y + rng.int(1, Math.max(1, r.h - 2));
+        const pw = rng.int(1, 2), ph = rng.int(1, 2);
+        box(px0, py0, px0 + pw - 1, py0 + ph - 1, T.CLIFF);
+    }
+
+    // Spoil along the walls, a bitten rim, and standing water in the corners.
+    for (let y = 1; y < H - 1; y++) {
+        for (let x = 1; x < W - 1; x++) {
+            const here = map.get(x, y);
+            if (here !== T.STONE) continue;
+            let rock = 0;
+            for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                if (map.get(x + dx, y + dy) === T.CLIFF) rock++;
+            }
+            if (rock > 0 && rng.chance(MINE.spoil)) map.data[y * W + x] = T.GRAVEL;
+            if (rock >= 2 && rng.chance(MINE.puddle)) map.data[y * W + x] = T.WATER;
+            // Bite the rim back here and there: a hand-cut gallery is not a
+            // rectangle.
+            if (rock === 1 && rng.chance(MINE.rough)) {
+                for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                    if (map.get(x + dx, y + dy) === T.CLIFF && rng.chance(0.4)) {
+                        put(x + dx, y + dy, T.GRAVEL);
+                    }
+                }
+            }
+        }
+    }
+}
+
 function carveMainPath(zone, rng) {
     const { map, def } = zone;
     const links = def.links || [];
@@ -354,7 +480,13 @@ function scatterProps(zone, rng, biome) {
 
             // Underground there is nothing but stone, ore and cave mushrooms.
             if (biome.cave) {
-                if (jitter > 1 - biome.rocks * 0.6) {
+                // Ore sits in the WALL, not in the middle of the gallery:
+                // a vein you can walk around is not a vein.
+                let touchesRock = false;
+                for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                    if (zone.map.get(x + dx, y + dy) === T.CLIFF) { touchesRock = true; break; }
+                }
+                if (touchesRock && jitter > 1 - biome.rocks * 1.4) {
                     const ore = rng.chance(0.55)
                         ? rng.weighted([["coal", 5], ["iron", 4], ["copper", 4], ["gem", 1]])
                         : null;

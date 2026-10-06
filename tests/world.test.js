@@ -19,9 +19,11 @@ test("every tile has a complete definition", () => {
     }
 });
 
-test("water stops you at the shoreline; paths are faster than mud", () => {
-    assert.ok(isSolidTile(T.WATER), "no swimming yet — the shallows stop you");
-    assert.ok(isSolidTile(T.DEEP));
+test("the shallows are wadeable, the deep is not; paths beat mud", () => {
+    assert.not(isSolidTile(T.WATER), "you can wade the waterline");
+    assert.ok(tileInfo(T.WATER).liquid, "…but it is still water");
+    assert.lt(tileInfo(T.WATER).speed, tileInfo(T.MUD).speed, "wading is the slowest going");
+    assert.ok(isSolidTile(T.DEEP), "no swimming: the deep still stops you");
     assert.ok(isSolidTile(T.CLIFF));
     assert.gt(tileInfo(T.PATH).speed, tileInfo(T.MUD).speed);
 });

@@ -84,7 +84,8 @@ function roam(game, zoneId, frames) {
         const tx = Math.floor(p.x / TILE_SIZE), ty = Math.floor(p.y / TILE_SIZE);
         const info = tileInfo(game.zone.map.get(tx, ty));
         if (info.solid) fail(zoneId, `герой стоит в непроходимом тайле (${info.name})`);
-        if (info.liquid) fail(zoneId, `герой стоит в воде (${info.name})`);
+        // Wading the shallows is allowed now; swimming is not.
+        if (info.liquid && info.solid) fail(zoneId, `герой стоит в глубокой воде (${info.name})`);
         if (game.zone.propBlocksBody && game.zone.propBlocksBody(p.x, p.y, 9)) {
             fail(zoneId, "герой стоит внутри пропа");
         }
@@ -116,6 +117,10 @@ for (const id of zoneIds) {
     try {
         g = newGame();
         g.enterZone(id, null, true);
+        // `enterZone` without an edge leaves the hero where he was: in a test
+        // harness that means "inside the rock of the next zone". Put him on
+        // the zone's own entry point before roaming.
+        g.placeSafely(g.zone.spawn.x, g.zone.spawn.y);
     } catch (e) {
         fail(id, `зона не открывается: ${e && e.message}`);
         continue;
@@ -126,7 +131,8 @@ for (const id of zoneIds) {
     ok(sp && Number.isFinite(sp.x) && Number.isFinite(sp.y), id, "у зоны нет точки входа");
     if (sp) {
         const info = tileInfo(g.zone.map.get(Math.floor(sp.x / TILE_SIZE), Math.floor(sp.y / TILE_SIZE)));
-        ok(!info.solid && !info.liquid, id, `точка входа в непроходимом тайле (${info.name})`);
+        ok(!info.solid, id, `точка входа в непроходимом тайле (${info.name})`);
+        ok(!info.liquid, id, `точка входа в воде (${info.name})`);
         ok(!g.zone.propBlocksBody(sp.x, sp.y, 9), id, "точка входа занята пропом");
     }
 }

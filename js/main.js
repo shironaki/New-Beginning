@@ -627,7 +627,11 @@ export class Game {
             const info = this.zone.map.get(
                 Math.floor(this.player.x / TILE_SIZE), Math.floor(this.player.y / TILE_SIZE));
             const def = tileInfo(info);
-            if (!def.liquid) {
+            if (def.liquid) {
+                // Wading: the boot throws water, not dust.
+                this.particles.splash(this.player.x + this.player.stepSide * 2.5, this.player.y + 2,
+                                      this.player.running ? 1.25 : 0.85);
+            } else {
                 this.particles.dust(this.player.x + this.player.stepSide * 2.5, this.player.y + 3,
                     this.player.running ? FX.dust.run : FX.dust.walk, dustColor(def));
             }

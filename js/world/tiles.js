@@ -48,7 +48,9 @@ export const TILES = {
     [T.SAND]:       { key: "sand",      name: "Песок",      solid: false, speed: 0.9,  colors: ["#d8c48c", "#c3ae77", "#e8d8a6"], step: "sand" },
     // You cannot swim yet: open water stops you at the shoreline. Shallow
     // water stays visually distinct and is where fish and reeds live.
-    [T.WATER]:      { key: "water",     name: "Отмель",     solid: true,  speed: 0,    colors: ["#4f8fa8", "#417a91", "#6fa9bd"], step: "water", liquid: true },
+    // The shallows are WADEABLE: you can walk the waterline, slowly and
+    // noisily. Deep water still stops you — there is no swimming.
+    [T.WATER]:      { key: "water",     name: "Отмель",     solid: false, speed: 0.58, colors: ["#4f8fa8", "#417a91", "#6fa9bd"], step: "water", liquid: true, shallow: true },
     [T.DEEP]:       { key: "deep",      name: "Глубина",    solid: true,  speed: 0,    colors: ["#2d5f7a", "#244e64", "#3a7390"], step: "water", liquid: true },
     [T.STONE]:      { key: "stone",     name: "Камень",     solid: false, speed: 1.05, colors: ["#7b7a78", "#656462", "#918f8c"], step: "stone" },
     [T.CLIFF]:      { key: "cliff",     name: "Скала",      solid: true,  speed: 0,    colors: ["#56544f", "#413f3b", "#6b6862"], step: "stone" },
@@ -67,6 +69,8 @@ export function tileInfo(id) { return TILES[id] || TILES[T.VOID]; }
 export function isSolidTile(id) { return tileInfo(id).solid === true; }
 export function tileSpeed(id) { return tileInfo(id).speed; }
 export function isLiquid(id) { return tileInfo(id).liquid === true; }
+/** Water you can stand in: the shallows, not the deep. */
+export function isShallow(id) { const t = tileInfo(id); return t.liquid === true && t.solid === false; }
 
 /** World units per tile. Everything positional in v3 is in world units. */
 export const TILE_SIZE = 32;

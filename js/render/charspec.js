@@ -144,6 +144,24 @@ export const READ = {
     rimA: 0.34               // contour light on the sunward silhouette
 };
 
+/**
+ * Wading. Standing in the shallows the hero loses his contact shadow (water
+ * swallows it) and gains a waterline across the boots, a foam collar and a
+ * ring that breathes. Numbers in u, as everywhere else in this file.
+ */
+export const WADE = {
+    lineY: -1.6,        // how high up the boot the water reaches
+    rx: 7.0, ry: 2.6,   // the ellipse of displaced water
+    bodyA: 0.5,         // α of the water over the legs
+    foamA: 0.55,        // α of the collar of foam
+    foamW: 0.9,         // u — its thickness
+    ringRX: 9.5, ringRY: 3.2,
+    ringA: 0.3,
+    breathe: 0.55,      // u — how much the ring swells
+    breatheHz: 1.7,
+    sink: 0.9           // u — the hero settles into the water
+};
+
 export const SHADOW = {
     coreRX: 7.2, coreRY: 2.8, coreA: 0.30,
     haloRX: 9.8, haloRY: 3.7, haloA: 0.14,

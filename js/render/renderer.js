@@ -290,6 +290,15 @@ export class Renderer {
                                      S, S * WATER.skyBandH / steps + 1);
                     }
                 }
+                // Puddles (three or four land neighbours) get no surf at all:
+                // waves need a body of water to come from.
+                let landAround = 0;
+                for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                    const nb = TILES[zone.map.get(tx + ddx, ty + ddy)];
+                    if (!nb || !nb.liquid) landAround++;
+                }
+                if (landAround >= 3) continue;
+
                 // Surf. The foam follows the shoreline and rounds off inner
                 // corners instead of stopping dead at the tile border.
                 const neighbours = [[0, -1], [0, 1], [-1, 0], [1, 0]];
@@ -399,11 +408,13 @@ export class Renderer {
                 drawCharacter(ctx, {
                     dir: o.dir, phase: o.anim, gait: o.gait, runBlend: o.runBlend,
                     slant: o.slant, moving: o.moving, look: state.look,
-                    actionTimer: o.actionTimer, tool: state.tool, idleTime: this.time
+                    actionTimer: o.actionTimer, tool: state.tool, idleTime: this.time,
+                    wading: this._inWater(state.zone, o.x, o.y)
                 });
             } else {
                 setShadowOrigin(o.x, o.y);
                 drawCharacter(ctx, {
+                    wading: this._inWater(state.zone, o.x, o.y),
                     // Settlers and travellers share the hero's locomotion contract:
                     // whatever advances their `anim`/`gait` gets the same walk.
                     dir: o.dir || "down", phase: o.anim || 0,
@@ -448,6 +459,13 @@ export class Renderer {
         out.length = n;
         setFireLights(out);
         return out;
+    }
+
+    /** Is this world point standing in water? (Used for the waterline.) */
+    _inWater(zone, x, y) {
+        if (!zone || !zone.map) return false;
+        const info = TILES[zone.map.get(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE))];
+        return !!(info && info.liquid);
     }
 
     /**

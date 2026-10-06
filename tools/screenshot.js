@@ -179,7 +179,12 @@ const scenes = [
     {
         name: "16-mine",
         about: "Глубокая шахта",
-        setup(g) { g.enterZone("mine", null, true); g.clock.minute = 12 * 60; }
+        setup(g) {
+            g.enterZone("mine", null, true);
+            g.placeSafely(g.zone.spawn.x, g.zone.spawn.y);   // stand in the gallery
+            g.camera.snapTo(g.player.x, g.player.y);
+            g.clock.minute = 12 * 60;
+        }
     },
     {
         name: "17-behind-pine",
