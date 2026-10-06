@@ -19,6 +19,7 @@
     "check": "for f in js/main.js js/*/*.js tests/*.js tools/*.js; do node --check \"$f\" || exit 1; done && echo 'syntax OK'",
     "sheet": "node tools/props-sheet.js",
     "hero": "node tools/hero-sheet.js",
-    "scene": "node tools/scene.js"
+    "scene": "node tools/scene.js",
+    "replay": "node tools/replay.js check"
   }
 }

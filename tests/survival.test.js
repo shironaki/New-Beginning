@@ -11,7 +11,7 @@ import { ITEMS, itemDef, foodValue, burnValue } from "../js/sandbox/items.js";
 import { PROPS, propDef, rollDrops, requiredTool, toolHint } from "../js/sandbox/gather.js";
 import { Player } from "../js/entities/player.js";
 import { generateZone } from "../js/world/worldgen.js";
-import { GAIT } from "../js/render/charspec.js";
+import { GAIT, MOVE } from "../js/render/charspec.js";
 import { posture } from "../js/render/character.js";
 
 suite("items");
@@ -612,6 +612,40 @@ test("a foot plant fires exactly once per half cycle", () => {
     const before = p.steps;
     for (let i = 0; i < 120; i++) p.update(1 / 60, { x: 0, y: 0 }, z, {});
     assert.eq(p.steps, before, "standing still must not plant feet");
+});
+
+suite("frame independence");
+
+test("30, 60 and 120 FPS walk to the very same pixel", () => {
+    // The ramp is analytic, but terrain, collision and the stamina gate are
+    // sampled per step — so the step itself is fixed. Same input, same path.
+    const run = (fps, seconds) => {
+        const p = new Player({ x: 100, y: 100 });
+        const frames = Math.round(seconds * fps);
+        for (let i = 0; i < frames; i++) {
+            const t = i / fps;
+            const axis = t < 1 ? { x: 1, y: 0 }
+                       : t < 1.6 ? { x: 0, y: 0 }          // coast to a stop
+                       : t < 2.6 ? { x: -1, y: 0.4 }       // reverse, diagonal
+                       : { x: 0, y: 0 };
+            // 1.8 s lands exactly on a frame at every rate tested.
+            p.update(1 / fps, axis, null, { wantRun: t >= 1.8 });
+        }
+        return p;
+    };
+    const a = run(30, 3), b = run(60, 3), c = run(120, 3);
+    assert.near(a.x, b.x, 1e-9);
+    assert.near(b.x, c.x, 1e-9);
+    assert.near(a.y, c.y, 1e-9);
+    assert.near(a.dist, c.dist, 1e-9);
+    assert.near(a.stamina, c.stamina, 1e-9);
+});
+
+test("a hitch is dropped, not replayed frame by frame", () => {
+    const p = new Player({ x: 0, y: 0 });
+    p.update(5, { x: 1, y: 0 }, null, {});        // the tab was in the background
+    assert.lt(p.x, 68 * MOVE.maxCatchUp + 1);     // at most a quarter second of travel
+    assert.gt(p.x, 0);
 });
 
 run("v3 survival");

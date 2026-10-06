@@ -15,6 +15,7 @@ export class Player {
     constructor({ x = 0, y = 0, bus = null } = {}) {
         this.x = x; this.y = y;
         this.vx = 0; this.vy = 0;       // measured, after collision
+        this.ax = 0; this.ay = 0;       // wanted acceleration, from the model
         this.mvx = 0; this.mvy = 0;     // wanted velocity carried between frames
         this.radius = 9;
         this.dir = "down";
@@ -64,10 +65,44 @@ export class Player {
      * @param {Zone} zone current zone (terrain + props)
      * @param {object} opts { speedFactor, wantRun }
      */
-    update(dt, axis, zone, { speedFactor = 1, wantRun = false } = {}) {
+    /**
+     * Movement runs on a FIXED step, whatever the frame rate is. The velocity
+     * ramp is analytic and frame-rate free on its own, but the things it is
+     * sampled against are not: terrain speed under the feet, collision slides
+     * along a rock, the stamina gate. Sampling those once per rendered frame
+     * made 30 FPS cover a couple of pixels more than 120 over a long run.
+     * With a fixed step and a carried remainder every rate walks the same
+     * ground, and `tools/replay.js` holds it to half a pixel.
+     */
+    update(dt, axis, zone, opts = {}) {
+        const STEP = MOVE.step;
+        this._acc = (this._acc || 0) + dt;
+        // A long hitch must not turn into a hundred steps of catch-up.
+        if (this._acc > MOVE.maxCatchUp) this._acc = MOVE.maxCatchUp;
+        let did = false;
+        // The epsilon matters: 4 × (1/120) is not bit-for-bit 1/30, and
+        // without it a 30 FPS frame would now and then be one step short.
+        while (this._acc >= STEP - MOVE.stepEps) {
+            this._acc = Math.max(0, this._acc - STEP);
+            this._step(STEP, axis, zone, opts);
+            did = true;
+        }
+        // Very small frames still need the non-physical bookkeeping to tick.
+        if (!did && dt > 0) this._idleTick(dt);
+        return this;
+    }
+
+    /** Timers that must not wait for a physics step (action swing, blends). */
+    _idleTick(dt) {
+        if (this.actionTimer > 0) this.actionTimer = Math.max(0, this.actionTimer - dt);
+        return this;
+    }
+
+    _step(dt, axis, zone, { speedFactor = 1, wantRun = false } = {}) {
         if (this.actionTimer > 0) this.actionTimer = Math.max(0, this.actionTimer - dt);
         if (this.sleeping) {
             this.moving = false;
+            this.ax = this.ay = 0;
             this.gait = approach(this.gait, 0, dt, GAIT.blendWalk);
             this.runBlend = approach(this.runBlend, 0, dt, GAIT.blendRun);
             return this;
@@ -104,11 +139,18 @@ export class Player {
         const vx0 = this.mvx, vy0 = this.mvy;
         this.mvx = wantX + (vx0 - wantX) * decay;
         this.mvy = wantY + (vy0 - wantY) * decay;
+        // Acceleration, taken from the model rather than measured between
+        // frames: a = (want - v) / tau. Exactly the same number at 30, 60 and
+        // 120 FPS, which a (v - vPrev)/dt difference would never be. The
+        // renderer leans the torso into it.
+        this.ax = (wantX - this.mvx) / tau;
+        this.ay = (wantY - this.mvy) / tau;
         const travelX = wantX * dt + (vx0 - wantX) * tau * (1 - decay);
         const travelY = wantY * dt + (vy0 - wantY) * tau * (1 - decay);
         if (!this.moving && Math.hypot(this.mvx, this.mvy) < MOVE.stopBelow) {
             this.mvx = this.mvy = 0;
             this.vx = this.vy = 0;
+            this.ax = this.ay = 0;
             this.settle(dt);
             return this;
         }

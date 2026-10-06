@@ -38,6 +38,9 @@ import { HUD, fireRows } from "./ui/hud.js";
  * touches: smoke, rain slant, the sway of the trees and the lean of the
  * grass — so a gust looks like one gust and not four unrelated animations.
  */
+/** Anything with a crown a gust can strip. */
+const TREE_KINDS = new Set(["pine", "spruce", "oak", "birch", "willow", "palm", "ancient_oak"]);
+
 export const WIND_BY_WEATHER = {
     clear: 0.35, cloudy: 0.5, fog: 0.15, rain: 0.7, snow: 0.45, wind: 1.1, storm: 1.4
 };
@@ -721,6 +724,10 @@ export class Game {
             this._thunderT = now;
             if (now < was) this.camera.shake(FX.shake.thunder, FX.shake.thunderTime);
         }
+        // Above ground the air has things in it too: pollen and chaff in a
+        // low sun, and leaves torn loose when it really blows.
+        if (!this.zone.def.underground) this._openAir(dt);
+
         // Underground atmosphere: dust in the torchlight and water off the
         // roof. Both are spawned around the hero, so the cost is flat.
         if (this.zone.def.underground) this._caveAir(dt);
@@ -756,6 +763,50 @@ export class Game {
      * The pending drops live in a fixed array that is reused, so a frame
      * allocates nothing.
      */
+    /**
+     * The air above ground: motes hanging in a low sun, and leaves a gust
+     * tears off the nearest tree. Both are spawned around the hero only, so
+     * the cost does not grow with the size of the zone.
+     */
+    _openAir(dt) {
+        const P = FX.pollen, G = FX.gustLeaf;
+        const hour = this.clock.minute / 60;
+        const sunLow = Math.abs(hour - 12.5) < P.sunBelow && this.clock.daylight > 0.25;
+        const calmEnough = (this.windStrength || 0) <= P.maxWeather * 2;
+        if (sunLow && calmEnough) {
+            this._pollenAt = (this._pollenAt || 0) - dt;
+            if (this._pollenAt <= 0) {
+                this._pollenAt = 1 / P.rate;
+                const warm = Math.abs(hour - 12.5) > 3.5;   // morning and evening light
+                this.particles.pollen(this.player.x + (Math.random() - 0.5) * P.spread,
+                                      this.player.y + (Math.random() - 0.5) * P.spread * 0.7,
+                                      warm);
+            }
+        }
+        if ((this.windStrength || 0) >= G.minStrength) {
+            this._gustAt = (this._gustAt || 0) - dt;
+            if (this._gustAt <= 0) {
+                this._gustAt = G.every;
+                // One tree near the hero gives up a couple of leaves.
+                let pick = null, n = 0;
+                for (const o of this.zone.objects) {
+                    if (!TREE_KINDS.has(o.kind)) continue;
+                    const dx = o.x - this.player.x, dy = o.y - this.player.y;
+                    if (dx * dx + dy * dy > G.reach * G.reach) continue;
+                    n++;
+                    if (Math.random() < 1 / n) pick = o;      // reservoir sample
+                }
+                if (pick) {
+                    const season = this.clock.season.key;
+                    const color = season === "autumn" ? "#c88a3a"
+                                : season === "winter" ? "#9fb0a6" : MATERIAL.plant.leaf;
+                    this.particles.leaves(pick.x, pick.y - G.crown, color, G.leaves);
+                }
+            }
+        }
+        return this;
+    }
+
     _caveAir(dt) {
         const M = FX.motes, D = FX.ceilingDrip;
         this._moteAt = (this._moteAt || 0) - dt;

@@ -170,7 +170,7 @@ export function posture(p) {
     // extra dip the instant the heel lands.
     const breath = Math.sin(idle * GAIT.breathHz * Math.PI * 2) * GAIT.breathAmp;
     const strike = Math.pow(Math.max(0, -Math.cos(phase * 2)), 3) * GAIT.heelStrike * g;
-    const bob = (Math.abs(Math.cos(phase)) - 0.5) * bobAmp * g - strike + breath * (1 - g);
+    let bob = (Math.abs(Math.cos(phase)) - 0.5) * bobAmp * g - strike + breath * (1 - g);
 
     // Weight: the pelvis slides over the supporting leg, shoulders counter it.
     const sway = sideView ? 0 : -Math.cos(phase) * GAIT.hipSway * g;
@@ -181,7 +181,17 @@ export function posture(p) {
         ? 0
         : -Math.cos(phase - GAIT.clothLagPhase) * GAIT.hipSway * g;
 
-    const lean = sideView ? side * GAIT.leanRun * run * g : 0;
+    // Travel lean (steady) + acceleration lean (transient). On the side view
+    // both are horizontal; head-on, acceleration shows as the body rising
+    // onto the toes instead, because a sideways offset would read as a wiggle.
+    // How much of the acceleration points the way the hero faces: positive
+    // while starting off, negative while braking.
+    const fmag = Math.hypot(p.faceX || 0, p.faceY || 0) || 1;
+    const accAlong = ((p.ax || 0) * (p.faceX || 0) + (p.ay || 0) * (p.faceY || 0)) / fmag;
+    const accK = Math.max(-1, Math.min(1, accAlong / GAIT.accelRef));
+    const lean = (sideView ? side * GAIT.leanRun * run * g : 0)
+               + (sideView ? side * GAIT.leanAccel * accK : 0);
+    const accLift = sideView ? 0 : -GAIT.leanAccel * 0.45 * accK;
     const squash = -GAIT.squash * Math.cos(phase * 2) * g;     // ±3% on contact
     const stance = sideView ? side * BODY.idleStance * (1 - g) : 0;
 
@@ -193,6 +203,7 @@ export function posture(p) {
             : Math.sin(((act - ACTION.windUp) / (1 - ACTION.windUp)) * Math.PI) * ACTION.strikeAmp)
         : 0;
 
+    bob += accLift;                       // head-on: push off / settle back
     return { dir, phase, g, run, idle, side, back, sideView, amp,
         swingN, swingF, liftN, liftF, bob, sway, counter, flagX,
         lean, squash, stance, swing };

@@ -44,6 +44,9 @@ jobs:
       # 40 simulated minutes of play: no rule violations, no NaN, no stuck hero.
       - name: Playtest
         run: npm run play 40
+      # 30, 60 and 120 FPS must walk to the same pixel.
+      - name: Replay at three frame rates
+        run: npm run replay
       - name: Keep the frames
         uses: actions/upload-artifact@v4
         with:

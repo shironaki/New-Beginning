@@ -2,6 +2,7 @@
 import { suite, test, assert, run } from "./tiny.js";
 import * as cameraMod from "../js/engine/camera.js";
 import * as serveMod from "../serve.js";
+import { MOVE, GAIT as gaitSpec } from "../js/render/charspec.js";
 import { LIGHT, ambientAt } from "../js/render/lighting.js";
 import { SUN, SHADOW, setSun, castShadow, setFireLights, setShadowOrigin, propHeight,
          ROCK, pick, rockOutline, BEND, setWalker, plantBend, BREEZE, setBreeze, windLean,
@@ -664,6 +665,28 @@ test("a lone tile of water is a puddle on the floor", () => {
     assert.gt(g.rx, 0); assert.lt(g.rx, 32);              // the blob fits its tile
     assert.lt(g.ry, g.rx);                                // flattened by the 3/4 view
     assert.near(g.cx, 16, 32 * PUDDLE.offset + 0.01);
+});
+
+suite("fixed step");
+
+test("the hero walks on a fixed step that divides every frame rate", () => {
+    // 1/120 s is the step; 30, 60 and 120 FPS are all whole multiples of it,
+    // which is what lets tools/replay.js hold them to the same pixel.
+    for (const fps of [30, 60, 120]) {
+        const steps = (1 / fps) / MOVE.step;
+        assert.near(steps, Math.round(steps), 1e-12);
+    }
+    assert.gt(MOVE.maxCatchUp, MOVE.step * 4);   // a hitch is dropped, not replayed
+    assert.lte(MOVE.maxCatchUp, 1);
+});
+
+suite("acceleration lean");
+
+test("the torso leans into a start and hangs back on the brakes", () => {
+    const GAIT = gaitSpec;
+    assert.gt(GAIT.leanAccel, 0);
+    assert.gt(GAIT.accelRef, 100);               // px/s², a real acceleration
+    assert.lt(GAIT.leanAccel, 6);                // px — a hint, not a cartoon
 });
 
 run("v3 core");

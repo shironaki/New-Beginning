@@ -191,6 +191,12 @@ export const SHADOW = {
  * about 0.08 s and stops within ~2 px.
  */
 export const MOVE = {
+    // The simulation step the hero moves on, independent of the frame rate.
+    // 1/120 s divides every rate we care about (30, 60, 120), so all three
+    // walk exactly the same ground; the leftover is carried to the next frame.
+    step: 1 / 120,
+    maxCatchUp: 0.25,        // s — a hitch is dropped, not replayed in full
+    stepEps: 1e-9,           // binary dust guard on the step accumulator
     // Time constants, not accelerations: an exponential approach composes,
     // so 30, 60 and 120 FPS give bit-identical motion. v(t) reaches 95 % of
     // the wanted speed in 3 x tau.
@@ -215,6 +221,13 @@ export const GAIT = {
     armRatio: 0.75,          // arm swing relative to leg swing
     armRatioTool: 0.40,      // the hand holding a tool swings less
     leanRun: 1.2,            // torso offset into the direction of travel
+    // Weight has to be *started* and *stopped*. The torso goes ahead of the
+    // feet while accelerating and hangs behind them while braking; the number
+    // comes from the movement model (a = (want - v)/tau), so it is identical
+    // at 30, 60 and 120 FPS.
+    leanAccel: 2.6,          // px of torso offset at the reference acceleration
+    accelRef: 900,           // px/s² — full-tilt start from standing
+    leanAccelTau: 0.09,      // s — the torso itself has a little give
     squash: 0.015,           // ±1.5% on contact — a hint, not a bounce
     kneeBend: 0.6,           // how hard the IK pushes the knee forward (0..1)
 

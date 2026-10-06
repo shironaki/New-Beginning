@@ -62,6 +62,31 @@ export const FX = {
         alpha: 0.5,
         color: "#d9e2ea"
     },
+    /**
+     * Outdoors in a low sun: pollen, chaff and dust hanging in the light.
+     * Same pool as the cave motes, warmer and only while the sun is low
+     * enough to light them from the side.
+     */
+    pollen: {
+        rate: 1.9,          // spawns per second around the hero
+        spread: 190,
+        life: 4.2, lifeVar: 2.6,
+        rise: 2.2, drift: 7,
+        size: 1.0, sizeVar: 0.9,
+        alpha: 0.5,
+        warm: "#ffe6ae",    // caught by a low sun
+        cool: "#e8f0f2",    // overcast, or high noon
+        sunBelow: 9,        // hours from noon at which they start to show
+        maxWeather: 0.75    // nothing hangs in the air in a storm
+    },
+    /** A gust tearing leaves off a tree. */
+    gustLeaf: {
+        minStrength: 0.65,  // wind below this takes nothing with it
+        every: 0.9,         // s between attempts
+        reach: 260,         // px around the hero worth animating
+        leaves: 2,
+        crown: 30           // px above the trunk's foot the leaf lets go
+    },
     /** Water finding its way through the roof of a mine. */
     ceilingDrip: {
         rate: 1.7,          // drops per second near the hero
@@ -323,6 +348,21 @@ export class Particles {
     }
 
     /** One slow speck of dust hanging in the air. */
+    /** A speck of pollen in the sunlight; `warm` picks the low-sun colour. */
+    pollen(x, y, warm = true) {
+        const C = FX.pollen;
+        const o = this._claim();
+        o.x = x; o.y = y;
+        o.vx = (Math.random() - 0.5) * C.drift;
+        o.vy = -(Math.random() * C.rise);
+        o.life = C.life + Math.random() * C.lifeVar; o.maxLife = C.life + C.lifeVar;
+        o.gravity = 0;
+        o.size = C.size + Math.random() * C.sizeVar;
+        o.alpha = C.alpha; o.glyph = "";
+        o.color = warm ? C.warm : C.cool; o.kind = "dot";
+        return this;
+    }
+
     mote(x, y) {
         const C = FX.motes;
         const o = this._claim();
