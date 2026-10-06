@@ -2,11 +2,12 @@
 import { suite, test, assert, run } from "./tiny.js";
 import * as cameraMod from "../js/engine/camera.js";
 import * as serveMod from "../serve.js";
+import { Tracks, TRACK } from "../js/render/tracks.js";
 import { MOVE, GAIT as gaitSpec } from "../js/render/charspec.js";
 import { LIGHT, ambientAt } from "../js/render/lighting.js";
 import { SUN, SHADOW, setSun, castShadow, setFireLights, setShadowOrigin, propHeight,
          ROCK, pick, rockOutline, BEND, setWalker, plantBend, BREEZE, setBreeze, windLean,
-         ASH, PUDDLE, puddleGeom, loneWaterFloor, propTone } from "../js/render/tilesart.js";
+         ASH, PUDDLE, puddleGeom, loneWaterFloor, propTone, PATCH, SCREE, COAST, CORNER } from "../js/render/tilesart.js";
 import { Renderer, OCCLUDE, CLOUDS, MIRROR, WATER } from "../js/render/renderer.js";
 import { READ, PALETTE, BODY } from "../js/render/charspec.js";
 import { moonFactor } from "../js/render/lighting.js";
@@ -714,6 +715,34 @@ test("mist sits on the water at first light and burns off", () => {
     assert.lt(WATER.mistPeak, WATER.mistTo);
     assert.lte(WATER.mistTo, 12);                // gone well before noon
     assert.lt(WATER.mistA, 0.5);                 // a veil, not a wall
+});
+
+suite("no right angles");
+
+test("the border between two grounds leaves the grid", () => {
+    // The seam is displaced by up to most of a tile, so a patch boundary
+    // cannot follow the 32 px grid even if the tiles do.
+    assert.gt(PATCH.amp, 16);
+    assert.lt(PATCH.amp, 32);
+    assert.gt(PATCH.points, 4);                 // enough samples for a curve
+    assert.gt(PATCH.slow, PATCH.fast);          // big meanders carry small ones
+    assert.gt(SCREE.far, SCREE.near);           // rubble thins outward
+    assert.lt(SCREE.farA, SCREE.nearA);
+    assert.gt(COAST.tongue, 16);                // the bank reaches into water
+    assert.gt(CORNER.dry, 1);                   // dry corners are bitten too
+});
+
+test("prints land under the boots, not below them", () => {
+    // The world is seen at three quarters: a sideways offset on the ground
+    // must cover less screen height than it does width.
+    assert.lt(TRACK.vScale, 1);
+    assert.gt(TRACK.vScale, 0.3);
+    assert.eq(TRACK.footDrop, 0);
+    const t = new Tracks();
+    t.add(100, 100, 1, 0, 1, 8);                // walking east, right foot
+    const p = t.items.find((q) => q.alive);
+    assert.ok(p, "a print on sand");
+    assert.lt(Math.abs(p.y - 100), TRACK.sideGap);   // squashed, not full offset
 });
 
 run("v3 core");

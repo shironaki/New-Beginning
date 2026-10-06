@@ -20,6 +20,12 @@ export const TRACK = {
     toeGap: 1.5,         // how far the toe sits ahead of the heel
     sideGap: 2.6,        // left/right offset from the body centre
     sink: 0.75,          // print offset along the heading, world units
+    // The world is seen at three quarters, so a step sideways on the ground
+    // covers LESS screen height than it does screen width. Without this the
+    // right-foot print of a hero walking east landed a visible 3 px below
+    // his boots instead of under them.
+    vScale: 0.52,        // vertical squash of every ground offset
+    footDrop: 0,         // px below the foot line; the boots ARE the line
     rimA: 0.45,          // rim highlight = depth alpha x this
     coreA: 0.5,          // the dark heart of the hollow, share of depth
     fadeIn: 0.12,        // seconds — a print appears, it does not pop
@@ -83,7 +89,7 @@ export class Tracks {
         p.alive = true;
         // Feet are not on the spine: step off the centre line by the side.
         p.x = x - hy * TRACK.sideGap * side + hx * TRACK.sink;
-        p.y = y + hx * TRACK.sideGap * side + hy * TRACK.sink;
+        p.y = y + (hx * TRACK.sideGap * side + hy * TRACK.sink) * TRACK.vScale + TRACK.footDrop;
         p.dx = hx; p.dy = hy;
         p.t = 0;
         p.life = soil.life;

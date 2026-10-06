@@ -65,6 +65,7 @@ export const WATER = {
     mistScale: 0.014,       // rad/px — size of the patches
     skyBandA: 0.09,         // α of the sky reflected off the far bank
     skyBandSteps: 4,        // soft steps of that reflection (no gradients)
+    skyBandCols: 6,         // slices along the shore — the band must not be a straight bar
     skyBandH: 0.5,          // fraction of a tile the reflection covers
     foamBase: 0.22,         // α of surf at rest
     foamPulse: 0.16,        // ± breathing of the surf
@@ -452,12 +453,24 @@ export class Renderer {
                 // the near side of land that sits above this tile.
                 const above = TILES[zone.map.get(tx, ty - 1)];
                 if (above && !above.liquid) {
+                    // The band follows the water, not the tile: a straight
+                    // bright line along the top of every shore tile drew a
+                    // rectangle around every pond.
                     const steps = WATER.skyBandSteps;
-                    for (let i = 0; i < steps; i++) {
-                        const a = WATER.skyBandA * daylight * (1 - i / steps);
-                        ctx.fillStyle = `rgba(214,232,246,${a.toFixed(3)})`;
-                        ctx.fillRect(s.x, s.y + (i / steps) * S * WATER.skyBandH,
-                                     S, S * WATER.skyBandH / steps + 1);
+                    const cols = WATER.skyBandCols;
+                    const cw = S / cols;
+                    for (let c = 0; c < cols; c++) {
+                        const u = tx + c / cols;
+                        const wob = 0.55 + 0.45 * Math.sin(u * 2.3 + ty * 1.7)
+                                  * Math.sin(u * 0.7 + ty * 0.9 + 1.3);
+                        for (let i = 0; i < steps; i++) {
+                            const a = WATER.skyBandA * daylight * (1 - i / steps) * wob;
+                            if (a <= 0.004) continue;
+                            ctx.fillStyle = `rgba(214,232,246,${a.toFixed(3)})`;
+                            const hgt = S * WATER.skyBandH * wob / steps;
+                            ctx.fillRect(s.x + c * cw, s.y + (i / steps) * S * WATER.skyBandH * wob,
+                                         cw + 0.6, hgt + 0.6);
+                        }
                     }
                 }
                 // Puddles (three or four land neighbours) get no surf at all:

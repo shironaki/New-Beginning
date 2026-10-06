@@ -698,6 +698,121 @@ function mixRGBA(a, b, t, alpha) {
  * The coastline, in numbers. The waterline is drawn as a curve through
  * sampled depths; `points` is how many samples one tile edge gets.
  */
+/**
+ * Where two dry grounds meet, in numbers.
+ *
+ * The seam between two tiles is not painted as a band or a comb of teeth —
+ * the BOUNDARY ITSELF is moved. One shared noise, keyed on the world line
+ * between the two tiles, says how far the border wanders off the grid; each
+ * of the two tiles then paints whichever side of that wandering line falls
+ * inside it. Both tiles read the same number with opposite signs, so the line
+ * matches across the seam and the grid disappears.
+ */
+export const PATCH = {
+    points: 8,         // samples per tile edge
+    amp: 26,           // px the border may wander either way (tile is 32)
+    slow: 5.5,         // tiles per period of the big meanders
+    fast: 2.1,         // tiles per period of the small ones
+    fastShare: 0.33,
+    fringeA: 0.4,      // a soft second pass just inside the new border
+    fringe: 7          // px of it
+};
+
+/**
+ * Signed displacement of the border on the world line `v` (tile units along
+ * the seam, fractional), for the seam whose fixed coordinate is `w`.
+ * Positive = the border moves towards +x / +y.
+ */
+function seamShift(v, w, salt) {
+    const a = soft(v * PATCH.points, w * PATCH.points, PATCH.slow * PATCH.points, salt);
+    const b = soft(v * PATCH.points, w * PATCH.points, PATCH.fast * PATCH.points, salt + 5);
+    return ((a * (1 - PATCH.fastShare) + b * PATCH.fastShare) - 0.5) * 2 * PATCH.amp;
+}
+
+/**
+ * Paint the neighbour's ground over the part of this tile that the wandering
+ * border took away from it.
+ */
+function seamPoly(side, px, py, size, tx, ty, style, alpha, grow = 0) {
+    const N = PATCH.points;
+    const horiz = side === "n" || side === "s";
+    // The line the two tiles share, in tile units, and the sign that turns
+    // the shared displacement into a depth inside THIS tile.
+    const w = side === "n" ? ty : side === "s" ? ty + 1 : side === "w" ? tx : tx + 1;
+    const sign = (side === "n" || side === "w") ? 1 : -1;
+    const v0 = horiz ? tx : ty;
+    const xs = [], ys = [];
+    let any = false;
+    for (let i = 0; i <= N; i++) {
+        const f = i / N;
+        const d = Math.max(0, seamShift(v0 + f, w, horiz ? 17 : 41) * sign + grow);
+        if (d > 0.5) any = true;
+        if (side === "n") { xs.push(px + f * size); ys.push(py + Math.min(d, size)); }
+        else if (side === "s") { xs.push(px + f * size); ys.push(py + size - Math.min(d, size)); }
+        else if (side === "w") { xs.push(px + Math.min(d, size)); ys.push(py + f * size); }
+        else { xs.push(px + size - Math.min(d, size)); ys.push(py + f * size); }
+    }
+    if (!any) return;
+    ctx2dCurve(side, px, py, size, xs, ys, style, alpha);
+}
+
+/** The skirt of rubble a rock wall throws onto the floor, in numbers. */
+export const SCREE = {
+    points: 7,
+    near: 6.5,        // px of the dense rubble
+    far: 12,          // px of the scattered grit
+    nearA: 0.72,
+    farA: 0.4,
+    slow: 4.5,        // tiles per period
+    fast: 1.6
+};
+
+/** One lobe of scree along a wall's edge. */
+function screePoly(side, px, py, size, tx, ty, salt, reach, style, alpha) {
+    const N = SCREE.points;
+    const horiz = side === "n" || side === "s";
+    const base = horiz ? tx * N : ty * N;
+    const cross = horiz ? ty * N : tx * N;
+    const xs = [], ys = [];
+    for (let i = 0; i <= N; i++) {
+        const f = i / N;
+        const a = soft(base + i, cross, SCREE.slow * N, side.charCodeAt(0) + salt * 11);
+        const b = soft(base + i, cross, SCREE.fast * N, side.charCodeAt(0) + salt * 11 + 3);
+        const d = (0.25 + (a * 0.6 + b * 0.4) * 1.3) * reach;
+        if (side === "n") { xs.push(px + f * size); ys.push(py + d); }
+        else if (side === "s") { xs.push(px + f * size); ys.push(py + size - d); }
+        else if (side === "w") { xs.push(px + d); ys.push(py + f * size); }
+        else { xs.push(px + size - d); ys.push(py + f * size); }
+    }
+    ctx2dCurve(side, px, py, size, xs, ys, style, alpha);
+}
+
+/** Trace a curve along one tile edge and fill the strip it cuts off. */
+function ctx2dCurve(side, px, py, size, xs, ys, style, alpha) {
+    const ctx = ctx2dCurve.ctx;
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.fillStyle = style;
+    ctx.beginPath();
+    if (side === "n") ctx.moveTo(px, py);
+    else if (side === "s") ctx.moveTo(px, py + size);
+    else if (side === "w") ctx.moveTo(px, py);
+    else ctx.moveTo(px + size, py);
+    ctx.lineTo(xs[0], ys[0]);
+    for (let i = 1; i < xs.length; i++) {
+        const mx = (xs[i - 1] + xs[i]) / 2, my = (ys[i - 1] + ys[i]) / 2;
+        ctx.quadraticCurveTo(xs[i - 1], ys[i - 1], mx, my);
+    }
+    ctx.lineTo(xs[xs.length - 1], ys[ys.length - 1]);
+    if (side === "n") ctx.lineTo(px + size, py);
+    else if (side === "s") ctx.lineTo(px + size, py + size);
+    else if (side === "w") ctx.lineTo(px, py + size);
+    else ctx.lineTo(px + size, py + size);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+}
+
 export const COAST = {
     points: 8,         // control points per tile edge
     tongue: 26,        // px the bank may reach into the water (of a 32 px tile)
@@ -705,6 +820,10 @@ export const COAST = {
     shallow: 13,       // px of sunlit shallows on the water side
     slow: 19,          // tiles per period of the big bays
     fast: 6.5,         // tiles per period of the small ones
+    wet: 7,            // px of wet ground inland of the waterline
+    wetPuddle: 4,
+    foamLine: 2.6,     // px of dried foam just inland of it (×wobble)
+    crestIn: 7,        // px — the drier crest of the bank's tongues
     shallowA: 0.3
 };
 
@@ -823,6 +942,7 @@ function paintPuddle(ctx, map, tx, ty, px, py, size, floorId) {
 }
 
 export function paintEdges(ctx, map, tx, ty, px, py, size, season = "spring") {
+    ctx2dCurve.ctx = ctx;                       // the seam painters draw here
     let here = map.get(tx, ty);
     const dirs = [[0, -1, "n"], [1, 0, "e"], [0, 1, "s"], [-1, 0, "w"]];
     // A single tile of water is a puddle, not a pond. The tile is handed back
@@ -863,20 +983,13 @@ export function paintEdges(ctx, map, tx, ty, px, py, size, season = "spring") {
             // spills a ragged fringe of rubble onto the floor. Without this
             // every gallery wall and every cliff is a straight line on the
             // grid, and the mine reads as a tiled dungeon.
-            const teeth = 16, seg = size / teeth;
-            for (let layer = 0; layer < 2; layer++) {
-                ctx.fillStyle = oi.colors[layer === 0 ? 1 : 2];
-                ctx.globalAlpha = layer === 0 ? 0.72 : 0.4;
-                for (let i = 0; i < teeth; i++) {
-                    const n = h(tx * 19 + i, ty * 23 + layer, side.charCodeAt(0));
-                    const n2 = h(tx * 7 + i * 3, ty * 13 + layer, side.charCodeAt(0) + 7);
-                    const d = (layer === 0 ? 3.2 : 6.5) * (0.25 + n * 1.2) * (0.55 + n2 * 0.8);
-                    if (side === "n") ctx.fillRect(px + i * seg, py, seg, d);
-                    if (side === "s") ctx.fillRect(px + i * seg, py + size - d, seg, d);
-                    if (side === "w") ctx.fillRect(px, py + i * seg, d, seg);
-                    if (side === "e") ctx.fillRect(px + size - d, py + i * seg, d, seg);
-                }
-            }
+            // The rock does not end on the tile border: it spills a skirt of
+            // scree onto the floor. Drawn as a curve — as teeth it was a
+            // staircase, and a staircase is exactly what makes a gallery
+            // wall look like a tiled dungeon.
+            ctx2dCurve.ctx = ctx;
+            screePoly(side, px, py, size, tx, ty, 0, SCREE.near, oi.colors[1], SCREE.nearA);
+            screePoly(side, px, py, size, tx, ty, 1, SCREE.far, oi.colors[2], SCREE.farA);
             ctx.globalAlpha = 1;
             // Contact shadow cast by a cliff onto the neighbouring ground.
             ctx.fillStyle = "rgba(0,0,0,0.20)";
@@ -893,20 +1006,14 @@ export function paintEdges(ctx, map, tx, ty, px, py, size, season = "spring") {
         // comb poking into the sea looks terrible.
         const steps = 16;
         if (!oi.liquid && !hi.liquid) {
-            for (let layer = 0; layer < 2; layer++) {
-                ctx.fillStyle = oi.colors[layer === 0 ? 0 : 1];
-                ctx.globalAlpha = layer === 0 ? 0.6 : 0.34;
-                for (let i = 0; i < steps; i++) {
-                    const n = h(tx * 13 + i, ty * 17 + layer, side.charCodeAt(0));
-                    const n2 = h(tx * 31 + i * 3, ty * 7 + layer, side.charCodeAt(0) + 5);
-                    const depth = (layer === 0 ? 4.5 : 10) * (0.2 + n * 1.1) * (0.6 + n2 * 0.7);
-                    const seg = size / steps;
-                    if (side === "n") ctx.fillRect(px + i * seg, py, seg, depth);
-                    if (side === "s") ctx.fillRect(px + i * seg, py + size - depth, seg, depth);
-                    if (side === "w") ctx.fillRect(px, py + i * seg, depth, seg);
-                    if (side === "e") ctx.fillRect(px + size - depth, py + i * seg, depth, seg);
-                }
-            }
+            // Two soft lobes of the neighbour's ground reaching across the
+            // seam. Drawn as curves, not as a comb of rectangles: a patch of
+            // ash in grass used to end in a staircase of 2 px teeth, and that
+            // staircase is most of what made the valley look square.
+            // The border between the two grounds wanders off the grid; this
+            // paints the neighbour's ground wherever it wandered into us.
+            seamPoly(side, px, py, size, tx, ty, oi.colors[0], 1);
+            seamPoly(side, px, py, size, tx, ty, oi.colors[1], PATCH.fringeA, -PATCH.fringe);
             ctx.globalAlpha = 0.4;
             ctx.fillStyle = oi.colors[1];
             for (let i = 0; i < 7; i++) {
@@ -1000,20 +1107,18 @@ export function paintEdges(ctx, map, tx, ty, px, py, size, season = "spring") {
             // A lone puddle is drawn as a blob; a band hugging the tile
             // border would put a square halo right back around it.
             if (landRound >= 4) continue;
-            band((i) => wobble(i, 11) * (puddle ? 4 : 7), (off, len, d) => {
-                ctx.fillStyle = "rgba(96,78,52,0.32)";            // wet ground
-                if (side === "n") ctx.fillRect(px + off, py, len, d);
-                if (side === "s") ctx.fillRect(px + off, py + size - d, len, d);
-                if (side === "w") ctx.fillRect(px, py + off, d, len);
-                if (side === "e") ctx.fillRect(px + size - d, py + off, d, len);
-            });
-            if (!puddle) band((i) => wobble(i, 23) * 2.6, (off, len, d) => {
-                ctx.fillStyle = "rgba(255,255,255,0.3)";          // dried foam line
-                if (side === "n") ctx.fillRect(px + off, py, len, d);
-                if (side === "s") ctx.fillRect(px + off, py + size - d, len, d);
-                if (side === "w") ctx.fillRect(px, py + off, d, len);
-                if (side === "e") ctx.fillRect(px + size - d, py + off, d, len);
-            });
+            // The waterline is the SAME wandering line both tiles agree on:
+            // where it came ashore, this tile is water; just inland of it the
+            // ground is wet and then dried foam. Nothing here is a straight
+            // bar along the tile border any more.
+            // Smooth curves, not bars: the wet rim and the dried foam used to
+            // trace the tile border exactly, and that pale rectangle around
+            // every pond was the most visible "square world" in the game.
+            bandPoly((i) => wobble(i, 11) * (puddle ? COAST.wetPuddle : COAST.wet),
+                     "rgba(96,78,52,1)", 0.32);
+            if (!puddle) {
+                bandPoly((i) => wobble(i, 23) * COAST.foamLine, "rgba(255,255,255,1)", 0.3);
+            }
         } else if (hi.liquid && oi.liquid) {
             // Shallow meeting deep: a soft lip instead of a hard rectangle.
             // A wide, ragged blend — the step from shallow to deep is the
@@ -1088,7 +1193,11 @@ export function paintEdges(ctx, map, tx, ty, px, py, size, season = "spring") {
         const seed = tx * 7 + ty * 13 + sx + sy * 2;
         // Each corner bites a different amount — a pond rounded by the same
         // quarter circle four times is just a rectangle with cut corners.
-        const bite = size * ((isPuddle ? 0.3 : 0.16) + h(tx + sx, ty + sy, 23) * 0.3);
+        // A small body of water is nearly all corner: bite it harder, or a
+        // five-tile pond stays a rectangle with rounded corners.
+        const small = hereLiquid && liquidAround <= 2;
+        const bite = size * ((isPuddle ? 0.3 : small ? 0.3 : 0.16)
+                             + h(tx + sx, ty + sy, 23) * (small ? 0.42 : 0.3));
         if (hereLiquid && !a.liquid && !b.liquid) {
             const land = tileInfo(a.id).colors;
             cornerPath(ctx, px, py, size, sx, sy, bite, seed);
@@ -1659,13 +1768,29 @@ function broadleaf(ctx, obj, season) {
             ctx.stroke();
         }
     } else {                                         // birch lenticels
+        // The marks have to live ON the trunk: the trunk tapers, so a mark
+        // placed by a flat ±1.7 unit offset slid clean off the bark near the
+        // top. Measure the trunk at that height and stay inside it.
+        const halfAt = (yy) => {
+            const t = Math.min(1, Math.max(0, yy / trunkTop));      // 0 base … 1 top
+            const mt = 1 - t;
+            // The same quadratic the trunk outline is drawn with.
+            return Math.abs(mt * mt * halfBase + 2 * mt * t * (halfBase * 0.62) + t * t * halfTop);
+        };
         ctx.fillStyle = "#3a3630";
         for (let i = 0; i < 9; i++) {
             const n = h(obj.tx, obj.ty + i, 7);
             const yy = -4 * S - i * 3.2 * S;
-            const ww = (1.4 + n * 2.4) * S;
-            ctx.fillRect((n - 0.5) * 3.4 * S, yy, ww, 0.9 * S);
-            if (n > 0.7) ctx.fillRect((n - 0.8) * 3 * S, yy + 1.6 * S, ww * 0.5, 0.7 * S);
+            const half = halfAt(yy) - 0.6 * S;                      // keep a bark margin
+            if (half <= 0.4 * S) continue;
+            const ww = Math.min((1.4 + n * 2.4) * S, half * 1.5);
+            const x0 = Math.max(-half, Math.min(half - ww, (n - 0.5) * 2 * half));
+            ctx.fillRect(x0, yy, ww, 0.9 * S);
+            if (n > 0.7) {
+                const w2 = ww * 0.5;
+                const x2 = Math.max(-half, Math.min(half - w2, x0 + 0.3 * S));
+                ctx.fillRect(x2, yy + 1.6 * S, w2, 0.7 * S);
+            }
         }
         ctx.fillStyle = "rgba(60,52,44,0.5)";        // sooty base
         ctx.beginPath();

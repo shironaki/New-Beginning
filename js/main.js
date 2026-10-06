@@ -645,16 +645,18 @@ export class Game {
             const def = tileInfo(info);
             if (def.liquid) {
                 // Wading: the boot throws water, not dust.
-                this.particles.splash(this.player.x + this.player.stepSide * 2.5, this.player.y + 2,
+                this.particles.splash(this.player.x + this.player.stepSide * 2.5, this.player.y + 1,
                                       this.player.running ? 1.25 : 0.85);
                 this.player.wet = TRACK.wetLife;
             } else {
                 // Soft ground keeps the boot: sand, snow, mud, ash. Soaked
                 // boots print on hard ground too, until they dry out.
-                this.tracks.add(this.player.x, this.player.y + 2,
+                // The foot line IS player.y — the print belongs there, not
+                // two pixels further down the screen.
+                this.tracks.add(this.player.x, this.player.y,
                                 this.player.faceX, this.player.faceY,
                                 this.player.stepSide, info, this.player.wet > 0);
-                this.particles.dust(this.player.x + this.player.stepSide * 2.5, this.player.y + 3,
+                this.particles.dust(this.player.x + this.player.stepSide * 2.5, this.player.y + 1,
                     this.player.running ? FX.dust.run : FX.dust.walk, dustColor(def));
             }
         }
@@ -905,6 +907,22 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
             }
         };
         fit(null);
+
+        // A blank page tells nobody anything. If the boot throws — a bad
+        // deploy, a file that did not upload, an old cached module — say so
+        // on screen instead of leaving a black rectangle.
+        const bootFail = (err) => {
+            const box = document.createElement("div");
+            box.style.cssText = "position:fixed;inset:0;display:flex;align-items:center;"
+                + "justify-content:center;padding:24px;background:#14120e;color:#f0e6d2;"
+                + "font:14px/1.5 ui-monospace,Menlo,Consolas,monospace;text-align:left;z-index:99999";
+            box.innerHTML = "<div><b style='color:#f0cc8c'>Игра не запустилась</b><br><br>"
+                + String((err && err.message) || err)
+                + "<br><br><span style='color:#9a8f7c'>Обнови страницу с очисткой кэша "
+                + "(Ctrl+Shift+R). Если повторится — пришли этот текст.</span></div>";
+            document.body.append(box);
+        };
+        window.addEventListener("error", (e) => bootFail(e.error || e.message), { once: true });
 
         const game = new Game({ canvas, hudRoot, seed: "ashes-and-grain" });
         window.GAME = game;

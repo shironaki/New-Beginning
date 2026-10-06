@@ -21,6 +21,7 @@
     "hero": "node tools/hero-sheet.js",
     "scene": "node tools/scene.js",
     "replay": "node tools/replay.js check",
-    "balance": "node tools/balance.js"
+    "balance": "node tools/balance.js",
+    "pages": "node tools/pagescheck.js"
   }
 }
