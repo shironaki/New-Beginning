@@ -369,6 +369,8 @@ export function installDevTools(game, win = window) {
         const noteBtn = btn("📍 Отметить место / область", () => startPicking(),
                             "клик — точка, протянуть мышь — область");
         row(noteBtn);
+        const serverLabel = el("div", { className: "hint" });
+        p.append(serverLabel);
         const queueLabel = el("span", { className: "val" });
         const sendBtn = btn("Отправить очередь", () => flushQueue(true),
                             "попробовать ещё раз, когда dev-сервер доступен");
@@ -433,6 +435,12 @@ export function installDevTools(game, win = window) {
             const n = queue.read().length;
             queueLabel.textContent = n ? `в очереди: ${n}` : "очередь пуста";
             sendBtn.classList.toggle("on", n > 0);
+            serverLabel.textContent = state.serverUp === undefined
+                ? "проверяю сервер…"
+                : state.serverUp
+                    ? "✔ dev-сервер на связи — заметки идут прямо в репозиторий"
+                    : "✖ сервера нет (Pages или файл с диска) — заметки копятся в очереди";
+            serverLabel.style.color = state.serverUp ? "#9fd08c" : "#e0a06a";
         }
         state.refresh = refresh;
         refresh();
@@ -565,6 +573,18 @@ export function installDevTools(game, win = window) {
         clear() { localStorage.removeItem(DEV.queueKey); }
     };
 
+    /**
+     * Is there anything on the other end that can save a note? Pages cannot,
+     * a dev server can — and the panel says which, so the answer to "where
+     * did my note go" is on screen before the note is written.
+     */
+    async function pingServer() {
+        try {
+            const r = await fetch("/__dev/notes", { headers: { "x-dev-token": state.token } });
+            return r.ok;
+        } catch { return false; }
+    }
+
     /** Try the dev server once. Returns the saved file name, or null. */
     async function postNote(note) {
         try {
@@ -644,7 +664,13 @@ export function installDevTools(game, win = window) {
         if (state.open && state.refresh) state.refresh();
         // Opening the panel is a good moment to try the server again: notes
         // written on Pages get saved the next time you play through serve.js.
-        if (state.open && state.unlocked) flushQueue(false);
+        if (state.open && state.unlocked) {
+            pingServer().then((up) => {
+                state.serverUp = up;
+                if (up) flushQueue(false);
+                if (state.refresh) state.refresh();
+            });
+        }
     }
 
     async function unlock() {
@@ -734,16 +760,56 @@ export function installDevTools(game, win = window) {
         });
     }, true);
 
-    // An already-unlocked session gets its panel back without asking again.
+    // An already-unlocked session gets its panel back without asking again —
+    // and anything that could not be saved last time is sent NOW, before the
+    // owner has to remember that a queue exists at all.
     (async () => {
         state.cfg = await loadConfig();
         const saved = localStorage.getItem(DEV.storeKey);
-        if (saved && saved === state.cfg.sha256) {
-            state.unlocked = true; state.token = saved;
-            build();
-            toggle(false);
+        if (!saved || saved !== state.cfg.sha256) return;
+        state.unlocked = true; state.token = saved;
+        build();
+        toggle(false);
+        state.serverUp = await pingServer();
+        const waiting = queue.read().length;
+        if (waiting && state.serverUp) {
+            const sent = await flushQueue(false);
+            if (sent) toast(`заметок отправлено в репозиторий: ${sent}`, 4000);
+        } else if (waiting) {
+            toast(`в очереди ${waiting} заметок — сервера нет, выгрузи их файлом`, 5000);
         }
+        if (state.refresh) state.refresh();
     })();
+
+    // A bundle exported on another host (GitHub Pages, another sandbox URL,
+    // yesterday's session) can simply be dropped onto the game window: it is
+    // read here and posted to the dev server, note by note.
+    win.addEventListener("dragover", (e) => {
+        if (!state.unlocked) return;
+        e.preventDefault();
+    });
+    win.addEventListener("drop", async (e) => {
+        if (!state.unlocked) return;
+        const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if (!file || !/\.json$/i.test(file.name)) return;
+        e.preventDefault();
+        let data;
+        try { data = JSON.parse(await file.text()); }
+        catch { toast("это не файл заметок"); return; }
+        const notes = Array.isArray(data) ? data
+            : Array.isArray(data.notes) ? data.notes
+            : data.text ? [data] : null;
+        if (!notes || !notes.length) { toast("в файле нет заметок"); return; }
+        let sent = 0;
+        for (const note of notes) {
+            // eslint-disable-next-line no-await-in-loop — a handful of notes, in order
+            if (await postNote(note)) sent++; else queue.push(note);
+        }
+        toast(sent === notes.length
+            ? `принято заметок: ${sent}`
+            : `принято ${sent} из ${notes.length}, остальные в очереди`, 4000);
+        if (state.refresh) state.refresh();
+    });
 
     return state;
 }
