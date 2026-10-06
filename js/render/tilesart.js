@@ -1367,6 +1367,19 @@ const HEIGHT_SCALES = new Set([
 ]);
 
 /** Drawn height of a prop, u. */
+/**
+ * One colour that stands for a prop at a distance: what its reflection in
+ * the water is made of. Crown colour for trees, stone for rock, bark for
+ * everything else — no reflection needs more detail than that.
+ */
+export function propTone(kind) {
+    const tree = TREE_COLORS[kind];
+    if (tree) return tree[0];
+    if (kind === "rock" || kind === "boulder" || kind === "stone" || kind === "ore_rock") return "#7e8a90";
+    if (kind === "reed" || kind === "grass_tuft" || kind === "herb" || kind === "fern") return "#4e7236";
+    return "#5a4530";
+}
+
 export function propHeight(kind, size = 1) {
     const base = PROP_HEIGHT[kind];
     if (base === undefined) return 10;

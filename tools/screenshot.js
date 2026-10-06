@@ -29,6 +29,7 @@ const hudRoot = globalThis.document.getElementById("hud");
 globalThis.document.getElementById = (id) => (id === "game" ? screen : hudRoot);
 
 const { Game } = await import("../js/main.js");
+const { propHeight } = await import("../js/render/tilesart.js");
 
 function frames(game, n, dt = 1 / 60) {
     for (let i = 0; i < n; i++) { game.update(dt); game.render(); }
@@ -384,6 +385,63 @@ const scenes = [
             }
             if (best) g.camera.snapTo((best.tx + 0.5) * 32, (best.ty + 0.5) * 32);
             g.camera.zoom = 2.2;
+        }
+    },
+    {
+        name: "28-shore-reflection",
+        about: "Берег отражается в воде",
+        setup(g) {
+            g.enterZone("shore", null, true);
+            g.clock.minute = 11 * 60;
+            // The tallest thing standing with water to the south of it: that
+            // is what a reflection is for.
+            let best = null, bh = 0;
+            for (const o of g.zone.objects) {
+                const h = propHeight(o.kind, o.size || 1);
+                if (h < 18 || h <= bh) continue;
+                const ty = Math.floor(o.y / 32) + 1;
+                const below = g.zone.map.get(Math.floor(o.x / 32), ty);
+                const below2 = g.zone.map.get(Math.floor(o.x / 32), ty + 1);
+                if (below !== 9 && below !== 10 && below2 !== 9 && below2 !== 10) continue;
+                bh = h; best = o;
+            }
+            // Stand on dry land just west of it, as close as the hero fits:
+            // placeSafely on a blocked tile would teleport him across the map.
+            if (best) {
+                for (const dx of [-22, -34, -46, -58, -70]) {
+                    if (g.fitsAt(best.x + dx, best.y + 4)) {
+                        g.player.x = best.x + dx; g.player.y = best.y + 4;
+                        break;
+                    }
+                }
+                g.camera.snapTo(g.player.x, g.player.y);
+            }
+            g.findInteractable = () => null;     // no prompt over the water
+            g.camera.zoom = 2.8;
+        }
+    },
+    {
+        name: "29-water-mist-dawn",
+        about: "Туман на воде на рассвете",
+        setup(g) {
+            g.enterZone("shore", null, true);
+            g.clock.minute = 6 * 60;
+            const map = g.zone.map;
+            let best = null, bestN = -1;
+            for (let ty = 4; ty < map.h - 4; ty++) {
+                for (let tx = 4; tx < map.w - 4; tx++) {
+                    const id = map.get(tx, ty);
+                    if (id !== 9 && id !== 10) continue;
+                    let n = 0;
+                    for (let k = -2; k <= 2; k++) for (let m = -2; m <= 2; m++) {
+                        const q = map.get(tx + k, ty + m);
+                        if (q === 9 || q === 10) n++;
+                    }
+                    if (n > bestN) { bestN = n; best = { tx, ty }; }
+                }
+            }
+            if (best) g.camera.snapTo((best.tx + 0.5) * 32, (best.ty + 0.5) * 32);
+            g.camera.zoom = 2.4;
         }
     },
     {

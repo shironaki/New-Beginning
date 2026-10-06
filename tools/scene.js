@@ -15,6 +15,7 @@
  *   --at x,y           world position for the hero (default: the zone spawn)
  *   --near <kind>      stand next to the closest prop of that kind (--gap px)
  *   --puddle           stand by the closest lone tile of water
+ *   --shore            stand on a bank with water to the south
  *   --hour <0..24>     clock, fractional hours allowed        (default 12)
  *   --day <n>          day number — picks the season          (default 1)
  *   --weather <key>    clear|wind|cloudy|rain|storm|fog|snow  (default clear)
@@ -112,6 +113,25 @@ if (flag("puddle", false)) {
     if (!best) { console.error("no lone puddle in " + game.zone.id); process.exit(1); }
     console.error(`puddle at ${best[0]},${best[1]}`);
     game.placeSafely(best[0] - num("gap", 26), best[1] + 10);
+}
+
+// --shore: stand on the bank with water to the south (reflections, surf).
+if (flag("shore", false)) {
+    const { TILES, TILE_SIZE } = await import("../js/world/tiles.js");
+    const map = game.zone.map;
+    const liquid = (x, y) => { const t = TILES[map.get(x, y)]; return !!(t && t.liquid); };
+    // A bank that reflects is one with something tall on it and water to the
+    // SOUTH — in a 3/4 view a reflection falls towards the viewer.
+    const { propHeight } = await import("../js/render/tilesart.js");
+    let best = null, bh = 0;
+    for (const o of game.zone.objects) {
+        if (propHeight(o.kind, o.size || 1) < 20) continue;
+        if (!liquid(o.tx, o.ty + 1) && !liquid(o.tx, o.ty + 2)) continue;
+        const hgt = propHeight(o.kind, o.size || 1);
+        if (hgt > bh) { bh = hgt; best = o; }
+    }
+    if (!best) { console.error("no reflecting bank in " + game.zone.id); process.exit(1); }
+    game.placeSafely(best.x - num("gap", 40), best.y - 6);
 }
 
 const at = flag("at", null);

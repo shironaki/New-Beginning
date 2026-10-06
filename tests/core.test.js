@@ -6,8 +6,8 @@ import { MOVE, GAIT as gaitSpec } from "../js/render/charspec.js";
 import { LIGHT, ambientAt } from "../js/render/lighting.js";
 import { SUN, SHADOW, setSun, castShadow, setFireLights, setShadowOrigin, propHeight,
          ROCK, pick, rockOutline, BEND, setWalker, plantBend, BREEZE, setBreeze, windLean,
-         ASH, PUDDLE, puddleGeom, loneWaterFloor } from "../js/render/tilesart.js";
-import { Renderer, OCCLUDE, CLOUDS } from "../js/render/renderer.js";
+         ASH, PUDDLE, puddleGeom, loneWaterFloor, propTone } from "../js/render/tilesart.js";
+import { Renderer, OCCLUDE, CLOUDS, MIRROR, WATER } from "../js/render/renderer.js";
 import { READ, PALETTE, BODY } from "../js/render/charspec.js";
 import { moonFactor } from "../js/render/lighting.js";
 import { Particles, FX, MATERIAL, materialOf } from "../js/render/particles.js";
@@ -687,6 +687,33 @@ test("the torso leans into a start and hangs back on the brakes", () => {
     assert.gt(GAIT.leanAccel, 0);
     assert.gt(GAIT.accelRef, 100);               // px/s², a real acceleration
     assert.lt(GAIT.leanAccel, 6);                // px — a hint, not a cartoon
+});
+
+suite("reflections and mist");
+
+test("a reflection is shorter, dimmer and rougher than the thing it mirrors", () => {
+    assert.lt(MIRROR.squash, 1);                 // shorter than the prop
+    assert.lt(MIRROR.alpha, 0.5);                // never a mirror
+    assert.lt(MIRROR.byWeather.storm, MIRROR.byWeather.clear);   // chop breaks it up
+    assert.lt(MIRROR.barFill, 1);                // water shows between the bars
+    assert.gt(MIRROR.gap, 0);
+    assert.lt(MIRROR.gapFade, 1);                // standing back from the bank dims it
+    assert.gt(MIRROR.minHeight, 0);
+});
+
+test("every prop has a colour its reflection can be made of", () => {
+    for (const kind of ["pine", "oak", "palm", "rock", "reed", "crate", "tent"]) {
+        const tone = propTone(kind);
+        assert.ok(/^#[0-9a-f]{6}$/i.test(tone), `${kind} -> ${tone}`);
+    }
+    assert.not(propTone("pine") === propTone("rock"));
+});
+
+test("mist sits on the water at first light and burns off", () => {
+    assert.lt(WATER.mistFrom, WATER.mistPeak);
+    assert.lt(WATER.mistPeak, WATER.mistTo);
+    assert.lte(WATER.mistTo, 12);                // gone well before noon
+    assert.lt(WATER.mistA, 0.5);                 // a veil, not a wall
 });
 
 run("v3 core");

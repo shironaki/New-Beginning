@@ -13,7 +13,7 @@
  */
 import { CHUNK } from "../world/tilemap.js";
 import { TILE_SIZE, TILES } from "../world/tiles.js";
-import { paintTile, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, setWalker, setBreeze, propHeight, puddleScreenPath } from "./tilesart.js";
+import { paintTile, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, setWalker, setBreeze, propHeight, propTone, puddleScreenPath } from "./tilesart.js";
 import { drawCharacter, drawSleeping } from "./character.js";
 import { LightMap, LIGHT } from "./lighting.js";
 import { itemEmoji } from "../sandbox/items.js";
@@ -54,6 +54,15 @@ export const WATER = {
     glintA: 0.5,            // α of a glint at full daylight
     glintSize: 1.5,         // u
     glintSpeed: 1.9,        // 1/s — twinkle rate
+    // Mist on the water at first light: the valley breathes before the sun
+    // gets high enough to burn it off. Painted per water tile, so it hugs
+    // the water instead of lying over the whole screen like weather fog.
+    mistFrom: 4.0,          // hour it starts
+    mistPeak: 6.0,          // hour it is thickest
+    mistTo: 9.0,            // hour it is gone
+    mistA: 0.3,             // α at the peak
+    mistSpeed: 5,           // px/s drift
+    mistScale: 0.014,       // rad/px — size of the patches
     skyBandA: 0.09,         // α of the sky reflected off the far bank
     skyBandSteps: 4,        // soft steps of that reflection (no gradients)
     skyBandH: 0.5,          // fraction of a tile the reflection covers
@@ -118,6 +127,34 @@ export const CLOUDS = {
     field: 2.2,          // wrap period, in screens
     minDaylight: 0.3,    // below this the sun is too low to print shadows
     byWeather: { clear: 0.38, wind: 0.72, cloudy: 1, rain: 0.5, storm: 0.34, fog: 0, snow: 0.28 }
+};
+
+/**
+ * Reflections, in numbers. A bank with trees on it and a mirror-flat void
+ * underneath never looks like water. The reflection is not a second copy of
+ * the prop — it is its colour, inverted, broken into bars that wobble with
+ * the swell and fade with depth. Each bar is tested against the map, so the
+ * reflection stops exactly where the water does and needs no clipping.
+ */
+export const MIRROR = {
+    minHeight: 12,       // px of prop height worth reflecting at all
+    heroHeight: 30,      // px — the hero reflects too, he is the tallest thing about
+    heroTone: "#5c5345",
+    gap: 72,             // px of bank the prop may stand back from the water
+    gapFade: 0.55,       // α left when it stands the full gap away
+    squash: 0.62,        // the reflection is shorter than the thing itself
+    rowStep: 4,          // px between bars — finer than this is invisible
+    barFill: 0.62,       // of the step a bar actually covers: water shows between
+    alpha: 0.36,         // α at the waterline
+    fade: 1.0,           // how fast it dies with depth (1 = gone at the end)
+    widthOf: 0.46,       // bar width as a fraction of prop height
+    taper: 0.45,         // the reflection narrows towards its tip
+    wobbleAmp: 2.4,      // px of sideways wander
+    wobbleHz: 0.8,
+    wobbleK: 0.09,       // rad/px — the wobble travels down the reflection
+    byWeather: { clear: 1, cloudy: 0.85, wind: 0.6, fog: 0.45, rain: 0.4, storm: 0.25, snow: 0.7 },
+    nightFloor: 0.35,    // reflections do not vanish at night, they go cold
+    minZoom: 1.2
 };
 
 /** Grading, in numbers. */
@@ -392,6 +429,25 @@ export class Renderer {
                         ctx.fillRect(ls.x - len / 2 + sway, yy, len, Math.max(1, 1.1 * z));
                     }
                 }
+                // First light: mist sitting on the water.
+                if (hour > WATER.mistFrom && hour < WATER.mistTo) {
+                    const ramp = hour < WATER.mistPeak
+                        ? (hour - WATER.mistFrom) / (WATER.mistPeak - WATER.mistFrom)
+                        : 1 - (hour - WATER.mistPeak) / (WATER.mistTo - WATER.mistPeak);
+                    const drift = t * WATER.mistSpeed;
+                    const n = Math.sin((wx + drift) * WATER.mistScale)
+                            * Math.sin((wy - drift * 0.6) * WATER.mistScale * 1.7);
+                    const a = WATER.mistA * Math.max(0, ramp) * (0.45 + 0.55 * (n * 0.5 + 0.5));
+                    if (a > 0.004) {
+                        // Snapped to whole pixels and NOT overdrawn by a
+                        // pixel: translucent tiles that overlap print their
+                        // seams as a bright grid over the whole lake.
+                        const x0 = Math.round(s.x), y0 = Math.round(s.y);
+                        ctx.fillStyle = `rgba(226,236,241,${a.toFixed(3)})`;
+                        ctx.fillRect(x0, y0, Math.round(s.x + S) - x0, Math.round(s.y + S) - y0);
+                    }
+                }
+
                 // The bank reflects the sky: a pale band hugging the shore on
                 // the near side of land that sits above this tile.
                 const above = TILES[zone.map.get(tx, ty - 1)];
@@ -470,6 +526,73 @@ export class Renderer {
      * Objects layer: props + characters, sorted by their base Y so a hero
      * walking behind a pine is actually behind it.
      */
+    /**
+     * Mirror the things standing on the bank into the water below them.
+     * One pass over the props that are already visible; a prop with no water
+     * under it costs a single tile lookup.
+     */
+    drawReflections(state) {
+        const cam = this.camera, ctx = this.ctx, zone = state.zone;
+        if (state.underground || cam.zoom < MIRROR.minZoom) return this;
+        const weather = MIRROR.byWeather[state.weather] !== undefined
+            ? MIRROR.byWeather[state.weather] : 0.8;
+        const daylight = state.clock ? state.clock.daylight : 1;
+        const lit = MIRROR.nightFloor + (1 - MIRROR.nightFloor) * daylight;
+        const strength = MIRROR.alpha * weather * lit;
+        if (strength <= 0.01) return this;
+        const t = this.time, z = cam.zoom;
+
+        // The hero reflects too — he is usually the tallest thing on the bank,
+        // and his own mirror image is what sells the water as water.
+        const list = this._mirrorList || (this._mirrorList = []);
+        list.length = 0;
+        for (const obj of zone.objects) list.push(obj);
+        if (!state.player.sleeping) {
+            list.push({ kind: "__hero", x: state.player.x, y: state.player.y, size: 1 });
+        }
+
+        for (const obj of list) {
+            if (obj.removed) continue;
+            const hero = obj.kind === "__hero";
+            const hgt = hero ? MIRROR.heroHeight : propHeight(obj.kind, obj.size || 1);
+            if (hgt < MIRROR.minHeight) continue;
+            if (!cam.isVisible(obj.x, obj.y, 120)) continue;
+            // Where does the water start below it? A tree may stand a little
+            // way up the bank and still be mirrored — but only a little.
+            const tx = Math.floor(obj.x / TILE_SIZE);
+            let start = -1;
+            for (let d = 4; d <= MIRROR.gap; d += 4) {
+                const info = TILES[zone.map.get(tx, Math.floor((obj.y + d) / TILE_SIZE))];
+                if (info && info.liquid) { start = d; break; }
+            }
+            if (start < 0) continue;
+            const near = 1 - (start / MIRROR.gap) * (1 - MIRROR.gapFade);
+
+            const len = hgt * MIRROR.squash;
+            const halfW = hgt * MIRROR.widthOf * 0.5;
+            const tone = hero ? MIRROR.heroTone : propTone(obj.kind);
+            ctx.fillStyle = tone;
+            for (let d = 0; d < len; d += MIRROR.rowStep) {
+                const f = d / len;                       // 0 at the waterline
+                // The bar has to be ON water: the map decides where the
+                // reflection ends, so it never spills onto the bank.
+                const wy = obj.y + start + d;
+                const info = TILES[zone.map.get(Math.floor(obj.x / TILE_SIZE), Math.floor(wy / TILE_SIZE))];
+                if (!info || !info.liquid) break;
+                const wob = Math.sin(t * MIRROR.wobbleHz * Math.PI * 2 - d * MIRROR.wobbleK)
+                          * MIRROR.wobbleAmp * (0.4 + f);
+                const w = halfW * (1 - f * MIRROR.taper);
+                const a = strength * near * (1 - f * MIRROR.fade);
+                if (a <= 0.004) break;
+                const sc = cam.worldToScreen(obj.x + wob - w, wy);
+                ctx.globalAlpha = a;
+                ctx.fillRect(sc.x, sc.y, w * 2 * z, MIRROR.rowStep * MIRROR.barFill * z + 1);
+            }
+            ctx.globalAlpha = 1;
+        }
+        return this;
+    }
+
     drawObjects(state, dt = 0) {
         const { zone, player, fires } = state;
         const cam = this.camera;
@@ -871,6 +994,7 @@ export class Renderer {
                               state.clock ? state.clock.daylight : 1,
                               !!state.underground,
                               state.windAngle || 0);
+        this.drawReflections(state);
         if (state.tracks) state.tracks.draw(ctx, this.camera);
         this.drawObjects(state, dt);
         if (state.particles) state.particles.draw(ctx, this.camera);
