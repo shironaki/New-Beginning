@@ -229,6 +229,24 @@ const scenes = [
         }
     },
     {
+        name: "23-chop-juice",
+        about: "Рубка: щепа по материалу, листва, тряска камеры",
+        setup(g) {
+            g.enterZone("forest", null, true);
+            g.clock.minute = 12 * 60;
+            const tree = g.zone.objects.find((o) => o.kind === "pine" || o.kind === "oak");
+            if (tree) {
+                g.player.x = tree.x - 26; g.player.y = tree.y + 18;
+                g.camera.zoom = 3.4;
+                g.camera.snapTo(tree.x, tree.y - 20);
+                g.inventory.add("axe_stone", 1);
+                g.harvest(tree);                 // mid-chop: chips in the air
+                g.particles.impact(tree.x, tree.y + 2, 12);
+                g.particles.leaves(tree.x, tree.y - 22, "#7fa24f", 10);
+            }
+        }
+    },
+    {
         name: "20-rain-storm",
         about: "Гроза: три слоя дождя, всплески, вспышка",
         setup(g) {

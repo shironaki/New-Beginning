@@ -6,7 +6,7 @@ import { SUN, SHADOW, setSun, castShadow, setFireLights, setShadowOrigin, propHe
 import { Renderer, OCCLUDE } from "../js/render/renderer.js";
 import { READ, PALETTE, BODY } from "../js/render/charspec.js";
 import { moonFactor } from "../js/render/lighting.js";
-import { Particles } from "../js/render/particles.js";
+import { Particles, FX, MATERIAL, materialOf } from "../js/render/particles.js";
 import { RNG, hashSeed, mixSeeds, valueNoise2D, fbm2D } from "../js/core/rng.js";
 import { EventBus } from "../js/core/events.js";
 import { World } from "../js/core/ecs.js";
@@ -466,12 +466,46 @@ test("particles never allocate once the pool is warm", () => {
         fx.smoke(10, 10, 2);
         fx.chips(10, 10, "#fff", 4);
         fx.dust(10, 10, 2);
+        fx.leaves(10, 10, "#7fa24f", 3);
+        fx.impact(10, 10, 6);
         fx.text(0, 0, "+1");
         fx.update(1 / 60);
     }
     assert.eq(fx.pool.length, 64, "the pool must not grow");
     assert.lte(fx.n, 64);
     for (const p of fx.pool) assert.ok(slots.has(p), "a particle object was replaced, not reused");
+});
+
+test("wind pushes smoke, not stone chips", () => {
+    const fx = new Particles({ max: 32, maxTexts: 4 });
+    fx.setWind(0, 1);                                  // straight east
+    assert.near(fx.windX, 1, 1e-9);
+    fx.smoke(0, 0, 1);
+    const smoke = fx.pool[0];
+    const vx0 = smoke.vx;
+    fx.update(0.5);
+    assert.gt(smoke.vx, vx0, "smoke is a sail");
+    fx.clear();
+    fx.chips(0, 0, "#fff", 1);
+    const chip = fx.pool[0];
+    const cvx = chip.vx;
+    fx.update(0.5);
+    assert.near(chip.vx, cvx, 1e-9, "a chip of stone ignores the breeze");
+    assert.eq(FX.wind.chip, 0, "…and the contract says so");
+});
+
+test("material decides what flies off a struck prop", () => {
+    assert.eq(materialOf("rock"), MATERIAL.stone);
+    assert.eq(materialOf("ore_rock"), MATERIAL.stone);
+    assert.eq(materialOf("ruin_wall"), MATERIAL.stone);
+    assert.eq(materialOf("burnt_stump"), MATERIAL.ash);
+    assert.eq(materialOf("bush"), MATERIAL.plant);
+    assert.eq(materialOf("oak"), MATERIAL.wood, "anything unknown is wood");
+    assert.ok(MATERIAL.plant.leaf, "only plants shed leaves");
+    assert.eq(MATERIAL.stone.leaf, null);
+    // Shake stays modest: a chop is not an earthquake.
+    assert.lt(FX.shake.hit, FX.shake.fell);
+    assert.lt(FX.shake.hit, 2);
 });
 
 test("dead particles are swapped out, not spliced", () => {

@@ -19,8 +19,62 @@ export const FX = {
     fontBuckets: [9, 11, 13, 16, 20, 26],
     smokeGrowth: 3,
     smokeDrag: 0.99,
-    textDrag: 0.94
+    textDrag: 0.94,
+
+    /**
+     * Wind. The day's wind vector is handed to `setWind()` once per frame and
+     * pushes each kind by its own share: smoke is a sail, a chip of stone is
+     * not. px/s² per unit of wind strength.
+     */
+    wind: { smoke: 34, spark: 14, leaf: 26, dot: 8, chip: 0, ember: 10 },
+
+    /** Sparks over a flame. */
+    spark: { spread: 16, rise: 18, riseVar: 22, life: 0.5, lifeVar: 0.6,
+             gravity: 10, size: 1, sizeVar: 1.4, hot: "#ffcf6a", cool: "#ff8a3a" },
+    /** Smoke: rises, spreads, greys out as it cools. */
+    smoke: { spread: 4, drift: 5, rise: 9, riseVar: 6, life: 1.6, lifeVar: 1,
+             size: 3, sizeVar: 3, warm: [196, 176, 150], cold: [150, 150, 152] },
+    /** Chips off a struck prop. */
+    chip: { spread: 40, rise: 20, riseVar: 25, life: 0.4, lifeVar: 0.3,
+            gravity: 120, size: 1.5, sizeVar: 1.5 },
+    /** Dust under a boot: harder at a run, the colour of the ground. */
+    dust: { spread: 5, drift: 10, rise: 4, riseVar: 6, life: 0.3, lifeVar: 0.25,
+            size: 2, sizeVar: 2.4, walk: 2, run: 4, runBoost: 1.5 },
+    /** Leaves shaken loose when a crown comes down. */
+    leaf: { spread: 26, rise: 10, riseVar: 18, life: 1.4, lifeVar: 1.1,
+            gravity: 16, size: 2, sizeVar: 1.6, sway: 2.4 },
+    /** A prop hitting the ground: a low ring of dust plus a thud of shake. */
+    impact: { ring: 16, ringVar: 10, life: 0.5, lifeVar: 0.35, size: 3, sizeVar: 3 },
+
+    /**
+     * Camera shake, in one place so no caller invents its own. Power is in
+     * world px, time in seconds.
+     */
+    shake: { hit: 0.9, hitTime: 0.1, fell: 3.2, fellTime: 0.32,
+             thunder: 2.2, thunderTime: 0.55 }
 };
+
+/**
+ * What a struck thing is made of. The old code read `kind.includes("rock")`
+ * in the middle of the harvest routine; material belongs in a table.
+ */
+export const MATERIAL = {
+    wood:  { chip: "#8a6a3c", chips: 6, leaf: null },
+    stone: { chip: "#9a958c", chips: 7, leaf: null },
+    plant: { chip: "#6d8a46", chips: 4, leaf: "#7fa24f" },
+    ash:   { chip: "#4a4038", chips: 5, leaf: null },
+    cloth: { chip: "#8c7a58", chips: 4, leaf: null }
+};
+
+/** Material of a prop kind — one lookup, no string sniffing at the call site. */
+export function materialOf(kind = "") {
+    if (kind.includes("rock") || kind.includes("ruin") || kind.includes("ore")) return MATERIAL.stone;
+    if (kind.includes("burnt") || kind.includes("ash") || kind.includes("charcoal")) return MATERIAL.ash;
+    if (kind === "tent" || kind === "chest_old") return MATERIAL.cloth;
+    if (kind.includes("bush") || kind.includes("herb") || kind.includes("grass")
+        || kind.includes("reed") || kind.includes("flower")) return MATERIAL.plant;
+    return MATERIAL.wood;
+}
 
 const EMPTY = {
     x: 0, y: 0, vx: 0, vy: 0, life: 0, maxLife: 1,
@@ -46,6 +100,17 @@ export class Particles {
         // Pre-built font strings, one per bucket, per family.
         this._emojiFonts = FX.fontBuckets.map((s) => `${s}px serif`);
         this._uiFonts = FX.fontBuckets.map((s) => `bold ${s}px "Segoe UI", system-ui, sans-serif`);
+        this.windX = 0; this.windY = 0;
+    }
+
+    /**
+     * The day's wind, in world units. Set once per frame from the weather
+     * system; `update()` applies it per kind through `FX.wind`.
+     */
+    setWind(angle = 0, strength = 0) {
+        this.windX = Math.cos(angle) * strength;
+        this.windY = Math.sin(angle) * strength * 0.35;   // top-down: less vertical
+        return this;
     }
 
     /** Oldest-first recycling: a burst never silently drops its own sparks. */
@@ -91,36 +156,42 @@ export class Particles {
     /* ---- presets ------------------------------------------------------- */
 
     sparks(x, y, n = 6) {
+        const C = FX.spark;
         for (let i = 0; i < n; i++) {
             const o = this._claim();
             o.x = x; o.y = y;
-            o.vx = (Math.random() - 0.5) * 16; o.vy = -18 - Math.random() * 22;
-            o.life = 0.5 + Math.random() * 0.6; o.maxLife = 1.1; o.gravity = 10;
-            o.size = 1 + Math.random() * 1.4; o.alpha = 1; o.glyph = "";
-            o.color = Math.random() > 0.5 ? "#ffcf6a" : "#ff8a3a"; o.kind = "spark";
+            o.vx = (Math.random() - 0.5) * C.spread; o.vy = -C.rise - Math.random() * C.riseVar;
+            o.life = C.life + Math.random() * C.lifeVar; o.maxLife = C.life + C.lifeVar;
+            o.gravity = C.gravity;
+            o.size = C.size + Math.random() * C.sizeVar; o.alpha = 1; o.glyph = "";
+            o.color = Math.random() > 0.5 ? C.hot : C.cool; o.kind = "spark";
         }
         return this;
     }
 
     smoke(x, y, n = 1) {
+        const C = FX.smoke;
         for (let i = 0; i < n; i++) {
             const o = this._claim();
-            o.x = x + (Math.random() - 0.5) * 4; o.y = y;
-            o.vx = (Math.random() - 0.5) * 5; o.vy = -9 - Math.random() * 6;
-            o.life = 1.6 + Math.random(); o.maxLife = 2.6; o.gravity = 0;
-            o.size = 3 + Math.random() * 3; o.alpha = 1; o.glyph = "";
-            o.color = "rgba(180,175,170,0.5)"; o.kind = "smoke";
+            o.x = x + (Math.random() - 0.5) * C.spread; o.y = y;
+            o.vx = (Math.random() - 0.5) * C.drift; o.vy = -C.rise - Math.random() * C.riseVar;
+            o.life = C.life + Math.random() * C.lifeVar; o.maxLife = C.life + C.lifeVar;
+            o.gravity = 0;
+            o.size = C.size + Math.random() * C.sizeVar; o.alpha = 1; o.glyph = "";
+            o.color = ""; o.kind = "smoke";       // colour is computed as it cools
         }
         return this;
     }
 
-    chips(x, y, color = "#8a6a3c", n = 7) {
+    chips(x, y, color = MATERIAL.wood.chip, n = 7) {
+        const C = FX.chip;
         for (let i = 0; i < n; i++) {
             const o = this._claim();
             o.x = x; o.y = y;
-            o.vx = (Math.random() - 0.5) * 40; o.vy = -20 - Math.random() * 25;
-            o.life = 0.4 + Math.random() * 0.3; o.maxLife = 0.7; o.gravity = 120;
-            o.size = 1.5 + Math.random() * 1.5; o.alpha = 1; o.glyph = "";
+            o.vx = (Math.random() - 0.5) * C.spread; o.vy = -C.rise - Math.random() * C.riseVar;
+            o.life = C.life + Math.random() * C.lifeVar; o.maxLife = C.life + C.lifeVar;
+            o.gravity = C.gravity;
+            o.size = C.size + Math.random() * C.sizeVar; o.alpha = 1; o.glyph = "";
             o.color = color; o.kind = "chip";
         }
         return this;
@@ -128,12 +199,50 @@ export class Particles {
 
     /** Dust kicked up by a footfall — soft, low, short-lived. */
     dust(x, y, n = 2, color = "rgba(176,163,140,0.55)") {
+        const C = FX.dust;
         for (let i = 0; i < n; i++) {
             const o = this._claim();
-            o.x = x + (Math.random() - 0.5) * 5; o.y = y;
-            o.vx = (Math.random() - 0.5) * 10; o.vy = -4 - Math.random() * 6;
-            o.life = 0.3 + Math.random() * 0.25; o.maxLife = 0.55; o.gravity = -4;
-            o.size = 2 + Math.random() * 2.4; o.alpha = 0.8; o.glyph = "";
+            o.x = x + (Math.random() - 0.5) * C.spread; o.y = y;
+            o.vx = (Math.random() - 0.5) * C.drift; o.vy = -C.rise - Math.random() * C.riseVar;
+            o.life = C.life + Math.random() * C.lifeVar; o.maxLife = C.life + C.lifeVar;
+            o.gravity = -4;
+            o.size = C.size + Math.random() * C.sizeVar; o.alpha = 0.8; o.glyph = "";
+            o.color = color; o.kind = "dot";
+        }
+        return this;
+    }
+
+    /** Leaves torn loose: they hang in the air and slide sideways. */
+    leaves(x, y, color = MATERIAL.plant.leaf, n = 8) {
+        const C = FX.leaf;
+        for (let i = 0; i < n; i++) {
+            const o = this._claim();
+            o.x = x + (Math.random() - 0.5) * C.spread;
+            o.y = y - Math.random() * 10;
+            o.vx = (Math.random() - 0.5) * C.sway * 6; o.vy = -C.rise + Math.random() * C.riseVar;
+            o.life = C.life + Math.random() * C.lifeVar; o.maxLife = C.life + C.lifeVar;
+            o.gravity = C.gravity;
+            o.size = C.size + Math.random() * C.sizeVar; o.alpha = 0.9; o.glyph = "";
+            o.color = color; o.kind = "leaf";
+        }
+        return this;
+    }
+
+    /**
+     * Something heavy hit the ground: a low ring of dust pushed outward from
+     * the point of impact. Paired with a camera shake by the caller.
+     */
+    impact(x, y, n = 10, color = "rgba(150,138,118,0.6)") {
+        const C = FX.impact;
+        for (let i = 0; i < n; i++) {
+            const a = (i / n) * Math.PI * 2 + Math.random() * 0.3;
+            const sp = C.ring + Math.random() * C.ringVar;
+            const o = this._claim();
+            o.x = x; o.y = y;
+            o.vx = Math.cos(a) * sp; o.vy = Math.sin(a) * sp * 0.45;
+            o.life = C.life + Math.random() * C.lifeVar; o.maxLife = C.life + C.lifeVar;
+            o.gravity = 0;
+            o.size = C.size + Math.random() * C.sizeVar; o.alpha = 0.75; o.glyph = "";
             o.color = color; o.kind = "smoke";
         }
         return this;
@@ -160,10 +269,14 @@ export class Particles {
                 this.n--;
                 continue;
             }
+            const w = FX.wind[p.kind] || 0;
+            if (w) { p.vx += this.windX * w * dt; p.vy += this.windY * w * dt; }
             p.vy += p.gravity * dt;
             p.x += p.vx * dt;
             p.y += p.vy * dt;
             if (p.kind === "smoke") { p.size += dt * FX.smokeGrowth; p.vx *= FX.smokeDrag; }
+            // A leaf does not fall straight: it slips side to side.
+            if (p.kind === "leaf") p.x += Math.sin(p.life * 6) * FX.leaf.sway * dt * 6;
         }
         for (let i = this.tn - 1; i >= 0; i--) {
             const t = this.textPool[i];
@@ -205,7 +318,17 @@ export class Particles {
                 ctx.textAlign = "center";
                 ctx.fillText(p.glyph, sx, sy);
             } else {
-                ctx.fillStyle = p.color;
+                if (p.kind === "smoke" && !p.color) {
+                    // Smoke cools as it climbs: warm near the embers, grey above.
+                    const C = FX.smoke, t = 1 - a;
+                    const r = Math.round(C.warm[0] + (C.cold[0] - C.warm[0]) * t);
+                    const g = Math.round(C.warm[1] + (C.cold[1] - C.warm[1]) * t);
+                    const b = Math.round(C.warm[2] + (C.cold[2] - C.warm[2]) * t);
+                    ctx.fillStyle = `rgb(${r},${g},${b})`;
+                    ctx.globalAlpha = a * p.alpha * 0.5;
+                } else {
+                    ctx.fillStyle = p.color;
+                }
                 const sz = p.size * cam.zoom * 0.5;
                 if (p.kind === "smoke") {
                     ctx.beginPath(); ctx.arc(sx, sy, sz, 0, Math.PI * 2); ctx.fill();

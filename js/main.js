@@ -27,7 +27,8 @@ import { ambientTemperature } from "./survival/temperature.js";
 import { Campfire } from "./survival/campfire.js";
 import { CookingJournal, isCookable } from "./survival/cooking.js";
 import { Renderer } from "./render/renderer.js";
-import { Particles } from "./render/particles.js";
+import { Particles, FX, materialOf } from "./render/particles.js";
+import { propHeight } from "./render/tilesart.js";
 import { StoryEngine } from "./story/acts.js";
 import { HUD, fireRows } from "./ui/hud.js";
 
@@ -367,8 +368,12 @@ export class Game {
         if (obj.hits === undefined) obj.hits = def.hits || 1;
         obj.hits -= 1 + (tool ? (this.inventory.findTool(tool).tier - 1) * 0.5 : 0);
 
-        const chipColor = obj.kind.includes("rock") || obj.kind === "ruin_wall" ? "#9a958c" : "#8a6a3c";
-        this.particles.chips(obj.x, obj.y - 10, chipColor, 5);
+        // What flies off depends on what the thing is made of, and the camera
+        // feels every blow — a hit with no weight behind it reads as a miss.
+        const mat = materialOf(obj.kind);
+        this.particles.chips(obj.x, obj.y - 10, mat.chip, mat.chips);
+        if (mat.leaf) this.particles.leaves(obj.x, obj.y - 14, mat.leaf, 3);
+        this.camera.shake(FX.shake.hit, FX.shake.hitTime);
         this.needs.fatigue = Math.min(100, this.needs.fatigue + 0.35);
 
         if (obj.hits > 0) return;
@@ -383,6 +388,16 @@ export class Game {
                 dy += 12;
             }
             if (left > 0) this.hud.toast("Рюкзак полон", "🎒");
+        }
+        // Felling something tall: a ring of dust, a drift of leaves and a
+        // thud in the camera, scaled by how big the thing was.
+        const tall = propHeight(obj.kind, obj.size || 1);
+        if (tall >= 20) {
+            const heft = Math.min(1.4, tall / 40);
+            this.particles.impact(obj.x, obj.y + 2, Math.round(8 + heft * 8));
+            if (mat.leaf || def.shade) this.particles.leaves(obj.x, obj.y - tall * 0.5,
+                                                            mat.leaf || "#7fa24f", Math.round(6 + heft * 8));
+            this.camera.shake(FX.shake.fell * heft, FX.shake.fellTime);
         }
         obj.removed = true;
         this.zone.removeSolid(obj);              // its footprint goes with it
@@ -614,7 +629,7 @@ export class Game {
             const def = tileInfo(info);
             if (!def.liquid) {
                 this.particles.dust(this.player.x + this.player.stepSide * 2.5, this.player.y + 3,
-                    this.player.running ? 3 : 2, dustColor(def));
+                    this.player.running ? FX.dust.run : FX.dust.walk, dustColor(def));
             }
         }
 
@@ -656,6 +671,19 @@ export class Game {
             }
         }
 
+        // The sky drives the smoke: one call per frame, no per-particle wind.
+        this.particles.setWind(this.weather.windAngle,
+                               this.weather.current === "storm" ? 1.4
+                             : this.weather.current === "wind" ? 1.1
+                             : this.weather.current === "rain" ? 0.7 : 0.35);
+        // Thunder: the flash is drawn by the renderer, the ground answers here.
+        if (this.weather.current === "storm") {
+            const period = 7.5;                     // same beat as the flash
+            const was = this._thunderT || 0;
+            const now = (was + dt) % period;
+            this._thunderT = now;
+            if (now < was) this.camera.shake(FX.shake.thunder, FX.shake.thunderTime);
+        }
         this.particles.update(dt);
         this.camera.update(dt);
         this.camera.follow(this.player.x, this.player.y - 8, dt);
