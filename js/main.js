@@ -908,6 +908,12 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
 
         const game = new Game({ canvas, hudRoot, seed: "ashes-and-grain" });
         window.GAME = game;
+        // The owner's control room. Loaded lazily and locked behind a
+        // password, so an ordinary player never sees it and the module costs
+        // nothing until it is asked for.
+        import("./dev/devtools.js")
+            .then((m) => m.installDevTools(game, window))
+            .catch(() => { /* dev tools are optional */ });
         window.addEventListener("resize", () => fit(game));
         game.start();
     });

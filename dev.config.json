@@ -1,0 +1,7 @@
+{
+  "_": "Доступ к dev-режиму. Пароль здесь НЕ хранится — только его SHA-256.",
+  "_password": "по умолчанию: ashes2026 — смените: node tools/devpass.js <новый пароль>",
+  "sha256": "6e430974bf4f6bd8fc8a253b6a8a90d3f5092c2a8f4337c95e3b4d3f513b22d1",
+  "notesDir": "docs/notes",
+  "hotkey": "Ctrl+Shift+D"
+}

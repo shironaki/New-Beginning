@@ -7,7 +7,7 @@
  * except at the links declared in regions.js. Same seed → same valley, in the
  * browser and in tests.
  */
-import { RNG, mixSeeds, hashSeed, fbm2D } from "../core/rng.js";
+import { RNG, mixSeeds, hashSeed, fbm2D, valueNoise2D } from "../core/rng.js";
 import { T, TILE_SIZE, tileInfo } from "./tiles.js";
 import { TileMap } from "./tilemap.js";
 import { ZONES, BIOMES, biomeDef, zoneDef } from "./regions.js";
@@ -307,7 +307,7 @@ export function generateZone(zoneId, worldSeed = 1) {
     if (!biome.cave) deepenWater(zone, seed);
     if (biome.cave) carveGallery(zone, rng);
     carveMainPath(zone, rng);
-    sealBorders(zone);
+    sealBorders(zone, seed);
     makePortals(zone);
     scatterProps(zone, rng, biome);
     placeStoryProps(zone, rng);
@@ -482,17 +482,51 @@ function carveMainPath(zone, rng) {
     }
 }
 
-/** Ring of impassable tiles so the player cannot walk off the zone. */
-function sealBorders(zone) {
+/**
+ * Ring of impassable tiles so the player cannot walk off the zone.
+ *
+ * The ring used to be a rectangle of exactly BORDER tiles, which drew a
+ * dead-straight cliff (or coastline) across the whole screen — the single
+ * biggest reason the valley read as a square. The wall is still at least
+ * BORDER thick everywhere (so `fitsAt` and the portals keep working), but how
+ * much further it reaches inward is noise: a ragged edge, deeper in places,
+ * with the odd headland. Doorways are left alone — a gate has to stay open.
+ */
+export const EDGE = {
+    extra: 6,          // tiles the wall may creep inward beyond BORDER
+    scale: 7,          // tiles per noise period along the edge
+    detail: 2.6,       // a second, finer wave
+    bite: 0.4,         // share of the finer wave
+    shape: 1.7,        // >1 keeps the wall thin most of the way and lets it
+                       // push out the odd headland instead of waving evenly
+    gate: 3            // tiles of clearance kept around every doorway
+};
+
+function sealBorders(zone, seed = 1) {
     const { map, def } = zone;
-    const edgeTile = def.biome === "shore" ? T.DEEP
-        : (def.biome === "highland" || def.biome === "pass") ? T.CLIFF : T.CLIFF;
+    const edgeTile = def.biome === "shore" ? T.DEEP : T.CLIFF;
+    const links = def.links || [];
+    const nearGate = (edge, i) => links.some((l) =>
+        l.edge === edge && i >= l.from - EDGE.gate && i <= l.to + EDGE.gate);
+
+    // How deep the wall reaches on each side, per tile along that side.
+    const depth = (edge, i, salt) => {
+        if (nearGate(edge, i)) return BORDER;
+        const a = valueNoise2D(seed + salt, i / EDGE.scale, salt * 0.37);
+        const b = valueNoise2D(seed + salt + 77, i / EDGE.detail, salt * 0.91);
+        const n = a * (1 - EDGE.bite) + b * EDGE.bite;
+        return BORDER + Math.round(Math.pow(n, EDGE.shape) * EDGE.extra);
+    };
+
+    for (let x = 0; x < def.w; x++) {
+        const dn = depth("north", x, 11), ds = depth("south", x, 29);
+        for (let y = 0; y < dn; y++) map.data[y * def.w + x] = edgeTile;
+        for (let y = def.h - ds; y < def.h; y++) map.data[y * def.w + x] = edgeTile;
+    }
     for (let y = 0; y < def.h; y++) {
-        for (let x = 0; x < def.w; x++) {
-            if (x < BORDER || y < BORDER || x >= def.w - BORDER || y >= def.h - BORDER) {
-                map.data[y * def.w + x] = edgeTile;
-            }
-        }
+        const dw = depth("west", y, 53), de = depth("east", y, 71);
+        for (let x = 0; x < dw; x++) map.data[y * def.w + x] = edgeTile;
+        for (let x = def.w - de; x < def.w; x++) map.data[y * def.w + x] = edgeTile;
     }
 }
 

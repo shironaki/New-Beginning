@@ -689,6 +689,31 @@ function mixRGBA(a, b, t, alpha) {
  * So the tile is given back to the floor and the water is drawn inside it as
  * a closed, uneven blob.
  */
+/**
+ * Corners, in numbers. The tile grid wants right angles; nature does not.
+ * Every corner where two neighbours agree gets bitten off with a curve, and
+ * the size of the bite is noise, so no two corners of a patch match.
+ */
+/**
+ * The coastline, in numbers. The waterline is drawn as a curve through
+ * sampled depths; `points` is how many samples one tile edge gets.
+ */
+export const COAST = {
+    points: 8,         // control points per tile edge
+    tongue: 26,        // px the bank may reach into the water (of a 32 px tile)
+    crest: 19,         // px of its drier crest
+    shallow: 13,       // px of sunlit shallows on the water side
+    slow: 19,          // tiles per period of the big bays
+    fast: 6.5,         // tiles per period of the small ones
+    shallowA: 0.3
+};
+
+export const CORNER = {
+    dry: 1.15,         // dry ground bites a little deeper than a coast
+    dryInner: 0.62,    // the second, softer bite
+    dryEdgeA: 0.5      // α of that second bite
+};
+
 export const PUDDLE = {
     lobes: 9,            // control points around the rim
     rMin: 0.2,           // of a tile — the pinched side
@@ -920,9 +945,49 @@ export function paintEdges(ctx, map, tx, ty, px, py, size, season = "spring") {
         const along = (i) => (side === "n" || side === "s") ? tx * steps + i : ty * steps + i;
         const across = (side === "n" || side === "s") ? ty * steps : tx * steps;
         const wobble = (i, salt) => {
-            const n = soft(along(i), across, 11, salt);        // slow swell
-            const n2 = soft(along(i), across, 4.5, salt + 3);  // small bays
+            const n = soft(along(i), across, COAST.slow, salt);     // big bays
+            const n2 = soft(along(i), across, COAST.fast, salt + 3); // small ones
             return 0.3 + n * 1.0 + n2 * 0.45;
+        };
+        /**
+         * The same band, but as ONE smooth filled shape instead of a comb of
+         * 1 px strips. A coast drawn strip by strip is a staircase however
+         * fine the strips are — this traces a curve through the sampled
+         * depths, so the waterline leaves the grid altogether.
+         */
+        const bandPoly = (depthAt, style, alpha = 1) => {
+            const N = COAST.points;
+            const xs = [], ys = [];
+            for (let i = 0; i <= N; i++) {
+                const f = i / N;
+                const d = Math.max(0, depthAt((i / N) * steps * 2));
+                if (side === "n") { xs.push(px + f * size); ys.push(py + d); }
+                else if (side === "s") { xs.push(px + f * size); ys.push(py + size - d); }
+                else if (side === "w") { xs.push(px + d); ys.push(py + f * size); }
+                else { xs.push(px + size - d); ys.push(py + f * size); }
+            }
+            ctx.save();
+            ctx.globalAlpha *= alpha;
+            ctx.fillStyle = style;
+            ctx.beginPath();
+            // Start on the tile edge, run the curve, come back along the edge.
+            if (side === "n") ctx.moveTo(px, py);
+            else if (side === "s") ctx.moveTo(px, py + size);
+            else if (side === "w") ctx.moveTo(px, py);
+            else ctx.moveTo(px + size, py);
+            ctx.lineTo(xs[0], ys[0]);
+            for (let i = 1; i < xs.length; i++) {
+                const mx = (xs[i - 1] + xs[i]) / 2, my = (ys[i - 1] + ys[i]) / 2;
+                ctx.quadraticCurveTo(xs[i - 1], ys[i - 1], mx, my);
+            }
+            ctx.lineTo(xs[xs.length - 1], ys[ys.length - 1]);
+            if (side === "n") ctx.lineTo(px + size, py);
+            else if (side === "s") ctx.lineTo(px + size, py + size);
+            else if (side === "w") ctx.lineTo(px, py + size);
+            else ctx.lineTo(px + size, py + size);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
         };
         if (oi.liquid && !hi.liquid) {
             // Is that water a puddle? Then no dried foam line on our side —
@@ -991,27 +1056,11 @@ export function paintEdges(ctx, map, tx, ty, px, py, size, season = "spring") {
             // Tongues of the bank poking into the water. Without them the
             // waterline stays exactly where the tile grid put it, and a pond
             // reads as a swimming pool however nice the foam is.
-            band((i) => (wobble(i, 37) - 0.95) * 15, (off, len, d) => {
-                ctx.fillStyle = oi.colors[0];
-                if (side === "n") ctx.fillRect(px + off, py, len, d);
-                if (side === "s") ctx.fillRect(px + off, py + size - d, len, d);
-                if (side === "w") ctx.fillRect(px, py + off, d, len);
-                if (side === "e") ctx.fillRect(px + size - d, py + off, d, len);
-            });
-            band((i) => (wobble(i, 37) - 1.25) * 13, (off, len, d) => {
-                ctx.fillStyle = oi.colors[1];                     // their dry crest
-                if (side === "n") ctx.fillRect(px + off, py, len, d);
-                if (side === "s") ctx.fillRect(px + off, py + size - d, len, d);
-                if (side === "w") ctx.fillRect(px, py + off, d, len);
-                if (side === "e") ctx.fillRect(px + size - d, py + off, d, len);
-            });
-            band((i) => wobble(i, 17) * 9, (off, len, d) => {
-                ctx.fillStyle = "rgba(190,215,205,0.3)";          // sunlit shallows
-                if (side === "n") ctx.fillRect(px + off, py, len, d);
-                if (side === "s") ctx.fillRect(px + off, py + size - d, len, d);
-                if (side === "w") ctx.fillRect(px, py + off, d, len);
-                if (side === "e") ctx.fillRect(px + size - d, py + off, d, len);
-            });
+            // The bank pushes into the water as a curve, not as a comb: this
+            // is what takes the coastline off the tile grid.
+            bandPoly((i) => (wobble(i, 37) - 0.95) * COAST.tongue, oi.colors[0]);
+            bandPoly((i) => (wobble(i, 37) - 1.25) * COAST.crest, oi.colors[1]);
+            bandPoly((i) => wobble(i, 17) * COAST.shallow, "rgba(190,215,205,1)", COAST.shallowA);
         }
     }
     ctx.globalAlpha = 1;
@@ -1065,6 +1114,23 @@ export function paintEdges(ctx, map, tx, ty, px, py, size, season = "spring") {
             cornerPath(ctx, px, py, size, sx, sy, bite * 0.9, seed + 11);
             ctx.fillStyle = sea[0];
             ctx.fill();
+        } else if (!hereLiquid && !a.liquid && !b.liquid
+                   && a.id === b.id && a.id !== here && a.id !== T.VOID
+                   && !tileInfo(a.id).solid && !tileInfo(here).solid) {
+            // Dry ground meeting dry ground: round the corner off too. A
+            // patch of ash in grass used to end in four perfect right angles,
+            // and nothing in a burnt valley has a right angle in it.
+            const other = tileInfo(a.id).colors;
+            const b2 = bite * CORNER.dry;
+            cornerPath(ctx, px, py, size, sx, sy, b2, seed + 17);
+            ctx.fillStyle = other[0];
+            ctx.fill();
+            ctx.save();                              // a softer second bite
+            ctx.globalAlpha = CORNER.dryEdgeA;
+            ctx.fillStyle = other[1];
+            cornerPath(ctx, px, py, size, sx, sy, b2 * CORNER.dryInner, seed + 23);
+            ctx.fill();
+            ctx.restore();
         }
     }
 

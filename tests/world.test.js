@@ -2,7 +2,7 @@
 import { suite, test, assert, run } from "./tiny.js";
 import { T, TILES, tileInfo, isSolidTile, TILE_SIZE } from "../js/world/tiles.js";
 import { TileMap, moveAndCollide, bodyBlocked, CHUNK } from "../js/world/tilemap.js";
-import { generateZone, WorldMap, Zone, SHORE } from "../js/world/worldgen.js";
+import { generateZone, WorldMap, Zone, SHORE, EDGE } from "../js/world/worldgen.js";
 import { ZONES, BIOMES, valleyTileCount, oppositeEdge, zoneDef } from "../js/world/regions.js";
 import { WeatherSystem, WEATHER } from "../js/world/weather.js";
 import { GameClock } from "../js/core/time.js";
@@ -524,6 +524,42 @@ test("winter snows and summer does not", () => {
     }
     assert.gt(snowyWinter, 10);
     assert.eq(snowySummer, 0);
+});
+
+suite("the edge of the world");
+
+test("the border is ragged but never thinner than the wall", () => {
+    const zone = generateZone("meadow", "ashes-and-grain");
+    const { map, def } = zone;
+    const depthAt = (x) => {
+        let d = 0;
+        while (d < def.h && !zone.isFree(x, d)) d++;
+        return d;
+    };
+    const gate = (x) => (def.links || []).some((l) =>
+        (l.edge === "north" || l.edge === "south") && x >= l.from - 4 && x <= l.to + 4);
+    const depths = [];
+    for (let x = 6; x < def.w - 6; x += 2) if (!gate(x)) depths.push(depthAt(x));
+    const min = Math.min(...depths), max = Math.max(...depths);
+    assert.gte(min, 2, "the wall must always be at least two tiles thick");
+    assert.gt(max, min, "…and must not be a perfect rectangle");
+    assert.lte(max, 2 + EDGE.extra + 2, "…nor eat the playable zone");
+});
+
+test("doorways stay open through the ragged wall", () => {
+    for (const id of ["meadow", "forest", "shore"]) {
+        const zone = generateZone(id, "ashes-and-grain");
+        for (const link of zone.def.links || []) {
+            const mid = Math.floor((link.from + link.to) / 2);
+            const probe = link.edge === "north" ? [mid, 2]
+                        : link.edge === "south" ? [mid, zone.def.h - 3]
+                        : link.edge === "west" ? [2, mid]
+                        : [zone.def.w - 3, mid];
+            const info = zone.map.get(probe[0], probe[1]);
+            assert.not(info === 12 || info === 10 || info === 0,
+                       `${id}: ${link.edge} gate blocked (tile ${info})`);
+        }
+    }
 });
 
 run("v3 world");

@@ -93,10 +93,96 @@ const RELOAD_SNIPPET = `
 })();
 </script>`;
 
+/** Dev-note endpoints, in numbers and paths. */
+export const DEVAPI = {
+    config: "dev.config.json",
+    dir: "docs/notes",
+    index: "docs/notes/README.md",
+    maxBody: 12 * 1024 * 1024      // a PNG of a 4K frame fits with room to spare
+};
+
+/** The SHA-256 the client has to present, or "" when dev mode is off. */
+export function devHash(root = ROOT) {
+    try {
+        const cfg = JSON.parse(fs.readFileSync(path.join(root, DEVAPI.config), "utf8"));
+        return String(cfg.sha256 || "");
+    } catch { return ""; }
+}
+
+/** `2026-10-06-143` → a stable, sortable, filesystem-safe stem. */
+export function noteStem(note, n) {
+    const day = new Date(note.at || Date.now()).toISOString().slice(0, 10);
+    const slug = String(note.text || "note").toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 40) || "note";
+    return `${day}-${String(n).padStart(3, "0")}-${note.zone || "zone"}-${slug}`;
+}
+
+/** Markdown for one note — written so it reads fine straight in a diff. */
+export function noteMarkdown(note, shotName) {
+    return `# ${note.text}\n\n`
+        + `- **зона:** ${note.zoneName || note.zone} (\`${note.zone}\`)\n`
+        + `- **место:** x ${note.x}, y ${note.y} (тайл ${Math.floor(note.x / 32)},${Math.floor(note.y / 32)})\n`
+        + `- **время:** день ${note.day}, ${note.time}, ${note.season}\n`
+        + `- **погода:** ${note.weather}\n`
+        + `- **зум:** ${note.zoom}\n`
+        + `- **повторить:** \`node tools/scene.js --zone ${note.zone} --at ${note.x},${note.y} `
+        + `--hour ${(note.time || "12:00").split(":")[0]} --weather ${note.weather} --zoom ${note.zoom}\`\n`
+        + (shotName ? `\n![кадр](${shotName})\n` : "")
+        + `\n<!-- ${note.at} -->\n`;
+}
+
 export function createServer(opts = {}) {
     const cfg = { ...SERVE, ...opts };
     /** @type {Set<import("node:http").ServerResponse>} */
     const clients = new Set();
+
+    const json = (res, code, obj) => {
+        res.writeHead(code, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify(obj));
+    };
+
+    function handleDev(urlPath, req, res) {
+        const want = devHash();
+        const got = String(req.headers["x-dev-token"] || "");
+        if (!want || got !== want) { json(res, 403, { ok: false, error: "forbidden" }); return; }
+        const dir = path.join(ROOT, DEVAPI.dir);
+
+        if (urlPath === "/__dev/notes" && req.method === "GET") {
+            let files = [];
+            try { files = fs.readdirSync(dir).filter((f) => f.endsWith(".md") && f !== "README.md"); } catch { /* none yet */ }
+            json(res, 200, { ok: true, count: files.length, files: files.slice(-20) });
+            return;
+        }
+        if (urlPath === "/__dev/note" && req.method === "POST") {
+            let size = 0;
+            const chunks = [];
+            req.on("data", (c) => {
+                size += c.length;
+                if (size > DEVAPI.maxBody) { req.destroy(); return; }
+                chunks.push(c);
+            });
+            req.on("end", () => {
+                let note;
+                try { note = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+                catch { json(res, 400, { ok: false, error: "bad json" }); return; }
+                fs.mkdirSync(dir, { recursive: true });
+                const n = fs.readdirSync(dir).filter((f) => f.endsWith(".md") && f !== "README.md").length + 1;
+                const stem = noteStem(note, n);
+                let shotName = "";
+                if (typeof note.shot === "string" && note.shot.startsWith("data:image/png;base64,")) {
+                    shotName = stem + ".png";
+                    fs.writeFileSync(path.join(dir, shotName),
+                                     Buffer.from(note.shot.slice("data:image/png;base64,".length), "base64"));
+                }
+                delete note.shot;
+                fs.writeFileSync(path.join(dir, stem + ".md"), noteMarkdown(note, shotName));
+                console.log(`📝 заметка: ${DEVAPI.dir}/${stem}.md`);
+                json(res, 200, { ok: true, file: stem + ".md" });
+            });
+            return;
+        }
+        json(res, 404, { ok: false, error: "no such dev endpoint" });
+    }
 
     const server = http.createServer((req, res) => {
         const urlPath = decodeURIComponent((req.url || "/").split("?")[0]);
@@ -110,6 +196,16 @@ export function createServer(opts = {}) {
             res.write("retry: 800\n\n");
             clients.add(res);
             req.on("close", () => clients.delete(res));
+            return;
+        }
+
+        // --- dev notes ----------------------------------------------------
+        // The owner pins a note to a place in the world; it lands in the
+        // repository as markdown plus the exact frame he was looking at.
+        // The password is checked HERE for real — the client-side gate only
+        // keeps the panel out of a player's way.
+        if (urlPath.startsWith("/__dev/")) {
+            handleDev(urlPath, req, res);
             return;
         }
 
