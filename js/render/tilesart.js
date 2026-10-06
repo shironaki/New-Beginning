@@ -62,12 +62,15 @@ export function seasonTint(season) {
     switch (season) {
         case "summer": return { c: "#8fbe4a", t: 0.10 };
         case "autumn": return { c: "#b8823a", t: 0.34 };
-        case "winter": return { c: "#dfe8f0", t: 0.55 };
+        case "winter": return { c: "#e8f1f8", t: 0.86 };
         default: return { c: "#7fc04f", t: 0.08 };
     }
 }
 
 const LIVING = new Set([T.GRASS, T.MEADOW, T.MOSS, T.GRASS_DRY, T.PINE_FLOOR]);
+/** Ground that snow settles on without being alive. */
+const DUSTABLE = new Set([T.DIRT, T.PATH, T.SAND, T.FARM, T.FARM_WET, T.GRAVEL, T.STONE, T.COBBLE, T.ASH, T.SOOT]);
+const WINTER_DUST = 0.42;       // share of the winter tint such ground takes
 
 /* ------------------------------------------------------------------ ground */
 
@@ -84,6 +87,13 @@ export function paintTile(ctx, id, px, py, size, tx, ty, season = "spring") {
         base = mix(base, st.c, st.t * 0.75);
         dark = mix(dark, st.c, st.t * 0.5);
         light = mix(light, st.c, st.t * 0.9);
+    } else if (season === "winter" && DUSTABLE.has(id)) {
+        // Winter does not stop at the grass: bare soil, paths and sand get a
+        // dusting too, otherwise the valley reads as green ground under snow.
+        const st = seasonTint(season);
+        base = mix(base, st.c, st.t * WINTER_DUST);
+        dark = mix(dark, st.c, st.t * WINTER_DUST * 0.7);
+        light = mix(light, st.c, st.t * WINTER_DUST * 1.2);
     }
 
     // Tone is computed per 8 px cell from noise sampled in *continuous* world

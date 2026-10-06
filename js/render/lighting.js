@@ -77,7 +77,7 @@ export const LIGHT = {
     /** Caves: a torch is still far brighter, but the eye adjusts. */
     /** Caves: dark, but the gallery must still be legible without a torch —
      *  a black screen is not atmosphere, it is a bug report. */
-    underground: { hex: "#0c1018", a: 0.54 },
+    underground: { hex: "#0c1018", a: 0.54, aTorch: 0.68 },
     /** Never crush the frame to black: the darkest pixel keeps this much. */
     floor: 0.14,
     /** Below this the buffer is not even built. */
@@ -89,7 +89,7 @@ export const LIGHT = {
         campfire: { r: 118, i: 1.0, warmth: 0.85, flicker: 1 },
         torch: { r: 84, i: 0.9, warmth: 0.8, flicker: 1 },
         window: { r: 60, i: 0.7, warmth: 0.5, flicker: 0 },
-        caveEye: { r: 130, i: 0.8, warmth: 0.3, flicker: 0 }
+        caveEye: { r: 130, i: 0.8, warmth: 0.3, flicker: 0, torchDim: 0.4 }
     },
     /** Warm halo pass. */
     halo: { alpha: 0.3, scale: 0.58, warm: [255, 150, 72], cool: [196, 216, 255] },
@@ -116,9 +116,12 @@ function ease(t) { return 0.5 - Math.cos(Math.PI * Math.min(1, Math.max(0, t))) 
  * @param {number} hour 0..24, fractional
  * @returns {{rgb:number[], alpha:number}}
  */
-export function ambientAt(hour, weather = "clear", underground = false) {
+export function ambientAt(hour, weather = "clear", underground = false, torch = false) {
     if (underground) {
-        return { rgb: parseHex(LIGHT.underground.hex), alpha: LIGHT.underground.a };
+        // Carrying a flame, the gallery around it goes darker: that is what
+        // makes the torch feel like the thing holding the dark back.
+        const u = LIGHT.underground;
+        return { rgb: parseHex(u.hex), alpha: torch ? u.aTorch : u.a };
     }
     const h = ((hour % 24) + 24) % 24;
     const i = Math.floor(h), j = (i + 1) % 24;
@@ -261,10 +264,10 @@ export class LightMap {
      * Composite darkness + lights onto the main context.
      * @param {CanvasRenderingContext2D} target
      */
-    render(target, { daylight = 1, hour = null, weather = "clear", underground = false, time = 0, day = 0 } = {}) {
+    render(target, { daylight = 1, hour = null, weather = "clear", underground = false, torch = false, time = 0, day = 0 } = {}) {
         const amb = hour === null
             ? (() => { const a = ambientFor(daylight, weather, underground); const rgb = parseHex(a.color); return { rgb, alpha: a.alpha }; })()
-            : ambientAt(hour, weather, underground);
+            : ambientAt(hour, weather, underground, torch);
         if (amb.alpha <= LIGHT.skip || !this.ctx) return this;
 
         const c = this.ctx;

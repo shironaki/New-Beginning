@@ -13,6 +13,7 @@ export class Camera {
         this.lerp = lerp;
         this.bounds = null;                 // { w, h } of the current zone, world units
         this.shakeTime = 0; this.shakePower = 0;
+        this.motionScale = 1;       // 0 when the player asked for reduced motion
         this.offsetX = 0; this.offsetY = 0; // shake offset, applied at draw time
     }
 
@@ -57,9 +58,30 @@ export class Camera {
         return this;
     }
 
+    /**
+     * Screen shake, scaled by `motionScale`. A player who asked the system
+     * for reduced motion gets none of it: `prefers-reduced-motion` is read
+     * once at start-up and followed live if it changes.
+     */
     shake(power = 4, time = 0.25) {
-        this.shakePower = Math.max(this.shakePower, power);
+        const p = power * this.motionScale;
+        if (p <= 0.01) return this;
+        this.shakePower = Math.max(this.shakePower, p);
         this.shakeTime = Math.max(this.shakeTime, time);
+        return this;
+    }
+
+    /** Hook the OS accessibility setting. Safe where matchMedia is absent. */
+    followReducedMotion(win = globalThis) {
+        const mq = win && win.matchMedia && win.matchMedia("(prefers-reduced-motion: reduce)");
+        if (!mq) return this;
+        const apply = () => {
+            this.motionScale = mq.matches ? 0 : 1;
+            if (!this.motionScale) { this.shakeTime = 0; this.shakePower = 0; this.offsetX = this.offsetY = 0; }
+        };
+        apply();
+        if (mq.addEventListener) mq.addEventListener("change", apply);
+        else if (mq.addListener) mq.addListener(apply);
         return this;
     }
 

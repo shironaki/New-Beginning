@@ -24,6 +24,12 @@ export const TRACK = {
     coreA: 0.5,          // the dark heart of the hollow, share of depth
     fadeIn: 0.12,        // seconds — a print appears, it does not pop
     minZoom: 1.1,        // below this the prints are mush; skip them
+    // Soaked boots: for a while after wading, every step leaves a wet mark —
+    // and it prints on stone and grass too, where dry boots leave nothing.
+    wetLife: 9,          // seconds the boots stay wet after the last wading step
+    wet: { life: 11, depth: 0.34 },
+    wetDark: "#2b4a57",  // the stain
+    wetRim: "#9ed8ea",   // the gleam on it
     // Per-surface: how long a print survives and how deep it reads.
     soil: {
         sand: { life: 18, depth: 0.38 },
@@ -39,7 +45,7 @@ export class Tracks {
         this.items = new Array(TRACK.max);
         for (let i = 0; i < TRACK.max; i++) {
             this.items[i] = {
-                alive: false, x: 0, y: 0, dx: 0, dy: 1,
+                alive: false, x: 0, y: 0, dx: 0, dy: 1, wet: false,
                 t: 0, life: 1, depth: 0, dark: "#000", rim: "#fff"
             };
         }
@@ -54,9 +60,10 @@ export class Tracks {
     }
 
     /** Does this ground hold a print at all? */
-    static soilOf(tileId) {
+    static soilOf(tileId, wet = false) {
         const info = TILES[tileId];
         if (!info || info.liquid) return null;
+        if (wet) return TRACK.wet;              // water prints on anything
         return TRACK.soil[info.step] || null;
     }
 
@@ -64,8 +71,8 @@ export class Tracks {
      * Plant one print. `side` is +1 right foot / -1 left, `dx,dy` the heading.
      * Reuses the oldest slot — no object is built here.
      */
-    add(x, y, dx, dy, side, tileId) {
-        const soil = Tracks.soilOf(tileId);
+    add(x, y, dx, dy, side, tileId, wet = false) {
+        const soil = Tracks.soilOf(tileId, wet);
         if (!soil) return this;
         const info = TILES[tileId];
         const len = Math.hypot(dx, dy) || 1;
@@ -81,8 +88,9 @@ export class Tracks {
         p.t = 0;
         p.life = soil.life;
         p.depth = soil.depth;
-        p.dark = info.colors[1];
-        p.rim = info.colors[2];
+        p.wet = wet;
+        p.dark = wet ? TRACK.wetDark : info.colors[1];
+        p.rim = wet ? TRACK.wetRim : info.colors[2];
         return this;
     }
 
@@ -132,9 +140,9 @@ export class Tracks {
             ctx.beginPath();
             ctx.ellipse(0, -0.2, TRACK.rx * 0.62, TRACK.ry * 0.62, 0, 0, Math.PI * 2);
             ctx.fill();
-            // The lip of displaced ground on the far rim — this is what makes
-            // a print read as a dent and not as a stain.
-            ctx.globalAlpha = a * TRACK.rimA;
+            // Dry ground gets a lip of displaced soil (a dent); wet ground
+            // gets a highlight (a puddle shaped like a boot).
+            ctx.globalAlpha = a * (p.wet ? TRACK.rimA * 1.4 : TRACK.rimA);
             ctx.fillStyle = p.rim;
             ctx.beginPath();
             ctx.ellipse(0, TRACK.ry * 0.75, TRACK.rx * 0.95, TRACK.ry * 0.45,

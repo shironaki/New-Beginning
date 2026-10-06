@@ -29,6 +29,7 @@ export class Player {
         this.stepEvent = false;     // a foot just planted
         this.stepSide = 1;          // 1 = right foot, -1 = left
         this.steps = 0;             // total foot plants this session
+        this.wet = 0;               // seconds of soaked boots left (set by the game)
         // walk cycle phase lives in `anim`, radians
         this.dist = 0;           // metres of ground actually covered
         this.gait = 0;           // 0 standing .. 1 full stride, blended

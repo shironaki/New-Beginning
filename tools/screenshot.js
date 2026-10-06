@@ -187,6 +187,19 @@ const scenes = [
         }
     },
     {
+        name: "26-mine-torch",
+        about: "Факел в руке: свет ходит с героем по галерее",
+        setup(g) {
+            g.enterZone("mine", null, true);
+            g.placeSafely(g.zone.spawn.x, g.zone.spawn.y);
+            g.clock.minute = 2 * 60;
+            g.inventory.add("torch", 1);
+            g.inventory.setActive(g.inventory.list().findIndex((sl) => sl.id === "torch"));
+            g.camera.zoom = 3.2;
+            g.camera.snapTo(g.player.x, g.player.y - 6);
+        }
+    },
+    {
         name: "17-behind-pine",
         about: "Герой за сосной: крона уходит в прозрачность",
         setup(g) {
@@ -318,6 +331,40 @@ const scenes = [
         }
     },
     {
+        name: "27-wet-steps",
+        about: "Вышел из воды: мокрые следы и капли",
+        setup(g) {
+            g.enterZone("shore", null, true);
+            g.clock.minute = 11 * 60;
+            const map = g.zone.map;
+            let best = null;
+            for (let ty = 6; ty < map.h - 6 && !best; ty++) {
+                for (let tx = 6; tx < map.w - 6; tx++) {
+                    if (map.get(tx, ty) !== 9) continue;
+                    let dry = true;
+                    for (let k = 1; k <= 5; k++) {
+                        const id = map.get(tx, ty - k);
+                        if (id !== 8 && id !== 1 && id !== 3) { dry = false; break; }
+                    }
+                    const cx = (tx + 0.5) * 32, cy = (ty - 2) * 32;
+                    if (dry && !g.zone.objects.some((o) => !o.removed &&
+                        Math.hypot(o.x - cx, o.y - cy) < 96)) { best = { tx, ty }; break; }
+                }
+            }
+            if (!best) return;
+            g.findInteractable = () => null;
+            g.placeSafely((best.tx + 0.5) * 32, (best.ty + 0.5) * 32);   // in the water
+            g.input.pressed = () => false;
+            g.input.axis = () => ({ x: 0, y: 1 });
+            frames(g, 20);                      // a couple of wading steps
+            g.input.axis = () => ({ x: 0, y: -1 });
+            frames(g, 110);                     // and out onto the dry sand
+            g.input.axis = () => ({ x: 0, y: 0 });
+            g.camera.zoom = 3.6;
+            g.camera.snapTo(g.player.x, g.player.y + 16);
+        }
+    },
+    {
         name: "25-open-water",
         about: "Открытая вода: глубина против отмели",
         setup(g) {
@@ -344,7 +391,7 @@ const scenes = [
         setup(g) {
             g.enterZone("forest", null, true);
             g.clock.minute = 11 * 60;
-            g.clock.day = 280;
+            g.clock.day = 90;              // winter is season 4: days 85…112
             g.weather.current = "snow";
             g.weather.windAngle = 2.6;
         }

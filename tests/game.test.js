@@ -7,6 +7,7 @@
  */
 import { suite, test, assert, run } from "./tiny.js";
 import { installDOM, key } from "./dom-harness.js";
+import { T } from "../js/world/tiles.js";
 import { UI, COLORS, CONTRACTS, contrast, applyTheme, pixelRatio } from "../js/ui/uispec.js";
 
 const dom = installDOM();
@@ -333,6 +334,41 @@ test("collapsing from exposure puts the hero back at camp, not at a game over", 
     assert.ok(g.hud.isStoryOpen || !g.needs.alive === false, "a collapse should be narrated");
     assert.ok(g.needs.alive, "the hero wakes up again — death is not an ending");
     assert.lt(g.needs.health, 60);
+});
+
+
+suite("accessibility");
+
+test("an open panel owns the keyboard: arrows walk it, Esc closes it", () => {
+    const game = boot();
+    const hud = game.hud;
+    let fired = 0;
+    hud.openPanel("Проверка", [
+        { icon: "A", label: "Раз", action: () => fired++ },
+        { icon: "B", label: "Два", action: () => fired++ },
+        { icon: "C", label: "Нельзя", disabled: true }
+    ], "test");
+    assert.ok(hud.isPanelOpen);
+    const rows = hud._focusables();
+    assert.eq(rows.length, 3, "two rows plus the close button, the disabled one is skipped");
+    const ev = (k) => ({ key: k, shiftKey: false, preventDefault() {}, stopPropagation() {} });
+    hud._panelKey(ev("ArrowDown"));
+    hud._panelKey(ev("Tab"));          // must not escape the dialog
+    hud._panelKey(ev("Escape"));
+    assert.not(hud.isPanelOpen, "Esc closes the panel");
+});
+
+test("the hero keeps his boots wet after wading", () => {
+    const game = boot();
+    game.player.wet = 4;
+    game.tracks.clear();
+    game.tracks.add(game.player.x, game.player.y, 0, 1, 1, T.STONE, true);
+    assert.eq(game.tracks.count, 1, "a wet boot prints on bare stone");
+    game.tracks.clear();
+    game.tracks.add(game.player.x, game.player.y, 0, 1, 1, T.STONE, false);
+    assert.eq(game.tracks.count, 0, "a dry boot does not");
+    game.update(1 / 60);
+    assert.lt(game.player.wet, 4, "and the boots dry out");
 });
 
 run("v3 game");

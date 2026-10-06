@@ -68,6 +68,11 @@ export class HUD {
         this.els.panelWrap.addEventListener("click", (e) => {
             if (e.target === this.els.panelWrap) this.closePanel();
         });
+        // An open panel owns the keyboard: arrows walk the rows, Tab cannot
+        // leave the dialog, Esc closes it. Without this the hero kept walking
+        // behind the panel and Tab fell through to the browser chrome.
+        this.els.panelWrap.addEventListener("keydown", (e) => this._panelKey(e));
+        this.els.storyWrap.addEventListener("keydown", (e) => this._storyKey(e));
 
         // Need bars.
         this.els.needs.innerHTML = NEED_DEFS.map((n) => `
@@ -149,6 +154,59 @@ export class HUD {
         return this;
     }
 
+    /* ---- keyboard ------------------------------------------------------ */
+
+    /** Everything inside the open panel a keyboard can land on, in order. */
+    _doc() {
+        return this.root.ownerDocument || (typeof document !== "undefined" ? document : null);
+    }
+
+    /**
+     * Keyboard stops inside the open panel, in reading order: the rows we
+     * built, then the close button. Kept as a list rather than a DOM query so
+     * the order is exactly the order the rows were added in.
+     */
+    _focusables() {
+        const rows = (this._panelRows || []).filter((b) => !b.disabled);
+        return rows.concat(this.els.panelClose);
+    }
+
+    _move(step) {
+        const items = this._focusables();
+        if (!items.length) return;
+        const doc = this._doc();
+        const at = items.indexOf(doc && doc.activeElement);
+        const next = items[(at + step + items.length * 2) % items.length];
+        if (next && typeof next.focus === "function") next.focus();
+    }
+
+    _panelKey(e) {
+        const k = e.key;
+        if (k === "Escape") { e.preventDefault(); e.stopPropagation(); this.closePanel(); return; }
+        if (k === "ArrowDown") { e.preventDefault(); e.stopPropagation(); this._move(1); return; }
+        if (k === "ArrowUp") { e.preventDefault(); e.stopPropagation(); this._move(-1); return; }
+        if (k === "Home") { e.preventDefault(); const f = this._focusables()[0]; f && f.focus(); return; }
+        if (k === "End") {
+            e.preventDefault();
+            const all = this._focusables(); const f = all[all.length - 1]; f && f.focus(); return;
+        }
+        if (k === "Tab") {                      // the trap itself
+            const items = this._focusables();
+            if (!items.length) return;
+            e.preventDefault();
+            this._move(e.shiftKey ? -1 : 1);
+        }
+    }
+
+    _storyKey(e) {
+        if (e.key === "Escape" || e.key === "Enter") {
+            e.preventDefault(); e.stopPropagation(); this.hideStory();
+        } else if (e.key === "Tab") {
+            e.preventDefault();
+            this.els.storyOk.focus();
+        }
+    }
+
     /* ---- panels -------------------------------------------------------- */
 
     /**
@@ -159,6 +217,7 @@ export class HUD {
         this.panelOpen = name;
         this.els.panelTitle.textContent = title;
         this.els.panelBody.innerHTML = "";
+        this._panelRows = [];
         for (const row of rows) {
             if (row.html !== undefined) {
                 const d = document.createElement("div");
@@ -169,19 +228,30 @@ export class HUD {
             }
             const b = document.createElement("button");
             b.className = "panelRow" + (row.disabled ? " disabled" : "");
+            if (row.disabled) { b.disabled = true; b.tabIndex = -1; }
             b.innerHTML = `<span class="rowIcon">${row.icon || "•"}</span>
                            <span class="rowLabel">${row.label}</span>
                            <span class="rowHint">${row.hint || ""}</span>`;
             if (!row.disabled) b.addEventListener("click", () => { row.action && row.action(); });
+            this._panelRows.push(b);
             this.els.panelBody.appendChild(b);
         }
         this.els.panelWrap.classList.remove("hidden");
+        // Hand the keyboard over, and remember where to hand it back.
+        const doc = this._doc();
+        this._returnFocus = doc ? doc.activeElement : null;
+        const first = this._focusables()[0];
+        if (first && typeof first.focus === "function") first.focus();
         return this;
     }
 
     closePanel() {
         this.panelOpen = null;
         this.els.panelWrap.classList.add("hidden");
+        // Back to the game: the canvas, or whatever opened the panel.
+        const back = this._returnFocus;
+        this._returnFocus = null;
+        if (back && typeof back.focus === "function" && back.isConnected !== false) back.focus();
         return this;
     }
 
@@ -195,6 +265,7 @@ export class HUD {
         this.els.storyNext.textContent = next ? "Дальше: " + next : "";
         this.els.storyWrap.classList.remove("hidden");
         this.storyShown = true;
+        if (typeof this.els.storyOk.focus === "function") this.els.storyOk.focus();
         return this;
     }
 

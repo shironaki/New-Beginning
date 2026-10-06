@@ -28,7 +28,7 @@ import { Campfire } from "./survival/campfire.js";
 import { CookingJournal, isCookable } from "./survival/cooking.js";
 import { Renderer } from "./render/renderer.js";
 import { Particles, FX, materialOf } from "./render/particles.js";
-import { Tracks } from "./render/tracks.js";
+import { Tracks, TRACK } from "./render/tracks.js";
 import { propHeight } from "./render/tilesart.js";
 import { StoryEngine } from "./story/acts.js";
 import { HUD, fireRows } from "./ui/hud.js";
@@ -65,6 +65,7 @@ export class Game {
 
         this.camera = new Camera({ width: canvas.width, height: canvas.height,
                                   zoom: UI.baseZoom * (canvas.width > 1700 ? 2 : 1) });
+        this.camera.followReducedMotion();
         this.camera.setBounds(this.zone.map.widthPx, this.zone.map.heightPx);
         this.camera.snapTo(this.player.x, this.player.y);
 
@@ -634,11 +635,13 @@ export class Game {
                 // Wading: the boot throws water, not dust.
                 this.particles.splash(this.player.x + this.player.stepSide * 2.5, this.player.y + 2,
                                       this.player.running ? 1.25 : 0.85);
+                this.player.wet = TRACK.wetLife;
             } else {
-                // Soft ground keeps the boot: sand, snow, mud, ash.
+                // Soft ground keeps the boot: sand, snow, mud, ash. Soaked
+                // boots print on hard ground too, until they dry out.
                 this.tracks.add(this.player.x, this.player.y + 2,
                                 this.player.faceX, this.player.faceY,
-                                this.player.stepSide, info);
+                                this.player.stepSide, info, this.player.wet > 0);
                 this.particles.dust(this.player.x + this.player.stepSide * 2.5, this.player.y + 3,
                     this.player.running ? FX.dust.run : FX.dust.walk, dustColor(def));
             }
@@ -694,6 +697,15 @@ export class Game {
             const now = (was + dt) % period;
             this._thunderT = now;
             if (now < was) this.camera.shake(FX.shake.thunder, FX.shake.thunderTime);
+        }
+        // Soaked clothes drip while they dry, and a little harder on the move.
+        if (this.player.wet > 0) {
+            this.player.wet = Math.max(0, this.player.wet - dt);
+            this._dripAt = (this._dripAt || 0) - dt * (this.player.moving ? 1.6 : 1);
+            if (this._dripAt <= 0) {
+                this._dripAt = FX.drip.every;
+                this.particles.drip(this.player.x, this.player.y);
+            }
         }
         this.particles.update(dt);
         this.tracks.update(dt);

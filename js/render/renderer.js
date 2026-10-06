@@ -15,7 +15,7 @@ import { CHUNK } from "../world/tilemap.js";
 import { TILE_SIZE, TILES } from "../world/tiles.js";
 import { paintTile, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, propHeight } from "./tilesart.js";
 import { drawCharacter, drawSleeping } from "./character.js";
-import { LightMap } from "./lighting.js";
+import { LightMap, LIGHT } from "./lighting.js";
 import { itemEmoji } from "../sandbox/items.js";
 
 /**
@@ -50,6 +50,7 @@ export const WATER = {
     swellDark: 0.13,        // α of the trough line
     swellLight: 0.12,       // α of the crest line
     glintRows: 2,           // specular dots per water tile
+    caveTint: 0.55,         // α of the darkness over underground water
     glintA: 0.5,            // α of a glint at full daylight
     glintSize: 1.5,         // u
     glintSpeed: 1.9,        // 1/s — twinkle rate
@@ -207,7 +208,7 @@ export class Renderer {
      * travelling swell, glints and foam along the shore. Cheap: only the
      * visible tiles, two strokes each.
      */
-    drawWater(zone, daylight = 1, hour = 12) {
+    drawWater(zone, daylight = 1, hour = 12, underground = false) {
         const cam = this.camera;
         const ctx = this.ctx;
         const t = this.time;
@@ -230,6 +231,13 @@ export class Renderer {
                 const s = cam.worldToScreen(tx * TILE_SIZE, ty * TILE_SIZE);
                 const z = cam.zoom, S = TILE_SIZE * z;
                 const wx = tx * TILE_SIZE, wy = ty * TILE_SIZE;
+                if (underground) {
+                    // There is no sky down here: a mine puddle is black
+                    // water with a sheen, not a bright blue square.
+                    ctx.fillStyle = `rgba(10,16,24,${WATER.caveTint})`;
+                    ctx.fillRect(s.x, s.y, S + 1, S + 1);
+                    continue;
+                }
                 // Swell: crests travel across the whole body of water. The
                 // phase is world-space, so nothing breaks at a tile seam.
                 ctx.lineCap = "round";
@@ -739,7 +747,8 @@ export class Renderer {
         this.drawGround(state.zone);
         this.drawWater(state.zone,
                        state.clock ? state.clock.daylight : 1,
-                       state.clock ? state.clock.minute / 60 : 12);
+                       state.clock ? state.clock.minute / 60 : 12,
+                       !!state.underground);
         if (state.tracks) state.tracks.draw(ctx, this.camera);
         this.drawObjects(state, dt);
         if (state.particles) state.particles.draw(ctx, this.camera);
@@ -768,13 +777,18 @@ export class Renderer {
         // even without a torch (a torch is still far brighter).
         if (state.underground) {
             const s2 = cam.worldToScreen(state.player.x, state.player.y - 8);
-            this.lightMap.addPreset(s2.x, s2.y, "caveEye", cam.zoom);
+            // With a torch in hand the eye stops straining: the ambient glow
+            // backs off so the flame is what lights the gallery.
+            const eye = LIGHT.presets.caveEye;
+            const dim = state.playerLight > 0 ? eye.torchDim : 1;
+            this.lightMap.addPreset(s2.x, s2.y, "caveEye", cam.zoom, eye.i * dim);
         }
         this.lightMap.render(ctx, {
             hour: state.clock ? state.clock.minute / 60 : 12,
             daylight: state.clock ? state.clock.daylight : 1,
             weather: state.weather,
             underground: !!(state.zone.def && state.zone.def.underground),
+            torch: state.playerLight > 0,
             time: this.time,
             day: state.clock ? state.clock.day : 0
         });

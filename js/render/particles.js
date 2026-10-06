@@ -44,6 +44,17 @@ export const FX = {
     leaf: { spread: 26, rise: 10, riseVar: 18, life: 1.4, lifeVar: 1.1,
             gravity: 16, size: 2, sizeVar: 1.6, sway: 2.4 },
     /** Wading: droplets thrown up by a boot, and the ring it leaves behind. */
+    // Run-off from a soaked hero walking back onto dry land.
+    drip: {
+        spread: 7,          // across the body, world units
+        from: 12,           // height it leaves the clothes at
+        fall: 26,           // initial downward speed
+        gravity: 200,
+        life: 0.26, lifeVar: 0.12,
+        size: 1.1,
+        color: "#8fd0e4",
+        every: 0.33         // seconds between drops while soaked and moving
+    },
     splash: { drops: 7, spread: 26, rise: 22, riseVar: 18, gravity: 150,
               life: 0.3, lifeVar: 0.25, size: 1.2, sizeVar: 1.3,
               color: "rgba(226,246,255,0.9)",
@@ -256,6 +267,26 @@ export class Particles {
         r.life = C.ringLife; r.maxLife = C.ringLife;
         r.size = 2; r.alpha = C.ringA; r.glyph = "";
         r.color = "rgba(226,246,255,"; r.kind = "ripple";
+        return this;
+    }
+
+    /**
+     * Water running off soaked boots and clothes: a couple of heavy drops
+     * that fall straight down and die on the ground. Costs two particles.
+     */
+    drip(x, y, n = 1) {
+        const C = FX.drip;
+        for (let i = 0; i < n; i++) {
+            const o = this._claim();
+            o.x = x + (Math.random() - 0.5) * C.spread;
+            o.y = y - C.from;
+            o.vx = (Math.random() - 0.5) * 3;
+            o.vy = C.fall;
+            o.life = C.life + Math.random() * C.lifeVar; o.maxLife = C.life + C.lifeVar;
+            o.gravity = C.gravity;
+            o.size = C.size; o.alpha = 1; o.glyph = "";
+            o.color = C.color; o.kind = "spark";
+        }
         return this;
     }
 
