@@ -58,7 +58,13 @@ export class FakeElement {
     constructor(tag = "div") {
         this.tagName = tag.toUpperCase();
         this.children = [];
-        this.style = {};
+        // `style` behaves enough like CSSStyleDeclaration for custom props.
+        this.style = {
+            _props: {},
+            setProperty(k, v) { this._props[k] = String(v); },
+            getPropertyValue(k) { return this._props[k] || ""; },
+            removeProperty(k) { delete this._props[k]; }
+        };
         this.dataset = {};
         this.classList = new FakeClassList();
         this.listeners = new Map();
@@ -66,6 +72,7 @@ export class FakeElement {
         this.textContent = "";
         this.title = "";
         this._cache = new Map();
+        this.attrs = {};
         this.parentElement = null;
         if (tag === "canvas") {
             this.width = 300; this.height = 150;
@@ -103,6 +110,11 @@ export class FakeElement {
         return this._cache.get(key);
     }
 
+    /** Attributes: the HUD sets ARIA roles and values on live elements. */
+    setAttribute(name, value) { this.attrs[name] = String(value); }
+    getAttribute(name) { return name in this.attrs ? this.attrs[name] : null; }
+    removeAttribute(name) { delete this.attrs[name]; }
+
     appendChild(child) { this.children.push(child); child.parentElement = this; return child; }
     removeChild(child) { this.children = this.children.filter((c) => c !== child); return child; }
     remove() { if (this.parentElement) this.parentElement.removeChild(this); }
@@ -136,6 +148,7 @@ export function installDOM() {
             return elements.get(id);
         },
         addEventListener() {},
+        documentElement: new FakeElement("html"),
         body: new FakeElement("body")
     };
     const listeners = new Map();

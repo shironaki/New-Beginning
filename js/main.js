@@ -14,6 +14,7 @@ import { Input } from "./engine/input.js";
 import { Camera } from "./engine/camera.js";
 import { WorldMap } from "./world/worldgen.js";
 import { WeatherSystem } from "./world/weather.js";
+import { UI, pixelRatio } from "./ui/uispec.js";
 import { START_ZONE, biomeDef, oppositeEdge } from "./world/regions.js";
 import { TILE_SIZE, tileInfo } from "./world/tiles.js";
 import { bodyBlocked } from "./world/tilemap.js";
@@ -59,7 +60,8 @@ export class Game {
         this.zone = this.world.get(START_ZONE);
         this.player = new Player({ x: this.zone.spawn.x, y: this.zone.spawn.y, bus: this.bus });
 
-        this.camera = new Camera({ width: canvas.width, height: canvas.height, zoom: 2.4 });
+        this.camera = new Camera({ width: canvas.width, height: canvas.height,
+                                  zoom: UI.baseZoom * (canvas.width > 1700 ? 2 : 1) });
         this.camera.setBounds(this.zone.map.widthPx, this.zone.map.heightPx);
         this.camera.snapTo(this.player.x, this.player.y);
 
@@ -715,12 +717,22 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
         const hudRoot = document.getElementById("hud");
         if (!canvas || !hudRoot) return;
 
+        // The canvas is sized in CSS pixels but drawn at the display's real
+        // pixel density: on a retina screen the old code rendered 1× and let
+        // the browser upscale, which is exactly the blur `image-rendering:
+        // pixelated` was supposed to prevent. Zoom is multiplied by the same
+        // ratio, so the world keeps its apparent size on every display.
         const fit = (game) => {
             const w = Math.min(window.innerWidth, 1600);
             const h = Math.min(window.innerHeight, 1000);
-            canvas.width = w; canvas.height = h;
+            const dpr = pixelRatio(window);
+            canvas.width = Math.round(w * dpr);
+            canvas.height = Math.round(h * dpr);
             canvas.style.width = w + "px"; canvas.style.height = h + "px";
-            if (game) game.renderer.resize(w, h);
+            if (game) {
+                game.renderer.resize(canvas.width, canvas.height);
+                game.camera.zoom = UI.baseZoom * dpr;
+            }
         };
         fit(null);
 

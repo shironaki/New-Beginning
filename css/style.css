@@ -1,12 +1,36 @@
-/* v3 — «Пепел и Зерно». Dark, warm, diegetic UI over a full-bleed canvas. */
+/* v3 — «Пепел и Зерно». Dark, warm, diegetic UI over a full-bleed canvas.
+ *
+ * This file holds NO numbers of its own: colours, type and spacing all come
+ * from `js/ui/uispec.js`, which writes them onto the document root. The only
+ * thing defined here is `--ui`, the viewport scale every other size is built
+ * from, plus the fallbacks that keep the page sane before the script runs.
+ */
 
 :root {
-    --ink: #efe3cd;
-    --ink-dim: #bfae93;
-    --panel: rgba(22, 19, 16, 0.94);
-    --panel-edge: rgba(214, 170, 104, 0.35);
-    --gold: #e8c07a;
-    --ember: #ff8a3a;
+    /* One ui unit: a LENGTH, so every size below is `number * var(--ui)`.
+       1 px at a 1200 px viewport, bigger on a 4K screen, floored on a phone.
+       (0.08333vw is 100vw / 1200 — calc cannot divide by a length.) */
+    --ui: clamp(0.86px, 0.08333vw, 1.35px);
+
+    /* Fallbacks — applyTheme() overwrites every one of these at boot. */
+    --ink: #f3e8d4;
+    --ink-dim: #c9b795;
+    --gold: #f0cc8c;
+    --ember: #ff9d55;
+    --danger: #ff6b6b;
+    --panel: #17140f;
+    --panel-edge: #d6aa68;
+    --screen: #0a0c10;
+    --t-xs: 11px; --t-sm: 12.5px; --t-md: 14px;
+    --t-lg: 17px; --t-xl: 21px; --t-xxl: 26px;
+    --s-xs: 4px; --s-sm: 6px; --s-md: 10px;
+    --s-lg: 14px; --s-xl: 18px; --s-xxl: 24px;
+    --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-pill: 999px;
+    --hit: 44px; --slot: 52px; --slot-gap: 8px; --bar-h: 9px;
+    --pulse-ms: 1100ms;
+
+    --panel-bg: color-mix(in srgb, var(--panel) 94%, transparent);
+    --edge: color-mix(in srgb, var(--panel-edge) 35%, transparent);
 }
 
 * { box-sizing: border-box; }
@@ -15,9 +39,11 @@ html, body {
     margin: 0;
     padding: 0;
     height: 100%;
-    background: #0a0c10;
+    background: var(--screen);
     color: var(--ink);
     font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-size: var(--t-md);
+    -webkit-text-size-adjust: 100%;
     overflow: hidden;
     overscroll-behavior: none;
     user-select: none;
@@ -35,14 +61,21 @@ html, body {
 #game {
     display: block;
     image-rendering: pixelated;
-    background: #0a0c10;
+    background: var(--screen);
 }
 
 #hud {
     position: absolute;
     inset: 0;
     pointer-events: none;
-    font-size: 14px;
+    font-size: var(--t-md);
+}
+
+/* Keyboard users must see where they are. */
+#hud :focus-visible,
+.storyCard button:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: 2px;
 }
 
 #hud button, #hud .panelRow, #hud .slot { pointer-events: auto; }
@@ -51,53 +84,70 @@ html, body {
 
 .hudTop {
     position: absolute;
-    top: 12px; left: 12px; right: 12px;
+    top: var(--s-lg); left: var(--s-lg); right: var(--s-lg);
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    gap: 12px;
+    gap: var(--s-lg);
 }
 
 .needsCard, .skyCard {
-    background: var(--panel);
-    border: 1px solid var(--panel-edge);
-    border-radius: 10px;
-    padding: 10px 12px;
+    background: var(--panel-bg);
+    border: 1px solid var(--edge);
+    border-radius: var(--r-md);
+    padding: var(--s-md) var(--s-lg);
     backdrop-filter: blur(3px);
     box-shadow: 0 6px 20px rgba(0,0,0,0.45);
 }
 
-.needsCard { min-width: 190px; display: grid; gap: 6px; }
+.needsCard { min-width: calc(210 * var(--ui)); display: grid; gap: var(--s-sm); }
 
-.need { display: flex; align-items: center; gap: 8px; }
-.needIcon { width: 18px; text-align: center; font-size: 13px; }
+.need { display: flex; align-items: center; gap: var(--s-sm); }
+.needIcon { width: calc(18 * var(--ui)); text-align: center; font-size: var(--t-sm); }
+.needVal {
+    width: calc(34 * var(--ui));
+    text-align: right;
+    font-size: var(--t-xs);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-dim);
+}
+.need.low .needVal { color: var(--ember); }
+.need.critical .needVal { color: var(--danger); font-weight: 600; }
 .needBarOuter {
     flex: 1;
-    height: 8px;
+    height: var(--bar-h);
     background: rgba(255,255,255,0.08);
-    border-radius: 5px;
+    border-radius: var(--r-sm);
     overflow: hidden;
 }
-.needBar { height: 100%; width: 50%; border-radius: 5px; transition: width .25s ease; }
-.need.low .needIcon { animation: pulse 1.1s infinite; }
+.needBar { height: 100%; width: 50%; border-radius: var(--r-sm); transition: width .25s ease; }
+/* State is never colour alone: a low bar is also hatched, a critical one
+   pulses twice as fast. Colour-blind players and a glance across the room
+   both work. */
+.need.low .needBar {
+    background-image: repeating-linear-gradient(135deg,
+        rgba(0,0,0,0.34) 0 3px, rgba(0,0,0,0) 3px 6px);
+}
+.need.low .needIcon { animation: pulse var(--pulse-ms) infinite; }
+.need.critical .needIcon { animation: pulse calc(var(--pulse-ms) / 2) infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
-.skyCard { text-align: right; min-width: 170px; }
-.skyTime { font-size: 22px; font-weight: 600; color: var(--gold); letter-spacing: .5px; }
-.skyMeta { font-size: 12px; color: var(--ink-dim); }
-.skyZone { margin-top: 4px; font-size: 12px; color: var(--ink); opacity: .85; }
+.skyCard { text-align: right; min-width: calc(180 * var(--ui)); }
+.skyTime { font-size: var(--t-xl); font-weight: 600; color: var(--gold); letter-spacing: .5px; font-variant-numeric: tabular-nums; }
+.skyMeta { font-size: var(--t-sm); color: var(--ink-dim); }
+.skyZone { margin-top: var(--s-xs); font-size: var(--t-sm); color: var(--ink); }
 
 /* ---------- objective ---------- */
 
 .objectiveBar {
     position: absolute;
-    top: 14px; left: 50%;
+    top: var(--s-lg); left: 50%;
     transform: translateX(-50%);
-    background: rgba(18,16,14,0.8);
-    border: 1px solid rgba(214,170,104,0.25);
-    border-radius: 20px;
-    padding: 6px 16px;
-    font-size: 13px;
+    background: var(--panel-bg);
+    border: 1px solid var(--edge);
+    border-radius: var(--r-pill);
+    padding: var(--s-sm) var(--s-xl);
+    font-size: var(--t-sm);
     color: var(--gold);
     max-width: 44vw;
     text-align: center;
@@ -110,20 +160,20 @@ html, body {
 
 .toasts {
     position: absolute;
-    left: 50%; bottom: 112px;
+    left: 50%; bottom: calc(var(--slot) + var(--s-xxl) * 2.6);
     transform: translateX(-50%);
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
+    gap: var(--s-sm);
 }
 
 .toast {
-    background: rgba(18,16,14,0.9);
-    border: 1px solid rgba(214,170,104,0.22);
-    border-radius: 18px;
-    padding: 6px 14px;
-    font-size: 13px;
+    background: var(--panel-bg);
+    border: 1px solid var(--edge);
+    border-radius: var(--r-pill);
+    padding: var(--s-sm) var(--s-lg);
+    font-size: var(--t-sm);
     opacity: 0;
     transform: translateY(8px);
     transition: all .3s ease;
@@ -135,27 +185,28 @@ html, body {
 
 .hotbar {
     position: absolute;
-    left: 50%; bottom: 24px;
+    left: 50%; bottom: var(--s-xxl);
     transform: translateX(-50%);
     display: flex;
-    gap: 8px;
+    gap: var(--slot-gap);
 }
 
 .slot {
     position: relative;
-    width: 52px; height: 52px;
-    background: rgba(20,17,14,0.88);
-    border: 1px solid rgba(214,170,104,0.22);
-    border-radius: 9px;
+    width: var(--slot); height: var(--slot);
+    min-width: var(--hit); min-height: var(--hit);
+    background: var(--panel-bg);
+    border: 1px solid var(--edge);
+    border-radius: var(--r-md);
     display: flex; align-items: center; justify-content: center;
-    font-size: 24px;
+    font-size: var(--t-xxl);
     cursor: pointer;
     transition: transform .12s ease, border-color .12s ease;
 }
 .slot:hover { transform: translateY(-2px); }
 .slot.active { border-color: var(--gold); box-shadow: 0 0 12px rgba(232,192,122,0.3); }
-.slotKey { position: absolute; top: 2px; left: 5px; font-size: 10px; color: var(--ink-dim); }
-.slotN { position: absolute; bottom: 2px; right: 5px; font-size: 11px; color: var(--ink); }
+.slotKey { position: absolute; top: 2px; left: 5px; font-size: var(--t-xs); color: var(--ink-dim); }
+.slotN { position: absolute; bottom: 2px; right: 5px; font-size: var(--t-xs); color: var(--ink); font-variant-numeric: tabular-nums; }
 
 /* ---------- panels ---------- */
 
@@ -171,11 +222,11 @@ html, body {
 .panelWrap.hidden, .storyWrap.hidden { display: none; }
 
 .panel {
-    width: min(420px, 90vw);
-    max-height: 76vh;
-    background: var(--panel);
-    border: 1px solid var(--panel-edge);
-    border-radius: 14px;
+    width: min(calc(440 * var(--ui)), 92vw);
+    max-height: 80vh;
+    background: var(--panel-bg);
+    border: 1px solid var(--edge);
+    border-radius: var(--r-lg);
     display: flex;
     flex-direction: column;
     box-shadow: 0 20px 60px rgba(0,0,0,0.6);
@@ -183,21 +234,22 @@ html, body {
 
 .panelHead {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 14px;
-    border-bottom: 1px solid rgba(214,170,104,0.18);
-    font-weight: 600; color: var(--gold);
+    padding: var(--s-lg);
+    border-bottom: 1px solid var(--edge);
+    font-weight: 600; color: var(--gold); font-size: var(--t-lg);
 }
 .panelHead button {
     background: none; border: none; color: var(--ink-dim);
-    font-size: 16px; cursor: pointer;
+    font-size: var(--t-lg); cursor: pointer;
+    min-width: var(--hit); min-height: var(--hit);
 }
 .panelHead button:hover { color: var(--ember); }
 
-.panelBody { overflow-y: auto; padding: 8px; display: grid; gap: 4px; }
+.panelBody { overflow-y: auto; padding: var(--s-md); display: grid; gap: var(--s-xs); }
 
 .panelInfo {
-    padding: 8px 10px;
-    font-size: 13px;
+    padding: var(--s-md);
+    font-size: var(--t-sm);
     color: var(--ink-dim);
     line-height: 1.5;
     border-bottom: 1px solid rgba(255,255,255,0.05);
@@ -205,23 +257,24 @@ html, body {
 .panelInfo b { color: var(--ink); }
 
 .panelRow {
-    display: flex; align-items: center; gap: 10px;
+    display: flex; align-items: center; gap: var(--s-md);
     width: 100%;
-    padding: 9px 10px;
+    padding: var(--s-md);
+    min-height: var(--hit);
     background: rgba(255,255,255,0.03);
     border: 1px solid transparent;
-    border-radius: 8px;
+    border-radius: var(--r-sm);
     color: var(--ink);
-    font-size: 13px;
+    font-size: var(--t-sm);
     text-align: left;
     cursor: pointer;
     font-family: inherit;
 }
 .panelRow:hover { background: rgba(232,192,122,0.1); border-color: rgba(232,192,122,0.3); }
 .panelRow.disabled { opacity: .4; cursor: default; }
-.rowIcon { font-size: 17px; width: 22px; text-align: center; }
+.rowIcon { font-size: var(--t-lg); width: calc(24 * var(--ui)); text-align: center; }
 .rowLabel { flex: 1; }
-.rowHint { font-size: 11px; color: var(--ink-dim); }
+.rowHint { font-size: var(--t-xs); color: var(--ink-dim); }
 
 /* ---------- story card ---------- */
 
@@ -236,32 +289,33 @@ html, body {
 }
 
 .storyCard {
-    width: min(540px, 90vw);
+    width: min(calc(560 * var(--ui)), 92vw);
     background: linear-gradient(180deg, #221c15, #171311);
-    border: 1px solid rgba(214,170,104,0.4);
-    border-radius: 16px;
-    padding: 26px 28px;
+    border: 1px solid var(--edge);
+    border-radius: var(--r-lg);
+    padding: var(--s-xxl);
     box-shadow: 0 24px 70px rgba(0,0,0,0.7);
     animation: rise .35s ease;
 }
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
 .storyTitle {
-    font-size: 21px;
+    font-size: var(--t-xxl);
     color: var(--gold);
-    margin-bottom: 12px;
+    margin-bottom: var(--s-lg);
     letter-spacing: .4px;
 }
-.storyText { font-size: 15px; line-height: 1.65; color: var(--ink); }
-.storyNext { margin-top: 14px; font-size: 13px; color: var(--ember); }
+.storyText { font-size: var(--t-lg); line-height: 1.6; color: var(--ink); }
+.storyNext { margin-top: var(--s-lg); font-size: var(--t-sm); color: var(--ember); }
 .storyCard button {
-    margin-top: 18px;
+    margin-top: var(--s-xl);
     background: linear-gradient(180deg, #d8a855, #b8822f);
     color: #241a0d;
     border: none;
-    border-radius: 9px;
-    padding: 10px 22px;
-    font-size: 14px;
+    border-radius: var(--r-sm);
+    padding: var(--s-md) var(--s-xxl);
+    min-height: var(--hit);
+    font-size: var(--t-md);
     font-weight: 600;
     cursor: pointer;
     font-family: inherit;
@@ -271,8 +325,18 @@ html, body {
 /* Key hints used to live here; they will come back as a settings panel. */
 
 @media (max-width: 760px) {
-    .objectiveBar { max-width: 60vw; top: auto; bottom: 90px; }
-    .skyCard { min-width: 130px; }
-    .needsCard { min-width: 140px; }
-    .slot { width: 44px; height: 44px; font-size: 20px; }
+    .objectiveBar { max-width: 62vw; top: auto; bottom: calc(var(--slot) + var(--s-xxl) * 2); }
+    .skyCard { min-width: calc(140 * var(--ui)); }
+    .needsCard { min-width: calc(150 * var(--ui)); }
+    .slot { width: var(--hit); height: var(--hit); font-size: var(--t-xl); }
+    .needVal { display: none; }          /* the bar alone, no room for digits */
+}
+
+/* Someone who gets motion sick should still be able to play. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+    }
 }

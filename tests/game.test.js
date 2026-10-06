@@ -7,6 +7,7 @@
  */
 import { suite, test, assert, run } from "./tiny.js";
 import { installDOM, key } from "./dom-harness.js";
+import { UI, COLORS, CONTRACTS, contrast, applyTheme, pixelRatio } from "../js/ui/uispec.js";
 
 const dom = installDOM();
 const { Game } = await import("../js/main.js");
@@ -335,3 +336,52 @@ test("collapsing from exposure puts the hero back at camp, not at a game over", 
 });
 
 run("v3 game");
+
+/* ---------------------------------------------------------------------- *
+ * UI contract
+ * ---------------------------------------------------------------------- */
+
+test("every HUD colour pair clears WCAG AA", () => {
+    for (const c of CONTRACTS) {
+        const got = contrast(c.fg, c.bg);
+        assert.gte(got, c.min, `${c.name}: ${got.toFixed(2)}:1, нужно ${c.min}`);
+    }
+});
+
+test("the type and spacing scales step, they do not wander", () => {
+    const t = Object.values(UI.type), sp = Object.values(UI.space);
+    for (let i = 1; i < t.length; i++) assert.gt(t[i], t[i - 1], "type scale rises");
+    for (let i = 1; i < sp.length; i++) assert.gt(sp[i], sp[i - 1], "space scale rises");
+    assert.gte(UI.type.xs, 11, "nothing smaller than 11 px at scale 1");
+    assert.gte(UI.hit, 44, "hit targets stay thumb-sized");
+    assert.gte(UI.slot.sizeSmall, UI.hit, "even the small hotbar slot is tappable");
+    assert.lt(UI.bar.critical, UI.bar.low, "critical is worse than low");
+});
+
+test("the theme reaches the document and the DPI is capped", () => {
+    const { win } = installDOM();
+    assert.ok(applyTheme(globalThis.document), "applyTheme writes to the root");
+    const props = globalThis.document.documentElement.style._props;
+    assert.eq(props["--ink"], COLORS.ink);
+    assert.ok(props["--t-md"].includes("var(--ui)"), "sizes scale with the viewport");
+    win.devicePixelRatio = 3;
+    assert.eq(pixelRatio(win), UI.dprCap, "a 3× display is rendered at the cap");
+    win.devicePixelRatio = undefined;
+    assert.eq(pixelRatio(win), 1, "no DPI reported means 1×");
+});
+
+test("need bars report a number, a state and an ARIA value", () => {
+    const game = boot();
+    game.needs.food = 8;
+    game.needs.health = 90;
+    game.hud.update({
+        needs: { food: game.needs.food, warmth: 60, fatigue: 40, health: game.needs.health }, clock: game.clock, weather: game.weather,
+        inventory: game.inventory, objective: "", zoneName: "", ambient: 10
+    });
+    const row = game.hud.needRows.food;
+    assert.eq(game.hud.needVals.food.textContent, "8%", "the number is shown, not just a bar");
+    assert.eq(row.getAttribute("aria-valuenow"), "8");
+    assert.ok(row.classList.contains("low"), "8 % is low");
+    assert.ok(row.classList.contains("critical"), "…and critical");
+    assert.not(game.hud.needRows.health.classList.contains("low"), "90 % is fine");
+});

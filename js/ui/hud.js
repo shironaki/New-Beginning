@@ -7,6 +7,7 @@
  * systems never touch the DOM themselves.
  */
 import { itemDef, itemEmoji, itemName } from "../sandbox/items.js";
+import { UI, applyTheme } from "./uispec.js";
 
 const NEED_DEFS = [
     { key: "food",    label: "Сытость",   icon: "🍖", color: "#d8a24a" },
@@ -22,6 +23,9 @@ export class HUD {
         this.onAction = onAction;
         this.els = {};
         this.panelOpen = null;
+        // The palette and the scales live in uispec.js; the stylesheet only
+        // reads them. This is the one place they reach the document.
+        applyTheme();
         this._build();
     }
 
@@ -67,13 +71,20 @@ export class HUD {
 
         // Need bars.
         this.els.needs.innerHTML = NEED_DEFS.map((n) => `
-          <div class="need" data-need="${n.key}">
-            <span class="needIcon">${n.icon}</span>
+          <div class="need" data-need="${n.key}" role="meter" aria-label="${n.label}"
+               aria-valuemin="0" aria-valuemax="100">
+            <span class="needIcon" aria-hidden="true">${n.icon}</span>
             <div class="needBarOuter"><div class="needBar" style="background:${n.color}"></div></div>
+            <span class="needVal"></span>
           </div>`).join("");
         this.needBars = {};
+        this.needVals = {};
+        this.needRows = {};
         NEED_DEFS.forEach((n) => {
-            this.needBars[n.key] = this.els.needs.querySelector(`[data-need="${n.key}"] .needBar`);
+            const row = this.els.needs.querySelector(`[data-need="${n.key}"]`);
+            this.needRows[n.key] = row;
+            this.needBars[n.key] = row.querySelector(".needBar");
+            this.needVals[n.key] = row.querySelector(".needVal");
         });
 
         // Hotbar slots.
@@ -90,10 +101,18 @@ export class HUD {
         const { needs, clock, weather, inventory, objective, zoneName } = state;
         for (const n of NEED_DEFS) {
             const raw = needs[n.key];
-            const v = n.invert ? 100 - raw : raw;
+            const v = Math.max(0, Math.min(100, n.invert ? 100 - raw : raw));
             const bar = this.needBars[n.key];
-            bar.style.width = Math.max(0, Math.min(100, v)) + "%";
-            bar.parentElement.parentElement.classList.toggle("low", v < 25);
+            const row = this.needRows[n.key];
+            const pct = Math.round(v);
+            bar.style.width = v + "%";
+            // A number as well as a bar: "half full" is not a plan, "38 %" is.
+            if (this.needVals[n.key].textContent !== pct + "%") {
+                this.needVals[n.key].textContent = pct + "%";
+                row.setAttribute("aria-valuenow", pct);
+            }
+            row.classList.toggle("low", v < UI.bar.low);
+            row.classList.toggle("critical", v < UI.bar.critical);
         }
 
         const w = weather.info;
@@ -118,14 +137,15 @@ export class HUD {
     toast(text, icon = "") {
         const el = document.createElement("div");
         el.className = "toast";
-        el.innerHTML = `${icon ? `<span>${icon}</span>` : ""}${text}`;
+        el.innerHTML = `${icon ? `<span class="toastIcon">${icon}</span>` : ""}${text}`;
+        el.setAttribute("role", "status");
         this.els.toasts.appendChild(el);
         setTimeout(() => el.classList.add("show"), 10);
         setTimeout(() => {
             el.classList.remove("show");
-            setTimeout(() => el.remove(), 400);
-        }, 3200);
-        while (this.els.toasts.children.length > 5) this.els.toasts.firstChild.remove();
+            setTimeout(() => el.remove(), UI.toast.fadeMs);
+        }, UI.toast.ms);
+        while (this.els.toasts.children.length > UI.toast.max) this.els.toasts.firstChild.remove();
         return this;
     }
 
