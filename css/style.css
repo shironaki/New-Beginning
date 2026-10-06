@@ -332,6 +332,25 @@ html, body {
     .needVal { display: none; }          /* the bar alone, no room for digits */
 }
 
+/* A 320 px phone in portrait: the narrowest screen we promise to support.
+   Six hotbar slots at the 44 px touch target plus gaps already eat 290 px,
+   so everything around them has to give way instead of overflowing. */
+@media (max-width: 420px) {
+    .hudTop { padding: var(--s-sm) var(--s-md); gap: var(--s-sm); }
+    .needsCard { min-width: calc(120 * var(--ui)); gap: var(--s-xs); }
+    .needIcon { width: calc(14 * var(--ui)); }
+    .skyCard { min-width: calc(92 * var(--ui)); }
+    .skyZone { display: none; }          /* the zone name is in the journal */
+    .skyTime { font-size: var(--t-lg); }
+    .objectiveBar { max-width: 86vw; }
+    .hotbar { gap: calc(var(--slot-gap) / 2); }
+    .slot { width: calc(44 * var(--ui)); height: calc(44 * var(--ui)); }
+    .panel { width: 96vw; }
+    .panelRow { padding: var(--s-sm) var(--s-md); gap: var(--s-sm); }
+    .rowHint { display: none; }          /* the label carries the meaning */
+    .storyCard { width: 94vw; }
+}
+
 /* Someone who gets motion sick should still be able to play. */
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {

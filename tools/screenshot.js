@@ -51,7 +51,7 @@ const scenes = [
         about: "Лагерь на пепелище, полдень",
         setup(g) {
             g.clock.minute = 12 * 60;
-            standAt(g, "campfire", -6, 30);
+            standAt(g, "campfire", -34, 22);
         }
     },
     {
@@ -59,7 +59,7 @@ const scenes = [
         about: "Сумерки, костёр горит, еда на вертеле",
         setup(g) {
             g.clock.minute = 20 * 60 + 20;
-            const obj = standAt(g, "campfire", -10, 28);
+            const obj = standAt(g, "campfire", -34, 20);
             const fire = g.fires.get(g.fireKey(g.zone, obj));
             fire.addFuel("log"); fire.addFuel("log");
             fire.light({ hasFlint: true });
@@ -195,6 +195,7 @@ const scenes = [
             g.clock.minute = 2 * 60;
             g.inventory.add("torch", 1);
             g.inventory.setActive(g.inventory.list().findIndex((sl) => sl.id === "torch"));
+            frames(g, 240);                 // let the dust and the drips build
             g.camera.zoom = 3.2;
             g.camera.snapTo(g.player.x, g.player.y - 6);
         }

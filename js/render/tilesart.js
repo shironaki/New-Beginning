@@ -249,6 +249,21 @@ function detailPass(ctx, id, px, py, size, tx, ty, pal) {
         }
 
         case T.ASH: case T.SOOT: {
+            // Burn scars at the scale of the fire, not of the tile: wide
+            // patches where the ground burned through, and pale drifts where
+            // the ash settled. Without this the whole valley is one flat tone.
+            {
+                const CELLS = 8, q = size / CELLS;
+                for (let cy2 = 0; cy2 < CELLS; cy2++) {
+                    for (let cx2 = 0; cx2 < CELLS; cx2++) {
+                        const gx = tx * CELLS + cx2, gy = ty * CELLS + cy2;
+                        const n = soft(gx, gy, 26, 71) * 0.7 + soft(gx, gy, 9, 17) * 0.3;
+                        if (n > 0.56) ctx.fillStyle = `rgba(22,18,16,${(n - 0.56) * 0.5})`;
+                        else ctx.fillStyle = `rgba(214,206,194,${(0.56 - n) * 0.28})`;
+                        ctx.fillRect(px + cx2 * q, py + cy2 * q, q, q);
+                    }
+                }
+            }
             // Soot flecks, charcoal bits and the odd live ember.
             for (let i = 0; i < 6; i++) {
                 const a = h(tx, ty, i * 5 + 3);

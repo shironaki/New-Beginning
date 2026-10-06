@@ -7,14 +7,15 @@
  */
 import { moveAndCollide } from "../world/tilemap.js";
 import { TILE_SIZE } from "../world/tiles.js";
-import { GAIT, approach } from "../render/charspec.js";
+import { GAIT, MOVE, approach } from "../render/charspec.js";
 
 export const DIRS = ["down", "left", "right", "up"];
 
 export class Player {
     constructor({ x = 0, y = 0, bus = null } = {}) {
         this.x = x; this.y = y;
-        this.vx = 0; this.vy = 0;
+        this.vx = 0; this.vy = 0;       // measured, after collision
+        this.mvx = 0; this.mvy = 0;     // wanted velocity carried between frames
         this.radius = 9;
         this.dir = "down";
         this.walkSpeed = 68;     // world units / second
@@ -81,36 +82,65 @@ export class Player {
         if (canRun) this.stamina = Math.max(0, this.stamina - 16 * dt);
         else this.stamina = Math.min(this.maxStamina, this.stamina + (this.moving ? 7 : 14) * dt);
 
-        if (!this.moving) {
-            this.vx = this.vy = 0;
-            this.settle(dt);
-            return this;
-        }
-
         // Analogue magnitude scales speed; sprint overrides the top end.
         const base = canRun ? this.runSpeed : this.walkSpeed;
         const terrain = zone ? zone.map.speedAt(this.x, this.y) : 1;
         const speed = base * Math.min(1, mag) * speedFactor * terrain;
 
-        const dx = axis.x * speed * dt;
-        const dy = axis.y * speed * dt;
+        // --- mass ---------------------------------------------------------
+        // The hero accelerates towards the wanted velocity instead of
+        // teleporting onto it, and keeps a little of it when the stick drops.
+        // Slippery ground (mud, shallows) brakes worse, so the stop drifts.
+        const wantX = this.moving ? (axis.x / (mag || 1)) * speed : 0;
+        const wantY = this.moving ? (axis.y / (mag || 1)) * speed : 0;
+        const slippery = terrain < MOVE.slipBelow;
+        let tau = this.moving ? MOVE.tauStart : MOVE.tauStop * (slippery ? MOVE.slipStop : 1);
+        if (this.moving && (this.mvx * wantX + this.mvy * wantY) < 0) tau = MOVE.tauTurn;
+        // Exact integration of dv/dt = (want - v)/tau over the frame, both
+        // for the velocity and for the ground it covers. Euler would make the
+        // ramp depend on the frame rate, and 30 FPS would walk a different
+        // distance than 120 — the one thing locomotion must never do.
+        const decay = Math.exp(-dt / tau);
+        const vx0 = this.mvx, vy0 = this.mvy;
+        this.mvx = wantX + (vx0 - wantX) * decay;
+        this.mvy = wantY + (vy0 - wantY) * decay;
+        const travelX = wantX * dt + (vx0 - wantX) * tau * (1 - decay);
+        const travelY = wantY * dt + (vy0 - wantY) * tau * (1 - decay);
+        if (!this.moving && Math.hypot(this.mvx, this.mvy) < MOVE.stopBelow) {
+            this.mvx = this.mvy = 0;
+            this.vx = this.vy = 0;
+            this.settle(dt);
+            return this;
+        }
+
+        const dx = travelX;
+        const dy = travelY;
 
         // Facing. On a diagonal the SIDE view wins: it is the only pose with a
         // readable stride, and a front view sliding sideways is what makes
         // diagonal movement look like the hero is on rails. The 0.55 bias
         // means "up" and "down" still win when the input is mostly vertical.
-        this.faceX = axis.x; this.faceY = axis.y;
-        if (Math.abs(axis.x) >= Math.abs(axis.y) * 0.55) this.dir = axis.x > 0 ? "right" : "left";
-        else this.dir = axis.y > 0 ? "down" : "up";
+        if (this.moving) {
+            this.faceX = axis.x; this.faceY = axis.y;
+            if (Math.abs(axis.x) >= Math.abs(axis.y) * 0.55) this.dir = axis.x > 0 ? "right" : "left";
+            else this.dir = axis.y > 0 ? "down" : "up";
+        }
         // How much of the step goes up/down screen, -1..1. The renderer uses
         // it to tilt the body into a three-quarter pose on diagonals.
-        this.slant = Math.abs(axis.x) < 1e-6 ? 0 : Math.max(-1, Math.min(1, axis.y / Math.abs(axis.x)));
+        if (this.moving) {
+            this.slant = Math.abs(axis.x) < 1e-6 ? 0 : Math.max(-1, Math.min(1, axis.y / Math.abs(axis.x)));
+        }
 
         const x0 = this.x, y0 = this.y;
         if (zone) {
             const res = moveAndCollide(zone.map, this.x, this.y, dx, dy, this.radius,
                 (wx, wy) => zone.isBlockedTile(Math.floor(wx / TILE_SIZE), Math.floor(wy / TILE_SIZE)),
                 (px, py, r) => zone.propContact(px, py, r));
+            // Hitting something eats the speed in that direction: no
+            // grinding along a rock at full tilt, and no stored energy that
+            // fires the hero sideways the moment the wall ends.
+            if (Math.abs(res.x - (x0 + dx)) > 1e-6) this.mvx *= 0.25;
+            if (Math.abs(res.y - (y0 + dy)) > 1e-6) this.mvy *= 0.25;
             this.x = res.x; this.y = res.y;
         } else {
             this.x += dx; this.y += dy;
@@ -144,7 +174,9 @@ export class Player {
         // driven by the legs themselves and can never drift from them.
         const before = this.anim;
         const after = before + adv;
-        if (adv > 0 && Math.floor(after / Math.PI) > Math.floor(before / Math.PI)) {
+        // While coasting to a stop the legs finish the stride they are in —
+        // that last couple of pixels is the foot settling, not a new step.
+        if (this.moving && adv > 0 && Math.floor(after / Math.PI) > Math.floor(before / Math.PI)) {
             this.stepEvent = true;
             this.stepSide = Math.floor(after / Math.PI) % 2 === 0 ? 1 : -1;
             this.steps++;

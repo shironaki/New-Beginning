@@ -138,7 +138,11 @@ test("losing focus drops every held key", () => {
     assert.not(g.input.pressed("right"), "a blurred window cannot hold a key");
     const x = g.player.x;
     for (let i = 0; i < 30; i++) g.update(1 / 60);
-    assert.near(g.player.x, x, 0.01);
+    // The hero has mass: he coasts a couple of pixels and then stands.
+    assert.near(g.player.x, x, 4, "a dropped key must not keep walking the hero");
+    const settled = g.player.x;
+    for (let i = 0; i < 30; i++) g.update(1 / 60);
+    assert.near(g.player.x, settled, 1e-9, "and he must come to a full stop");
 });
 
 test("a key with no auto-repeat is never cut off", () => {

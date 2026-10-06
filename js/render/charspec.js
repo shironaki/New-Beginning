@@ -184,6 +184,24 @@ export const SHADOW = {
  *             one step covers stride/2 px = stride/4 u, and the foot moves
  *             2 * swing = stride/4 u relative to the hip. Exactly matched.
  */
+/**
+ * Ground physics of the hero. Instant velocity made the hero feel weightless:
+ * full speed on frame one, dead stop on key-up. These numbers give the body
+ * mass without costing responsiveness — at `accel` the hero is at full walk in
+ * about 0.08 s and stops within ~2 px.
+ */
+export const MOVE = {
+    // Time constants, not accelerations: an exponential approach composes,
+    // so 30, 60 and 120 FPS give bit-identical motion. v(t) reaches 95 % of
+    // the wanted speed in 3 x tau.
+    tauStart: 0.075,     // s, spinning up to the wanted velocity
+    tauStop: 0.055,      // s, coasting down when the stick is released
+    tauTurn: 0.045,      // s, when the new direction opposes the old one
+    slipStop: 2.6,       // tauStop multiplier on slippery ground (mud, shallows)
+    slipBelow: 0.8,      // terrain speed under which the ground counts as slippery
+    stopBelow: 1.5       // px/s — below this the hero is simply standing
+};
+
 export const GAIT = {
     strideWalk: 24,          // px of ground per cycle  -> 2.83 cycles/s at 68 px/s
     strideRun: 34,           //                         -> 3.47 cycles/s at 118 px/s

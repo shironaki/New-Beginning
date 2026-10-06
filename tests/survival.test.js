@@ -422,12 +422,18 @@ test("one stride of ground equals exactly one cycle of the legs", () => {
     const p = new Player({ x: 0, y: 0 });
     const dt = 1 / 60;
     // Walk exactly one stride worth of ground.
+    // Spin up first: the hero has mass now, so the first tenth of a second
+    // is a ramp. The claim under test is about cruising, not about launch.
+    for (let i = 0; i < 60; i++) p.update(dt, { x: 1, y: 0 }, null, {});
+    const dist0 = p.dist, anim0 = p.anim;
     const steps = Math.round((GAIT.strideWalk / p.walkSpeed) / dt);
     for (let i = 0; i < steps; i++) p.update(dt, { x: 1, y: 0 }, null, {});
-    const cycles = p.dist / GAIT.strideWalk;
-    assert.near(p.dist, GAIT.strideWalk, 0.6, "walked the wrong distance");
-    assert.near(cycles, 1, 0.03, "feet and ground drifted apart");
-    assert.near(Math.cos(p.anim), 1, 0.05, "the cycle did not close");
+    const walked = p.dist - dist0;
+    const turned = (p.anim - anim0 + Math.PI * 4) % (Math.PI * 2);
+    assert.near(walked, GAIT.strideWalk, 0.6, "walked the wrong distance");
+    assert.near(walked / GAIT.strideWalk, 1, 0.03, "feet and ground drifted apart");
+    assert.near(turned, Math.PI * 2 * (walked / GAIT.strideWalk) % (Math.PI * 2), 0.05,
+                "the cycle did not close");
 });
 
 test("a slowdown slows the legs too: no skating in mud", () => {
@@ -440,6 +446,28 @@ test("a slowdown slows the legs too: no skating in mud", () => {
     assert.near(slow.dist, fast.dist / 2, 1e-6);
     assert.near(slow.anim / slow.dist, fast.anim / fast.dist, 1e-6,
         "phase per pixel must be constant whatever the speed");
+});
+
+test("the hero has mass: he spins up and coasts, the same at any frame rate", () => {
+    const p = new Player({ x: 0, y: 0 });
+    p.update(1 / 60, { x: 1, y: 0 }, null, {});
+    assert.lt(p.dist, p.walkSpeed / 60 * 0.9, "full speed on the first frame is weightless");
+    for (let i = 0; i < 120; i++) p.update(1 / 60, { x: 1, y: 0 }, null, {});
+    const cruise = p.dist;
+    p.update(1 / 60, { x: 1, y: 0 }, null, {});
+    assert.near(p.dist - cruise, p.walkSpeed / 60, 0.01, "cruising speed must be exact");
+    // Released: a short coast, then a full stop.
+    const before = p.x;
+    for (let i = 0; i < 120; i++) p.update(1 / 60, { x: 0, y: 0 }, null, {});
+    const coast = p.x - before;
+    assert.gt(coast, 0.5, "a body in motion does not stop dead");
+    assert.lt(coast, 8, "...but it does not skate either");
+
+    // And the ramp itself must not depend on the frame rate.
+    const fine = new Player({ x: 0, y: 0 }), coarse = new Player({ x: 0, y: 0 });
+    for (let i = 0; i < 24; i++) fine.update(1 / 120, { x: 1, y: 0 }, null, {});
+    for (let i = 0; i < 6; i++) coarse.update(1 / 30, { x: 1, y: 0 }, null, {});
+    assert.near(fine.x, coarse.x, 1e-9, "the ramp drifted with the frame rate");
 });
 
 test("idle to walk to idle blends instead of snapping", () => {

@@ -1,5 +1,6 @@
 /** v3 tests — core: RNG, noise, events, ECS, clock, save, loop. */
 import { suite, test, assert, run } from "./tiny.js";
+import * as cameraMod from "../js/engine/camera.js";
 import { LIGHT, ambientAt } from "../js/render/lighting.js";
 import { SUN, SHADOW, setSun, castShadow, setFireLights, setShadowOrigin, propHeight,
          ROCK, pick, rockOutline } from "../js/render/tilesart.js";
@@ -516,6 +517,38 @@ test("dead particles are swapped out, not spliced", () => {
     assert.eq(fx.n, 1, "the dead one should be gone");
     assert.eq(fx.pool[0].x, 2, "the survivor moved into the free slot");
     assert.eq(fx.count, 1);
+});
+
+
+suite("camera");
+
+test("the view leads a running hero and recentres when he stops", () => {
+    const { Camera } = cameraMod;
+    const cam = new Camera({ width: 320, height: 200, zoom: 1, deadzone: 0 });
+    cam.snapTo(0, 0);
+    for (let i = 0; i < 120; i++) cam.follow(0, 0, 1 / 60, 118, 0);
+    assert.gt(cam.x + cam.viewW / 2, 4, "the camera never looked ahead");
+    assert.lte(cam.x + cam.viewW / 2, Camera.LEAD.max + 0.001, "it ran away from the hero");
+    for (let i = 0; i < 240; i++) cam.follow(0, 0, 1 / 60, 0, 0);
+    assert.near(cam.x + cam.viewW / 2, 0, 0.5, "the lead never decayed");
+    cam.motionScale = 0;                       // reduced motion: no lead either
+    for (let i = 0; i < 120; i++) cam.follow(0, 0, 1 / 60, 118, 0);
+    assert.near(cam.x + cam.viewW / 2, 0, 0.5);
+});
+
+test("reduced motion switches the camera shake off", () => {
+    const { Camera } = cameraMod;
+    const cam = new Camera({ width: 320, height: 200 });
+    cam.shake(4, 0.3);
+    assert.gt(cam.shakeTime, 0);
+    cam.shakeTime = 0; cam.shakePower = 0;
+    cam.motionScale = 0;
+    cam.shake(4, 0.3);
+    assert.eq(cam.shakeTime, 0);
+    cam.update(1 / 60);
+    assert.eq(cam.offsetX, 0);
+    cam.followReducedMotion({});               // no matchMedia: must not throw
+    assert.eq(cam.motionScale, 0);
 });
 
 run("v3 core");

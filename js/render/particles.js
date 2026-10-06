@@ -44,6 +44,34 @@ export const FX = {
     leaf: { spread: 26, rise: 10, riseVar: 18, life: 1.4, lifeVar: 1.1,
             gravity: 16, size: 2, sizeVar: 1.6, sway: 2.4 },
     /** Wading: droplets thrown up by a boot, and the ring it leaves behind. */
+    /**
+     * Air you can see. Underground the torch light has to catch something or
+     * the gallery reads as an empty box; a few slow motes do that for almost
+     * nothing. Spawned around the hero, so they cost the same anywhere.
+     */
+    motes: {
+        rate: 2.6,          // spawns per second while underground
+        spread: 150,        // px around the hero they appear in
+        life: 3.2, lifeVar: 2.4,
+        rise: 3.5,          // px/s, they drift upward and sideways
+        drift: 5,
+        size: 0.9, sizeVar: 0.7,
+        alpha: 0.5,
+        color: "#d9e2ea"
+    },
+    /** Water finding its way through the roof of a mine. */
+    ceilingDrip: {
+        rate: 0.5,          // drops per second near the hero
+        spread: 170,
+        fall: 70,           // px/s at birth
+        gravity: 320,
+        life: 0.55,
+        size: 1.2,
+        color: "#9fd6e8",
+        ringLife: 0.5,
+        ringGrow: 16,
+        ringA: 0.28
+    },
     // Run-off from a soaked hero walking back onto dry land.
     drip: {
         spread: 7,          // across the body, world units
@@ -287,6 +315,45 @@ export class Particles {
             o.size = C.size; o.alpha = 1; o.glyph = "";
             o.color = C.color; o.kind = "spark";
         }
+        return this;
+    }
+
+    /** One slow speck of dust hanging in the air. */
+    mote(x, y) {
+        const C = FX.motes;
+        const o = this._claim();
+        o.x = x; o.y = y;
+        o.vx = (Math.random() - 0.5) * C.drift;
+        o.vy = -(Math.random() * C.rise);
+        o.life = C.life + Math.random() * C.lifeVar; o.maxLife = C.life + C.lifeVar;
+        o.gravity = 0;
+        o.size = C.size + Math.random() * C.sizeVar;
+        o.alpha = C.alpha; o.glyph = "";
+        o.color = C.color; o.kind = "dot";
+        return this;
+    }
+
+    /** A drop off the roof of a gallery, and the ring where it lands. */
+    ceilingDrop(x, y) {
+        const C = FX.ceilingDrip;
+        const o = this._claim();
+        o.x = x; o.y = y;
+        o.vx = 0; o.vy = C.fall;
+        o.life = C.life; o.maxLife = C.life;
+        o.gravity = C.gravity;
+        o.size = C.size; o.alpha = 1; o.glyph = "";
+        o.color = C.color; o.kind = "spark";
+        return this;
+    }
+
+    /** The ring that drop leaves when it hits the floor. */
+    dropRing(x, y) {
+        const C = FX.ceilingDrip;
+        const r = this._claim();
+        r.x = x; r.y = y; r.vx = 0; r.vy = 0; r.gravity = 0;
+        r.life = C.ringLife; r.maxLife = C.ringLife;
+        r.size = 1.5; r.alpha = C.ringA; r.glyph = "";
+        r.color = "rgba(190,226,240,"; r.kind = "ripple";
         return this;
     }
 

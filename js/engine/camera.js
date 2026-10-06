@@ -5,6 +5,14 @@
  * than a camera glued to the player) and catches up smoothly on longer moves.
  */
 export class Camera {
+    /** How far the view runs ahead of the hero. */
+    static LEAD = {
+        perSpeed: 0.22,     // world units of lead per unit of speed
+        max: 26,            // never more than this, or the hero drifts off-centre
+        vertical: 0.7,      // less lead up/down: the screen is shorter that way
+        tau: 0.45           // s, how softly the lead builds and decays
+    };
+
     constructor({ width = 960, height = 540, zoom = 2, deadzone = 36, lerp = 6 } = {}) {
         this.x = 0; this.y = 0;             // top-left of the view, in world units
         this.width = width; this.height = height;
@@ -32,16 +40,33 @@ export class Camera {
         return this;
     }
 
-    follow(tx, ty, dt) {
+    /**
+     * Dead-zone follow with a lead: the view drifts ahead of a moving hero so
+     * he is not pinned to the centre staring at where he has been. `vx, vy`
+     * are his velocity in world units per second.
+     *
+     * The lead itself eases in and out (`LEAD.tau`), otherwise the frame
+     * jumps sideways the moment a key goes down.
+     */
+    follow(tx, ty, dt, vx = 0, vy = 0) {
+        const L = Camera.LEAD;
+        const speed = Math.hypot(vx, vy);
+        const want = Math.min(L.max, speed * L.perSpeed) * this.motionScale;
+        const wantX = speed > 1 ? (vx / speed) * want : 0;
+        const wantY = speed > 1 ? (vy / speed) * want * L.vertical : 0;
+        const k = 1 - Math.exp(-dt / L.tau);
+        this.leadX = (this.leadX || 0) + (wantX - (this.leadX || 0)) * k;
+        this.leadY = (this.leadY || 0) + (wantY - (this.leadY || 0)) * k;
+
         const cx = this.x + this.viewW / 2;
         const cy = this.y + this.viewH / 2;
-        const dx = tx - cx, dy = ty - cy;
+        const dx = tx + this.leadX - cx, dy = ty + this.leadY - cy;
         const dist = Math.hypot(dx, dy);
         if (dist > this.deadzone) {
             const pull = (dist - this.deadzone) / dist;
-            const k = Math.min(1, this.lerp * dt);
-            this.x += dx * pull * k;
-            this.y += dy * pull * k;
+            const k2 = Math.min(1, this.lerp * dt);
+            this.x += dx * pull * k2;
+            this.y += dy * pull * k2;
         }
         this.clamp();
         return this;

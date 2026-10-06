@@ -92,9 +92,13 @@ export const LIGHT = {
         caveEye: { r: 130, i: 0.8, warmth: 0.3, flicker: 0, torchDim: 0.4 }
     },
     /** Warm halo pass. */
-    halo: { alpha: 0.3, scale: 0.58, warm: [255, 150, 72], cool: [196, 216, 255] },
+    halo: { alpha: 0.44, scale: 0.62, warm: [255, 142, 56], cool: [196, 216, 255] },
     /** The hot core right over the embers: small, bright, always warm. */
-    core: { alpha: 0.26, scale: 0.2 },
+    core: { alpha: 0.34, scale: 0.22 },
+    /** A hole in the darkness is never a hole in the night: keep this much
+     *  of the ambient inside the lit pool so it reads as firelight on dark
+     *  ground, not as a patch of daylight. */
+    cutoutMax: 0.86,
     /** Flicker: two detuned sines, never a random jitter (that reads as noise). */
     flicker: { depth: 0.06, depth2: 0.05, speed: 9, speed2: 15.7, intensity: 0.07 }
 };
@@ -291,7 +295,8 @@ export class LightMap {
             for (const L of this.lights) {
                 const fl = this._flick(L, time);
                 const rad = Math.max(4, L.radius * fl);
-                c.globalAlpha = Math.min(1, L.intensity * (1 - LIGHT.flicker.intensity * (1 - fl) * 8));
+                c.globalAlpha = Math.min(LIGHT.cutoutMax,
+                    L.intensity * (1 - LIGHT.flicker.intensity * (1 - fl) * 8));
                 c.drawImage(CUTOUT, L.x - rad, L.y - rad, rad * 2, rad * 2);
             }
         }
@@ -311,14 +316,14 @@ export class LightMap {
             const sprite = L.warmth > 0.5 ? HALO_WARM : HALO_COOL;
             if (!sprite) break;
             const rad = L.radius * LIGHT.halo.scale * this._flick(L, time, 1.3);
-            target.globalAlpha = Math.min(0.85, LIGHT.halo.alpha * L.intensity * amb.alpha * 1.3);
+            target.globalAlpha = Math.min(0.85, LIGHT.halo.alpha * L.intensity * amb.alpha * 1.45);
             target.drawImage(sprite, L.x - rad, L.y - rad, rad * 2, rad * 2);
         }
         // The hot core: a small bright disc over the embers themselves.
         for (const L of this.lights) {
             if (L.warmth <= 0.5 || !HALO_WARM) continue;
             const rad = L.radius * LIGHT.core.scale * this._flick(L, time, 2.1);
-            target.globalAlpha = Math.min(0.9, LIGHT.core.alpha * L.intensity * amb.alpha * 1.4);
+            target.globalAlpha = Math.min(0.9, LIGHT.core.alpha * L.intensity * amb.alpha * 1.55);
             target.drawImage(HALO_WARM, L.x - rad, L.y - rad, rad * 2, rad * 2);
         }
         target.globalAlpha = 1;

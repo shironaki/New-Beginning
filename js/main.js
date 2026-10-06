@@ -698,6 +698,10 @@ export class Game {
             this._thunderT = now;
             if (now < was) this.camera.shake(FX.shake.thunder, FX.shake.thunderTime);
         }
+        // Underground atmosphere: dust in the torchlight and water off the
+        // roof. Both are spawned around the hero, so the cost is flat.
+        if (this.zone.def.underground) this._caveAir(dt);
+
         // Soaked clothes drip while they dry, and a little harder on the move.
         if (this.player.wet > 0) {
             this.player.wet = Math.max(0, this.player.wet - dt);
@@ -710,7 +714,7 @@ export class Game {
         this.particles.update(dt);
         this.tracks.update(dt);
         this.camera.update(dt);
-        this.camera.follow(this.player.x, this.player.y - 8, dt);
+        this.camera.follow(this.player.x, this.player.y - 8, dt, this.player.vx, this.player.vy);
         this.input.consume();
 
         this.hud.update({
@@ -722,6 +726,44 @@ export class Game {
             zoneName: this.zone.def.name,
             ambient: this.ambient
         });
+    }
+
+    /**
+     * Air in a gallery: slow motes and the occasional drop off the roof.
+     * The pending drops live in a fixed array that is reused, so a frame
+     * allocates nothing.
+     */
+    _caveAir(dt) {
+        const M = FX.motes, D = FX.ceilingDrip;
+        this._moteAt = (this._moteAt || 0) - dt;
+        if (this._moteAt <= 0) {
+            this._moteAt = 1 / M.rate;
+            this.particles.mote(this.player.x + (Math.random() - 0.5) * M.spread,
+                                this.player.y + (Math.random() - 0.5) * M.spread * 0.7);
+        }
+        this._dropAt = (this._dropAt || 0) - dt;
+        if (this._dropAt <= 0) {
+            this._dropAt = 1 / D.rate;
+            // Pick a floor tile near the hero: a drop needs somewhere to land.
+            const x = this.player.x + (Math.random() - 0.5) * D.spread;
+            const y = this.player.y + (Math.random() - 0.5) * D.spread * 0.7;
+            if (!this.zone.isBlockedTile(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE))) {
+                this.particles.ceilingDrop(x, y - 26);
+                this._pendingDrops = this._pendingDrops || [];
+                this._pendingDrops.push({ x, y, t: D.life });
+            }
+        }
+        const pend = this._pendingDrops;
+        if (pend) {
+            for (let i = pend.length - 1; i >= 0; i--) {
+                pend[i].t -= dt;
+                if (pend[i].t > 0) continue;
+                this.particles.dropRing(pend[i].x, pend[i].y);
+                pend[i] = pend[pend.length - 1];
+                pend.pop();
+            }
+        }
+        return this;
     }
 
     render() {

@@ -373,15 +373,21 @@ export class Renderer {
         for (const obj of zone.objects) {
             if (obj.removed) continue;
             if (!cam.isVisible(obj.x, obj.y, 70)) continue;
-            drawables.push({ y: obj.y, kind: "prop", obj });
+            drawables.push({ y: obj.y, x: obj.x, ord: drawables.length, kind: "prop", obj });
         }
         for (const ent of (state.entities || [])) {
             if (!cam.isVisible(ent.x, ent.y, 70)) continue;
-            drawables.push({ y: ent.y, kind: "entity", obj: ent });
+            drawables.push({ y: ent.y, x: ent.x, ord: drawables.length, kind: "entity", obj: ent });
         }
-        if (!player.sleeping) drawables.push({ y: player.y, kind: "player", obj: player });
+        if (!player.sleeping) {
+            drawables.push({ y: player.y, x: player.x, ord: drawables.length, kind: "player", obj: player });
+        }
 
-        drawables.sort((a, b) => a.y - b.y);
+        // Painter's order. The key is the foot line, not the centre, and ties
+        // are broken by x and then by identity: two props on the same row used
+        // to swap places between frames (sort is only stable for equal keys of
+        // the same shape) and the overlap flickered.
+        drawables.sort((a, b) => (a.y - b.y) || (a.x - b.x) || (a.ord - b.ord));
         this.stats.propsDrawn = drawables.length;
 
         for (const d of drawables) {
