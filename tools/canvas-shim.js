@@ -112,6 +112,7 @@ class State {
             this.filter = "none";
             this.lineCap = "butt";
             this.lineDashOffset = 0;
+            this.clipMask = null;
         }
     }
     clone() { return new State(this); }
@@ -274,13 +275,56 @@ export class ShimContext {
         const ya = Math.max(0, Math.floor(Math.min(y0, y1))), yb = Math.min(ch, Math.ceil(Math.max(y0, y1)));
         for (let py = ya; py < yb; py++) {
             for (let px = xa; px < xb; px++) {
+                if (!this._insideClip(px, py)) continue;
                 const i = (py * cw + px) * 4;
                 d[i] = d[i + 1] = d[i + 2] = d[i + 3] = 0;
             }
         }
     }
 
-    clip() { /* not needed by the renderer */ }
+    clip() {
+        // Paths are already in device coordinates. Keep an immutable, bounded
+        // mask in the saved state; nested clips intersect rather than replace it.
+        const points = this.path.flat();
+        const x = Math.max(0, Math.floor(Math.min(...points.map((p) => p[0]))));
+        const y = Math.max(0, Math.floor(Math.min(...points.map((p) => p[1]))));
+        const right = Math.min(this.canvas.width, Math.ceil(Math.max(...points.map((p) => p[0]))));
+        const bottom = Math.min(this.canvas.height, Math.ceil(Math.max(...points.map((p) => p[1]))));
+        const w = Math.max(0, right - x), h = Math.max(0, bottom - y);
+        if (!points.length || !w || !h) {
+            this.s.clipMask = { x: 0, y: 0, w: 0, h: 0, data: new Uint8Array(0) };
+            return;
+        }
+        const data = new Uint8Array(w * h);
+        for (let row = 0; row < h; row++) {
+            const sy = y + row + 0.5, hits = [];
+            for (const poly of this.path) for (let i = 0; i < poly.length; i++) {
+                const a = poly[i], b = poly[(i + 1) % poly.length];
+                if ((a[1] <= sy && b[1] > sy) || (b[1] <= sy && a[1] > sy)) {
+                    hits.push({ x: a[0] + (sy - a[1]) / (b[1] - a[1]) * (b[0] - a[0]),
+                        wind: b[1] > a[1] ? 1 : -1 });
+                }
+            }
+            hits.sort((a, b) => a.x - b.x);
+            let wind = 0;
+            for (let i = 0; i + 1 < hits.length; i++) {
+                wind += hits[i].wind;
+                if (!wind) continue;
+                const from = Math.max(x, Math.ceil(hits[i].x - 0.5));
+                const to = Math.min(right - 1, Math.floor(hits[i + 1].x - 0.5));
+                for (let col = from; col <= to; col++) {
+                    if (this._insideClip(col, y + row)) data[row * w + col - x] = 1;
+                }
+            }
+        }
+        this.s.clipMask = { x, y, w, h, data };
+    }
+
+    _insideClip(x, y) {
+        const c = this.s.clipMask;
+        return !c || (x >= c.x && y >= c.y && x < c.x + c.w && y < c.y + c.h
+            && c.data[(y - c.y) * c.w + x - c.x] !== 0);
+    }
 
     /* --- text (approximated) --- */
     measureText(str) { return { width: String(str).length * (this._fontSize() * 0.55) }; }
@@ -354,7 +398,16 @@ export class ShimContext {
         }
         return { data: out, width: w, height: h };
     }
-    putImageData() {}
+    createImageData(w, h) { return { data: new Uint8ClampedArray(w * h * 4), width: w, height: h }; }
+    putImageData(image, x, y) {
+        // Like Canvas: raw pixels ignore transform, alpha and clip.
+        for (let j = 0; j < image.height; j++) for (let i = 0; i < image.width; i++) {
+            const px = x + i, py = y + j;
+            if (px < 0 || py < 0 || px >= this.canvas.width || py >= this.canvas.height) continue;
+            const si = (j * image.width + i) * 4, di = (py * this.canvas.width + px) * 4;
+            this.canvas.data.set(image.data.subarray(si, si + 4), di);
+        }
+    }
 
     createRadialGradient(x0, y0, r0, x1, y1, r1) {
         const p0 = this._pt(x0, y0), p1 = this._pt(x1, y1), k = this._scaleFactor();
@@ -429,6 +482,7 @@ export class ShimContext {
     }
 
     _blendPixel(px, py, r, g, b, a, mode) {
+        if (!this._insideClip(px, py)) return;
         const cw = this.canvas.width;
         const d = this.canvas.data;
         const i = (py * cw + px) * 4;

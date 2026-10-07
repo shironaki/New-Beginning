@@ -284,6 +284,7 @@ export function fireRows(fire, inventory, actions) {
     const rows = [];
     rows.push({ html: `<b>${fire.lit ? "🔥 Костёр горит" : "🪵 Кострище"}</b><br>
         <small>${fire.status()}</small>` });
+    if (fire.exposure) rows.push({ html: `<small>${fire.exposure.label} · сырость ${Math.round(fire.damp * 100)}%<br>Тепло ${Math.round(fire.intensity * 100)}% · расход ×${fire.exposure.burn.toFixed(2)}</small>` });
 
     // What is physically in the pit, newest on top, with how much is left.
     if (fire.stack && fire.stack.length) {

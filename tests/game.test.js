@@ -214,6 +214,7 @@ test("a tree refuses bare hands and yields to an axe", () => {
 
 test("the campfire panel opens, takes fuel, lights and cooks", () => {
     const g = boot();
+    g.weather.current = "clear";
     const fireObj = g.zone.objects.find((o) => o.kind === "campfire");
     assert.ok(fireObj);
     g.inventory.add("firewood", 5);

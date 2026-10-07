@@ -19,10 +19,14 @@
  *   --hour <0..24>     clock, fractional hours allowed        (default 12)
  *   --day <n>          day number — picks the season          (default 1)
  *   --weather <key>    clear|wind|cloudy|rain|storm|fog|snow  (default clear)
+ *   --wet <0..1>      ground moisture (default 0; does not imply instant rain)
  *   --zoom <n>         camera zoom                            (default 2.6)
  *   --size WxH         canvas size                            (default 960x560)
  *   --frames <n>       frames to simulate before the shot     (default 8)
  *   --walk <dx,dy>     hold this input while simulating (prints, splashes)
+ *   --dir <direction>  face down|up|left|right for attachment review
+ *   --fallen           freeze a fallen pose after simulation
+ *   --light-fire       light the closest campfire with a log
  *   --torch            put a lit torch in the hero's hand
  *   --hud              keep the interaction prompt visible
  *   --out <path>       output file (default .artifacts/scene.png)
@@ -70,7 +74,9 @@ const hudRoot = globalThis.document.getElementById("hud");
 globalThis.document.getElementById = (id) => (id === "game" ? screen : hudRoot);
 
 const { Game } = await import("../js/main.js");
-const game = new Game({ canvas: screen, hudRoot, seed: String(flag("seed", "ashes-and-grain")) });
+const seedArg = flag("seed", "ashes-and-grain");
+const seed = /^\d+$/.test(String(seedArg)) ? Number(seedArg) : String(seedArg);
+const game = new Game({ canvas: screen, hudRoot, seed });
 game.hud.hideStory();
 game.paused = false;
 
@@ -141,13 +147,23 @@ if (at && at !== true) {
 }
 
 game.clock.day = num("day", game.clock.day);
-game.clock.minute = Math.max(0, Math.min(24, num("hour", 12))) * 60;
+game.clock.minute = Math.min(1439, Math.round(Math.max(0, Math.min(24, num("hour", 12))) * 60));
 const weather = flag("weather", null);
 if (weather && weather !== true) game.weather.current = String(weather);
+game.weather.groundWet = Math.max(0, Math.min(1, num("wet", 0)));
 
 if (flag("torch", false)) {
     game.inventory.add("torch", 1);
     game.inventory.setActive(game.inventory.list().findIndex((s) => s.id === "torch"));
+}
+if (flag("light-fire", false)) {
+    const fires = game.zone.objects.filter((o) => o.kind === "campfire" && !o.removed);
+    fires.sort((a, b) => Math.hypot(a.x - game.player.x, a.y - game.player.y) - Math.hypot(b.x - game.player.x, b.y - game.player.y));
+    if (fires[0]) {
+        const f = game.fires.get(game.fireKey(game.zone, fires[0]));
+        f.addFuel("log"); f.setExposure(game.fireEnvironment(game.zone, fires[0]));
+        for (let i = 0; i < 6 && !f.lit; i++) f.light();
+    }
 }
 if (!flag("hud", false)) game.findInteractable = () => null;
 
@@ -161,8 +177,13 @@ if (walk && walk !== true) {
 const frames = num("frames", 8);
 for (let i = 0; i < frames; i++) { game.update(1 / 60); game.render(); }
 
+const dir = flag("dir", null);
+if (["down", "up", "left", "right"].includes(dir)) game.player.dir = dir;
+if (flag("fallen", false)) game.player.fallTimer = 1;
 game.camera.zoom = num("zoom", 2.6);
 game.camera.snapTo(game.player.x, game.player.y - 8);
+// Pin visual time without replaying hundreds of software-rendered frames.
+if (flag("pose-time", null) !== null) game.renderer.time = num("pose-time", 0) - 1 / 60;
 game.render();
 
 fs.writeFileSync(OUT, encodePNG(screen));

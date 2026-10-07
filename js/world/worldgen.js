@@ -9,6 +9,8 @@
  */
 import { RNG, mixSeeds, hashSeed, fbm2D, valueNoise2D } from "../core/rng.js";
 import { T, TILE_SIZE, tileInfo } from "./tiles.js";
+import { edgeScenery } from "./edges.js";
+import { TerrainField } from "./terrain.js";
 import { TileMap } from "./tilemap.js";
 import { ZONES, BIOMES, biomeDef, zoneDef } from "./regions.js";
 import { propDef } from "../sandbox/gather.js";
@@ -289,7 +291,7 @@ export function generateZone(zoneId, worldSeed = 1) {
             }
             if (hgt < biome.water * 0.55) tile = T.DEEP;
             else if (hgt < biome.water) tile = T.WATER;
-            else if (hgt > 0.80 && biome.rocks > 0.1) tile = T.CLIFF;
+            else if (hgt > (def.biome === "highland" || def.biome === "pass" ? 0.69 : 0.80) && biome.rocks > 0.1) tile = T.CLIFF;
             else if (hgt > 0.72 && biome.rocks > 0.1) tile = T.STONE;
             else if (wet < 0.36) tile = ground[0];
             else if (wet > 0.64) tile = ground[2];
@@ -311,6 +313,23 @@ export function generateZone(zoneId, worldSeed = 1) {
     makePortals(zone);
     scatterProps(zone, rng, biome);
     placeStoryProps(zone, rng);
+    restoreCoast(zone);
+    // Final topology first; otherwise the border overwrites the shallow rim.
+    // Do this after scattering so existing land loot is not rerolled.
+    if (def.biome === "shore") {
+        deepenWater(zone, seed);
+        // Smoothing must not turn the first wet cell next to land into a
+        // deep hole, particularly at narrow spits and the outer border.
+        for (let y = 0; y < map.h; y++) for (let x = 0; x < map.w; x++) {
+            if (map.get(x, y) !== T.DEEP) continue;
+            if ([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) =>
+                map.inBounds(x + dx, y + dy) && !tileInfo(map.get(x + dx, y + dy)).liquid)) {
+                map.data[y * map.w + x] = T.WATER;
+            }
+        }
+    }
+    zone.terrain = map.terrain = new TerrainField(map, seed, def.biome);
+    zone.edgeScenery = edgeScenery(zone, seed);
     pickSpawn(zone, rng);
 
     map.markAllDirty();
@@ -473,6 +492,13 @@ function carveMainPath(zone, rng) {
                     const px = x + ox, py = y + oy;
                     if (!map.inBounds(px, py)) continue;
                     const cur = map.get(px, py);
+                    // Restore AFTER prop generation: old islands/loot keep
+                    // their original seeded rolls, not a different RNG stream.
+                    if (def.biome === "shore") {
+                        zone._shoreOriginal ||= new Map();
+                        const index = py * def.w + px;
+                        if (!zone._shoreOriginal.has(index)) zone._shoreOriginal.set(index, cur);
+                    }
                     if (cur === T.DEEP || cur === T.WATER) { map.data[py * def.w + px] = T.PLANK; continue; } // a plank crossing
                     if (cur === T.CLIFF) { map.data[py * def.w + px] = T.GRAVEL; continue; }
                     if (Math.abs(ox) + Math.abs(oy) <= 1) map.data[py * def.w + px] = pathTile;
@@ -480,6 +506,36 @@ function carveMainPath(zone, rng) {
             }
         }
     }
+}
+
+/** Undo the old synthetic causeway without rerolling any island's loot. */
+function restoreCoast(zone) {
+    if (!zone._shoreOriginal) return;
+    const { map } = zone;
+    for (const [i, id] of zone._shoreOriginal) {
+        const tx = i % map.w, ty = Math.floor(i / map.w);
+        // The authored doorway is kept; the route across the sea is not.
+        if (tx < BORDER + 1 || ty < BORDER + 1 || tx >= map.w - BORDER - 1 || ty >= map.h - BORDER - 1) continue;
+        map.data[i] = id;
+    }
+    // Anything generated on the old causeway is washed onto the nearest
+    // real bank. Do not discard loot just because its support disappeared.
+    for (const o of zone.objects) {
+        if (!tileInfo(map.get(o.tx, o.ty)).liquid || o.kind === "reed") continue;
+        let best = null, distance = Infinity;
+        for (let ty = BORDER + 1; ty < map.h - BORDER - 1; ty++) for (let tx = BORDER + 1; tx < map.w - BORDER - 1; tx++) {
+            const d = (tx - o.tx) ** 2 + (ty - o.ty) ** 2;
+            if (d >= distance || !zone.isFree(tx, ty)) continue;
+            best = { tx, ty }; distance = d;
+        }
+        if (!best) continue;
+        const radius = o.block;
+        zone.removeSolid(o);
+        o.x += (best.tx - o.tx) * TILE_SIZE; o.y += (best.ty - o.ty) * TILE_SIZE;
+        o.tx = best.tx; o.ty = best.ty;
+        if (radius > 0) zone.addSolid(o, radius);
+    }
+    delete zone._shoreOriginal;
 }
 
 /**
@@ -629,8 +685,8 @@ function scatterProps(zone, rng, biome) {
                 const ore = (oreCountry && rng.chance(0.42))
                     ? rng.weighted([["copper", 5], ["iron", 3], ["coal", 4], ["gem", 1]])
                     : null;
-                addProp(zone, ore ? "ore_rock" : "rock", x, y, {
-                    variant: rng.int(0, 2), ore, hp: ore ? 5 : 3, yields: ore || "stone"
+                addProp(zone, def.biome === "shore" ? "beach_pebbles" : ore ? "ore_rock" : "rock", x, y, {
+                    variant: rng.int(0, 2), ore, hp: def.biome === "shore" ? 1 : ore ? 5 : 3, yields: ore || "stone"
                 });
                 continue;
             }

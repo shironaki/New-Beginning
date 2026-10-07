@@ -167,6 +167,11 @@ export function noteMarkdown(note, shotName) {
           + `— тайлы ${Math.floor(note.x / 32)},${Math.floor(note.y / 32)}`
           + ` … ${Math.floor((note.x + note.w) / 32)},${Math.floor((note.y + note.h) / 32)}\n`
         : `- **точка:** x ${note.x}, y ${note.y} (тайл ${Math.floor(note.x / 32)},${Math.floor(note.y / 32)})\n`;
+    const [hh, mm] = String(note.time || "12:00").split(":").map(Number);
+    const hour = Number.isFinite(hh + mm) ? hh + mm / 60 : 12;
+    const day = Number.isFinite(note.day) ? Math.max(1, Math.floor(note.day)) : 1;
+    const wet = Number.isFinite(note.groundWet) ? Math.max(0, Math.min(1, note.groundWet)) : 0;
+    const seed = Number.isFinite(note.seed) ? ` --seed ${note.seed}` : "";
     return `# ${note.text}\n\n`
         + `- **зона:** ${note.zoneName || note.zone} (\`${note.zone}\`)\n`
         + where
@@ -174,7 +179,7 @@ export function noteMarkdown(note, shotName) {
         + `- **погода:** ${note.weather}\n`
         + `- **зум:** ${note.zoom}\n`
         + `- **повторить:** \`node tools/scene.js --zone ${note.zone} --at ${cx},${cy} `
-        + `--hour ${(note.time || "12:00").split(":")[0]} --weather ${note.weather} --zoom ${note.zoom}\`\n`
+        + `--day ${day} --hour ${hour} --weather ${note.weather} --wet ${wet} --zoom ${note.zoom}${seed}\`\n`
         + (shotName ? `\n![кадр](${shotName})\n` : "")
         + `\n<!-- ${note.at} -->\n`;
 }

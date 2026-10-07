@@ -15,7 +15,7 @@ import { paintProp, paintFlames, setSun } from "../js/render/tilesart.js";
 const KINDS = [
     "pine", "spruce", "oak", "birch", "willow", "ancient_oak",
     "palm", "dead_tree", "burnt_tree", "burnt_stump", "burnt_beam",
-    "rock", "ore_rock", "ruin_wall", "bush", "herb",
+    "rock", "ore_rock", "beach_pebbles", "ruin_wall", "bush", "herb",
     "firewood", "reed", "grass_tuft", "flower", "driftwood", "tent",
     "hearth_ruin", "diary", "chest_old", "campfire"
 ];

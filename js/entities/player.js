@@ -6,6 +6,7 @@
  * terrain + prop solidity, so a pine actually stops you.
  */
 import { moveAndCollide } from "../world/tilemap.js";
+import { ICE } from "../world/surface.js";
 import { TILE_SIZE } from "../world/tiles.js";
 import { GAIT, MOVE, approach } from "../render/charspec.js";
 
@@ -40,6 +41,10 @@ export class Player {
         this.running = false;
         this.actionTimer = 0;    // tool swing animation
         this.actionKind = null;
+        this.fallTimer = 0;
+        this.slipCooldown = 0;
+        this.slipDistance = 0;
+        this.slipChecks = 0;
         this.sleeping = false;
         this.name = "Странник";
     }
@@ -98,7 +103,7 @@ export class Player {
         return this;
     }
 
-    _step(dt, axis, zone, { speedFactor = 1, wantRun = false } = {}) {
+    _step(dt, axis, zone, { speedFactor = 1, wantRun = false, surfaceAt = null } = {}) {
         if (this.actionTimer > 0) this.actionTimer = Math.max(0, this.actionTimer - dt);
         if (this.sleeping) {
             this.moving = false;
@@ -108,6 +113,13 @@ export class Player {
             return this;
         }
 
+        this.slipCooldown = Math.max(0, this.slipCooldown - dt);
+        if (this.fallTimer > 0) {
+            this.fallTimer = Math.max(0, this.fallTimer - dt);
+            axis = { x: 0, y: 0 }; wantRun = false;
+        }
+        const surface = surfaceAt ? surfaceAt(this.x, this.y) : null;
+        const icy = !!surface?.ice;
         const mag = Math.hypot(axis.x, axis.y);
         this.moving = mag > 0.01;
 
@@ -120,7 +132,7 @@ export class Player {
         // Analogue magnitude scales speed; sprint overrides the top end.
         const base = canRun ? this.runSpeed : this.walkSpeed;
         const terrain = zone ? zone.map.speedAt(this.x, this.y) : 1;
-        const speed = base * Math.min(1, mag) * speedFactor * terrain;
+        const speed = base * Math.min(1, mag) * speedFactor * terrain * (surface?.slope || 1) * (icy ? ICE.speed : 1);
 
         // --- mass ---------------------------------------------------------
         // The hero accelerates towards the wanted velocity instead of
@@ -131,6 +143,9 @@ export class Player {
         const slippery = terrain < MOVE.slipBelow;
         let tau = this.moving ? MOVE.tauStart : MOVE.tauStop * (slippery ? MOVE.slipStop : 1);
         if (this.moving && (this.mvx * wantX + this.mvy * wantY) < 0) tau = MOVE.tauTurn;
+        const turningHard = this.moving && (this.mvx * wantX + this.mvy * wantY) < 0;
+        if (icy) tau = this.moving ? (turningHard ? ICE.tauTurn : ICE.tauMove) : ICE.tauStop;
+        if (this.fallTimer > 0) tau = ICE.tauFallen;
         // Exact integration of dv/dt = (want - v)/tau over the frame, both
         // for the velocity and for the ground it covers. Euler would make the
         // ramp depend on the frame rate, and 30 FPS would walk a different
@@ -193,6 +208,21 @@ export class Player {
         // matches the ground under it: no skating, no legs lagging the torso.
         const moved = Math.hypot(this.x - x0, this.y - y0);
         this.dist += moved;
+        if (icy && this.slipCooldown <= 0 && (canRun || turningHard)) {
+            this.slipDistance += moved;
+            if (this.slipDistance >= ICE.checkDistance) {
+                this.slipDistance -= ICE.checkDistance;
+                // Deterministic chance per distance, not per render frame.
+                this.slipChecks++;
+                const roll = ((Math.imul(this.slipChecks, 1103515245) + 12345) >>> 0) / 4294967296;
+                if (roll < (turningHard ? ICE.chanceTurn : ICE.chanceRun)) {
+                    this.fallTimer = ICE.fallTime; this.slipCooldown = ICE.cooldown;
+                    this.stamina = Math.max(0, this.stamina - ICE.staminaCost);
+                    this.actionTimer = 0; this.running = false;
+                    if (this.bus) this.bus.emit("player:slipped", {});
+                }
+            }
+        } else if (!icy) this.slipDistance = 0;
         this.advance(dt, moved, canRun);
 
         this.vx = (this.x - x0) / dt; this.vy = (this.y - y0) / dt;
@@ -252,6 +282,14 @@ export class Player {
         return 0.75;
     }
 
-    toJSON() { return { x: this.x, y: this.y, dir: this.dir, stamina: this.stamina, name: this.name }; }
-    load(d) { if (d) Object.assign(this, d); return this; }
+    toJSON() { return { x: this.x, y: this.y, dir: this.dir, stamina: this.stamina, name: this.name,
+        slipDistance: this.slipDistance, slipChecks: this.slipChecks, slipCooldown: this.slipCooldown, fallTimer: this.fallTimer }; }
+    load(d) {
+        if (d) Object.assign(this, d);
+        for (const [key, max] of [["fallTimer", ICE.fallTime], ["slipCooldown", ICE.cooldown], ["slipDistance", ICE.checkDistance], ["slipChecks", 4294967295]]) {
+            this[key] = Number.isFinite(this[key]) ? Math.max(0, Math.min(max, this[key])) : 0;
+        }
+        this.slipChecks = Math.floor(this.slipChecks);
+        return this;
+    }
 }

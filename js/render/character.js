@@ -17,20 +17,24 @@
  *
  * Body frame: origin between the feet, on the ground; up is negative Y.
  */
+import { drawHead } from "./head.js";
+import { torchFlame, paintTorchFlame } from "./torch.js";
 import { SUN, castShadow } from "./tilesart.js";
-import { BODY, GEAR, TONE, PALETTE, READ, SHADOW, WADE, GAIT, ACTION, clamp01, easeInOutSine, q } from "./charspec.js";
+import { BODY, GEAR, TONE, PALETTE, READ, SHADOW, WADE, GAIT, ACTION, ATTACH, clamp01, easeInOutSine, q } from "./charspec.js";
 
 export const DEFAULT_LOOK = {
-    skin: "#e2b48a",
+    skin: "#d3ae86",
     hair: "#4a3526",
-    shirt: "#6d7f4a",
-    pants: "#524636",
-    accent: "#8a4b32",       // one accent per figure — sash, flap, trim
+    shirt: "#65786f",
+    pants: "#4e4337",
+    accent: "#996847",       // one accent per figure — sash, flap, trim
     cloak: null,
     hairStyle: "short",
-    shoulders: true,         // gear as silhouette
-    bracers: true,
-    bootCuff: true,
+    stubble: true,
+    satchel: true,
+    shoulders: false,         // gear as silhouette
+    bracers: false,
+    bootCuff: false,
     beltFlap: true
 };
 
@@ -209,12 +213,62 @@ export function posture(p) {
         lean, squash, stance, swing };
 }
 
+/** Anatomical RIGHT hand: screen-left head-on, screen-right from behind;
+ * near in right profile, far in left profile. Never swaps hands for visibility. */
+export function armRig(p, pose = posture(p)) {
+    const { sideView, side, back, bob, counter, lean, swingN, swingF, swing, g, idle } = pose;
+    const make = (x, reach, lift) => {
+        const sx = x + counter + lean, sy = BODY.armY - bob;
+        const ex = sx + reach, ey = sy + BODY.armLen - Math.abs(reach) * 0.25 - lift;
+        return { sx, sy, ex, ey, mx: (sx + ex) / 2 + reach * 0.1, my: (sy + ey) / 2 };
+    };
+    const ax = BODY.shoulderW / 2 + BODY.armW / 2 - 1;
+    const behind = p.dir === "left" || back;
+    const rest = Math.sin(idle * 1.3) * 0.45 * (1 - g);
+    const right = sideView
+        ? make(behind ? -BODY.farArmX * side : BODY.nearArmX * side,
+            -(behind ? swingF : swingN) * GAIT.armRatioTool + side * swing * 2.2 + rest,
+            Math.max(0, swing) * 1.5)
+        : make(back ? ax : -ax, rest, (back ? 1 : -1) * swingN * GAIT.armRatioTool - swing * 2.2);
+    const left = sideView
+        ? make(behind ? BODY.nearArmX * side : -BODY.farArmX * side,
+            -(behind ? swingN : swingF) * GAIT.armRatio - rest, 0)
+        : make(back ? -ax : ax, -rest, (back ? -1 : 1) * swingN * GAIT.armRatio);
+    return { right, left, behind };
+}
+
+function heldToolAngle(dir, side, swing) {
+    const lean = dir === "up" ? 0.35 : dir === "down" ? -0.4 : side * 0.45;
+    return lean - side * swing * 1.9;
+}
+
+/** Shared attachment for sprite and light map, relative to the foot line. */
+export function toolAttachment(p) {
+    const pose = posture(p), rig = armRig(p, pose);
+    const dir = p.dir || "down";
+    const angle = heldToolAngle(dir, pose.side, pose.swing);
+    const gx = rig.right.ex, gy = rig.right.ey + BODY.handH / 2 - 0.5;
+    const narrow = pose.sideView ? 1 - GAIT.slantNarrow * Math.abs(p.slant || 0) : 1;
+    const flame = torchFlame(p.idleTime || 0, p.torchWind || 0, p.gait || 0);
+    const localX = flame.x * (dir === "left" ? -1 : 1);
+    let x = (gx + localX * Math.cos(angle) - flame.y * Math.sin(angle)) * narrow;
+    let y = gy + localX * Math.sin(angle) + flame.y * Math.cos(angle);
+    if (p.fallTimer > 0) {
+        const a = ATTACH.fallAngle, xx = x;
+        x = xx * Math.cos(a) - y * Math.sin(a);
+        y = xx * Math.sin(a) + y * Math.cos(a) + ATTACH.fallY;
+    }
+    return { x, y, intensity: flame.intensity, gripX: gx, gripY: gy, angle, behind: rig.behind };
+}
+
 /**
  * @param {CanvasRenderingContext2D} ctx translated to the character's feet
  * @param {object} p { dir, phase|anim, gait|moving, runBlend, look,
  *                     actionTimer, tool, idleTime }
  */
 export function drawCharacter(ctx, p) {
+    ctx.save();
+    if (p.fallTimer > 0) { ctx.translate(0, ATTACH.fallY); ctx.rotate(ATTACH.fallAngle); }
     // A diagonal is drawn as the side view, turned: the body narrows a little
     // and the head leads the travel direction. Cheap, and it stops diagonal
     // movement from looking like the hero is sliding on rails.
@@ -283,7 +337,9 @@ export function drawCharacter(ctx, p) {
         const toe = sideView ? side * BODY.bootToe : 0;
         const bw = sideView ? BODY.bootW : BODY.bootW * 0.74;
         const bx = ax - bw / 2 + toe, by = ay - 0.4;
-        rect(ctx, bx, by, bw, BODY.bootH, far ? PALETTE.bootFar : PALETTE.boot, "all");
+        poly(ctx, [[bx + 0.7, by], [bx + bw - 0.8, by], [bx + bw, by + 1],
+            [bx + bw - 0.3, by + BODY.bootH], [bx + 0.2, by + BODY.bootH], [bx, by + 1]],
+            far ? PALETTE.bootFar : PALETTE.boot);
         rect(ctx, bx, by + BODY.bootH - 0.9, bw, 0.9, far ? PALETTE.soleFar : PALETTE.sole, false);
         // A lit edge on top of the boot and a dark line where it meets the
         // ground: without them the leg and the boot are one brown column.
@@ -300,12 +356,6 @@ export function drawCharacter(ctx, p) {
     };
 
     /* ---- arms: kinematics first, the tool needs the hand --------------- */
-    const armPose = (shoulderX, reach, lift) => {
-        const sx = shoulderX + counter, sy = BODY.armY - bob + lean;
-        const ex = sx + reach, ey = sy + BODY.armLen - Math.abs(reach) * 0.25 - lift;
-        return { sx, sy, ex, ey, mx: (sx + ex) / 2 + reach * 0.1, my: (sy + ey) / 2 };
-    };
-
     const paintHand = (a, far) => {
         // The cuff line: a hand that butts straight onto a sleeve of the same
         // value disappears at this size.
@@ -321,8 +371,8 @@ export function drawCharacter(ctx, p) {
     const paintArm = (a, far, hand = true) => {
         const sleeve = far ? shadeHex(shirt, PALETTE.shirtFar) : band(shirt, "deep");
         const skinC = far ? shadeHex(skin, PALETTE.skinDeep) : skin;
-        limb(ctx, a.sx, a.sy, a.mx, a.my, BODY.armW * BODY.sleeveW, BODY.armW, sleeve, "all");
-        limb(ctx, a.mx, a.my, a.ex, a.ey, BODY.armW, BODY.armW * 0.85, skinC, "all");
+        limb(ctx, a.sx, a.sy, a.mx, a.my, BODY.armW * BODY.sleeveW, BODY.armW, sleeve, true);
+        limb(ctx, a.mx, a.my, a.ex, a.ey, BODY.armW, BODY.armW * 0.85, skinC, true);
         if (look.bracers) {                                   // gear: bracer
             const bw = BODY.armW * GEAR.bracerW;
             rect(ctx, a.ex - bw / 2 + (a.mx - a.ex) * 0.1, a.ey - 0.6 - GEAR.bracerH, bw, GEAR.bracerH,
@@ -331,21 +381,12 @@ export function drawCharacter(ctx, p) {
         if (hand) paintHand(a, far);
     };
 
-    // Arms counter-swing the legs: the far arm goes with the NEAR leg. Head-on
-    // the tool is in the right hand, from behind it is on the left, so the free
-    // arm swaps sides too — otherwise the hero loses an arm.
-    const ax0 = BODY.shoulderW / 2 + BODY.armW / 2 - 1.0;      // outside, slight overlap
-    const farArm = sideView
-        ? armPose(-BODY.farArmX * side, -swingF * GAIT.armRatio, 0)
-        : armPose(back ? ax0 : -ax0, 0, (back ? 1 : -1) * swingN * GAIT.armRatio);
-    const toolArm = sideView
-        ? armPose(BODY.nearArmX * side,
-            -swingN * GAIT.armRatioTool + side * swing * 2.2, Math.max(0, swing) * 1.5)
-        : armPose(back ? -ax0 : ax0, 0,
-            (back ? -1 : 1) * swingN * GAIT.armRatioTool - swing * 2.2);
-
-    if (sideView) paintArm(farArm, true);
-    if (p.tool && back) { drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, true); paintHand(toolArm, false); }
+    const rig = armRig(p);
+    const toolArm = rig.right, farArm = rig.left;
+    if (rig.behind) {
+        paintArm(toolArm, true, !p.tool);
+        if (p.tool) { drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, true, p); paintHand(toolArm, true); }
+    } else paintArm(farArm, true);
 
     if (sideView) {
         drawLeg(-0.9 * side, swingF - stance, liftF, true, side);
@@ -371,7 +412,8 @@ export function drawCharacter(ctx, p) {
     const waistY = top + BODY.torsoH * BODY.waistAt;
     const narrow = sideView ? BODY.shoulderWSide / BODY.shoulderW : 1;
     const rows = [
-        [top, BODY.shoulderW / 2 * narrow],
+        [top, BODY.shoulderW * 0.36 * narrow],
+        [top + 1.5, BODY.shoulderW / 2 * narrow],
         [waistY, BODY.waistW / 2 * narrow],
         [bottom, BODY.hipW / 2 * narrow]
     ];
@@ -387,6 +429,21 @@ export function drawCharacter(ctx, p) {
         rect(ctx, -2, top, 4, 1.5, band(shirt, "dark"), false);                        // collar
     }
 
+    if (!back) {
+        poly(ctx, [[-3, top], [3, top + 0.5], [1, top + 3], [-1.5, top + 2.5]], look.accent, false);
+        poly(ctx, [[1, top + 2], [3, top + 2], [2.5 + Math.sin(idle * 1.7) * 0.7, top + 6], [0.5, top + 5]],
+            shadeHex(look.accent, -16), false);
+    }
+    if (look.satchel) {
+        // Cloth strap and a rounded pouch, not metal blocks on every joint.
+        const sign = back ? -1 : 1;
+        ctx.strokeStyle = "#46392a"; ctx.lineWidth = 1.9;
+        ctx.beginPath(); ctx.moveTo(-3.5 * sign, top + 0.6); ctx.lineTo(3.1 * sign, bottom - 1); ctx.stroke();
+        ctx.strokeStyle = "#99805a"; ctx.lineWidth = 0.7; ctx.stroke();
+        poly(ctx, [[2 * sign, bottom - 3], [5.6 * sign, bottom - 2.4], [6 * sign, bottom + 1.5],
+            [4.8 * sign, bottom + 2.7], [2.1 * sign, bottom + 2.1]], PALETTE.leather, false);
+        rect(ctx, 2.6 * sign, bottom - 1.7, 2.2, 0.6, "#a88c5c", false);
+    }
     // Belt, buckle and the accent flap that trails the pelvis.
     const beltY = bottom - 2.2;
     rect(ctx, -rows[2][1] - 0.2, beltY, rows[2][1] * 2 + 0.4, 2.2, PALETTE.belt);
@@ -423,67 +480,24 @@ export function drawCharacter(ctx, p) {
     };
 
     /* ---- near arm ------------------------------------------------------- */
-    if (!sideView) paintArm(farArm, false);
-    paintArm(toolArm, false, !p.tool);        // with a tool the hand comes later
     paintPauldrons();
 
-    /* ---- head ----------------------------------------------------------- */
-    let headY = BODY.headY - bob;
-    const headH = BODY.headH, headW = BODY.headW;
-    const headX = (sideView ? side * 0.5 : 0) + counter * 0.5;
-    if (turning) headY += GAIT.slantHead * slant;      // look where you are going
-    rect(ctx, -2.2, headY + headH - 0.5, 4.4, 1.6, PALETTE.ao, false);          // neck
-    rect(ctx, headX - headW / 2, headY, headW, headH, skin);
-    rect(ctx, headX + headW / 2 - 1.8, headY + 1, 1.8, headH - 1, shadeHex(skin, PALETTE.skinShade), false);
-    rect(ctx, headX - headW / 2, headY + 1, 1.3, headH - 2, shadeHex(skin, PALETTE.skinLit), false);
-    rect(ctx, headX - headW / 2, headY + 1, PALETTE.rimW, headH - 3, PALETTE.rim, false);
-    if (back) rect(ctx, headX - headW / 2, headY + headH - 2.2, headW, 2.2,
-        shadeHex(skin, PALETTE.skinShade), false);
-
-    const hairDark = shadeHex(look.hair, PALETTE.hairShade);
-    const hairLit = shadeHex(look.hair, PALETTE.hairLit);
-    if (back) {
-        rect(ctx, headX - headW / 2 - 0.5, headY - 1, headW + 1, headH - 1, look.hair);
-        rect(ctx, headX + headW / 2 - 2.2, headY - 1, 2.2, headH - 1, hairDark, false);
-        rect(ctx, headX - headW / 2 + 1, headY - 0.5, 3, 1.2, hairLit, false);
-    } else {
-        rect(ctx, headX - headW / 2 - 0.5, headY - 1, headW + 1, 3.6, look.hair);
-        rect(ctx, headX + headW / 2 - 2.2, headY - 1, 2.2, 3.6, hairDark, false);
-        if (look.hairStyle === "long") {
-            rect(ctx, headX - headW / 2 - 1.2, headY, 1.7, 6.5, look.hair, false);
-            rect(ctx, headX + headW / 2 - 0.5, headY, 1.7, 6.5, look.hair, false);
-        } else {
-            rect(ctx, headX - headW / 2 - 1, headY + 0.5, 1.4, 2.2, look.hair, false);
-            rect(ctx, headX + headW / 2 - 0.4, headY + 0.5, 1.4, 2.2, look.hair, false);
-        }
-        rect(ctx, headX - headW / 2 + 1, headY - 0.5, 2.6, 1, hairLit, false);
-    }
-
-    if (!back) {
-        const blink = (idle % GAIT.blinkEvery) < GAIT.blinkFor;
-        const eyeH = blink ? 0.5 : 1.4, eyeW = 1.4;
-        const eyeY = headY + (blink ? 4.8 : 4);
-        if (dir === "left") {
-            rect(ctx, headX - 3.2, eyeY, eyeW, eyeH, PALETTE.eye, false);
-            rect(ctx, headX - headW / 2 - 0.5, headY + 4, 1, 1.4, shadeHex(skin, PALETTE.skinShade), false);
-            rect(ctx, headX - 3.6, headY + 6.2, 2.2, 0.9, "rgba(0,0,0,0.2)", false);
-        } else if (dir === "right") {
-            rect(ctx, headX + 1.8, eyeY, eyeW, eyeH, PALETTE.eye, false);
-            rect(ctx, headX + headW / 2 - 0.5, headY + 4, 1, 1.4, shadeHex(skin, PALETTE.skinShade), false);
-            rect(ctx, headX + 1.4, headY + 6.2, 2.2, 0.9, "rgba(0,0,0,0.2)", false);
-        } else {
-            rect(ctx, headX - 2.7, eyeY, eyeW, eyeH, PALETTE.eye, false);
-            rect(ctx, headX + 1.3, eyeY, eyeW, eyeH, PALETTE.eye, false);
-            rect(ctx, headX - 0.9, headY + 6.2, 1.8, 0.9, "rgba(0,0,0,0.16)", false);
-        }
-    }
+    /* ---- head: authored silhouette, narrow neck, shaped hair and jaw ---- */
+    drawHead(ctx, {
+        x: (sideView ? side * 0.5 : 0) + counter * 0.5 + Math.sin(idle * 0.65) * 0.35 * (1 - g),
+        y: BODY.headY - bob + (turning ? GAIT.slantHead * slant : 0),
+        dir, look, time: idle
+    });
 
     ctx.restore();
 
-    // Tool in the near hand, in front of the body; the fist closes over the
+    if (rig.behind) paintArm(farArm, false);
+    else paintArm(toolArm, false, !p.tool);
+
+    // Tool in the anatomical right hand, with direction-correct occlusion; the fist closes over the
     // handle afterwards so the grip reads as a grip and not as a loose block.
-    if (p.tool && !back) {
-        drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, false);
+    if (p.tool && !rig.behind) {
+        drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, false, p);
         paintHand(toolArm, false);
     }
     // --- the waterline -------------------------------------------------
@@ -511,18 +525,18 @@ export function drawCharacter(ctx, p) {
     }
 
     if (turning) ctx.restore();
+    ctx.restore();
 }
 
 /**
  * Draw the held tool at the hand. `dir` decides which side of the body the
  * grip sits on; the tool is rotated around the grip when swinging.
  */
-function drawHeldTool(ctx, tool, dir, side, swing, arm, behind) {
+function drawHeldTool(ctx, tool, dir, side, swing, arm, behind, pose = {}) {
     // The grip IS the hand of the tool arm — passing a fixed GRIP_Y used to
     // leave the knife floating next to a second, phantom hand.
     const gx = arm.ex, gy = arm.ey + BODY.handH / 2 - 0.5;
-    const lean = dir === "up" ? -0.35 : dir === "down" ? 0.3 : side * 0.45;
-    const angle = lean - side * swing * 1.9;
+    const angle = heldToolAngle(dir, side, swing);
 
     ctx.save();
     ctx.translate(gx, gy);
@@ -539,7 +553,7 @@ function drawHeldTool(ctx, tool, dir, side, swing, arm, behind) {
         case "spear": drawSpear(ctx); break;
         case "rod": drawRod(ctx); break;
         case "hoe": drawHoe(ctx); break;
-        case "torch": drawTorch(ctx); break;
+        case "torch": drawTorch(ctx, pose); break;
         default: drawGeneric(ctx); break;
     }
 
@@ -643,23 +657,11 @@ function drawHoe(ctx) {
     ctx.fillRect(-0.8, -13.6, 6.4, 0.6);
 }
 
-function drawTorch(ctx) {
-    ctx.fillStyle = "#5e4228";
-    ctx.fillRect(-1.3, -11, 2.6, 13);
-    ctx.fillStyle = "#3f2c18";
-    ctx.fillRect(0.4, -11, 0.9, 13);
-    ctx.fillStyle = "#2a211a";                  // pitch-soaked rag
-    ctx.fillRect(-2.2, -13.5, 4.4, 3);
-    ctx.fillStyle = "rgba(255,120,40,0.85)";
-    ctx.beginPath();
-    ctx.moveTo(-2.6, -13); ctx.quadraticCurveTo(0, -22, 2.6, -13);
-    ctx.quadraticCurveTo(0, -11.5, -2.6, -13);
-    ctx.closePath(); ctx.fill();
-    ctx.fillStyle = "rgba(255,220,140,0.9)";
-    ctx.beginPath();
-    ctx.moveTo(-1.2, -13.5); ctx.quadraticCurveTo(0, -18.5, 1.2, -13.5);
-    ctx.quadraticCurveTo(0, -12.6, -1.2, -13.5);
-    ctx.closePath(); ctx.fill();
+function drawTorch(ctx, pose) {
+    ctx.fillStyle = "#5e4228"; ctx.fillRect(-1.2, -11, 2.4, 13);
+    ctx.fillStyle = "#95704a"; ctx.fillRect(-1.2, -10, 0.7, 9);
+    ctx.fillStyle = "#302b22"; ctx.fillRect(-2.1, -13.5, 4.2, 3.2);
+    paintTorchFlame(ctx, pose.idleTime || 0, pose.torchWind || 0, pose.gait || 0);
 }
 
 function drawGeneric(ctx) {

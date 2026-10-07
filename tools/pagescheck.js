@@ -35,13 +35,16 @@ const exists = (rel) => {
 };
 
 /* ---- 1. what index.html asks for ------------------------------------- */
-const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
-for (const m of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
-    const url = m[1];
-    if (/^(https?:|data:|#|\/\/)/.test(url)) continue;
-    checked++;
-    if (url.startsWith("/")) problems.push(`index.html: абсолютный путь "${url}" — на Pages сайт лежит в подпапке`);
-    else if (!exists(url)) problems.push(`index.html: нет файла ${url}`);
+for (const file of ["index.html", ...fs.readdirSync(path.join(ROOT, "dev")).filter((f) => f.endsWith(".html")).map((f) => `dev/${f}`)]) {
+    const html = fs.readFileSync(path.join(ROOT, file), "utf8");
+    for (const m of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
+        const url = m[1];
+        if (/^(https?:|data:|#|\/\/)/.test(url)) continue;
+        checked++;
+        const target = path.relative(ROOT, path.resolve(ROOT, path.dirname(file), url)).split(path.sep).join("/");
+        if (url.startsWith("/")) problems.push(`${file}: абсолютный путь "${url}" — на Pages сайт лежит в подпапке`);
+        else if (!exists(target)) problems.push(`${file}: нет файла ${url}`);
+    }
 }
 
 /* ---- 2. every import in every module ---------------------------------- */

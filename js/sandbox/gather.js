@@ -31,6 +31,7 @@ export const PROPS = {
     driftwood:   { name: "Плавник",      tool: null, hits: 1, drops: [["firewood", 2]], solid: false, xp: 1, block: 0 },
 
     /* ---- stone & ore --------------------------------------------------- */
+    beach_pebbles: { name: "Галька", tool: null, hits: 1, drops: [["stone", 2], ["flint", 1, 0.3]], solid: false, xp: 1, instant: true, block: 0 },
     rock:        { name: "Камень",       tool: "pick", hits: 3, drops: [["stone", 2], ["flint", 1, 0.3]], solid: true, xp: 3, block: 6.5 },
     ore_rock:    { name: "Рудная жила",  tool: "pick", hits: 5, drops: [["stone", 1]], solid: true, xp: 7, oreDrop: true, block: 6.5 },
     ruin_wall:   { name: "Обломок стены",tool: "pick", hits: 4, drops: [["stone", 3]], solid: true, xp: 3, block: 9 },
