@@ -20,7 +20,7 @@
 import { drawHead } from "./head.js";
 import { torchFlame, paintTorchFlame } from "./torch.js";
 import { SUN, castShadow } from "./tilesart.js";
-import { BODY, GEAR, TONE, PALETTE, READ, SHADOW, WADE, GAIT, ACTION, ATTACH, clamp01, easeInOutSine, q } from "./charspec.js";
+import { BODY, GEAR, TONE, PALETTE, READ, SHADOW, WADE, GAIT, ACTION, ATTACH, fallPose, clamp01, easeInOutSine, q } from "./charspec.js";
 
 export const DEFAULT_LOOK = {
     skin: "#d3ae86",
@@ -35,7 +35,7 @@ export const DEFAULT_LOOK = {
     shoulders: false,         // gear as silhouette
     bracers: false,
     bootCuff: false,
-    beltFlap: true
+    beltFlap: false
 };
 
 function shadeHex(hex, amount) {
@@ -145,6 +145,7 @@ function knee(hx, hy, ax, ay, bendDir) {
  * unit tested — this is where the left/right mirror bug lived.
  */
 export function posture(p) {
+    if (p.fallTimer > 0) p = { ...p, gait: 0, runBlend: 0, ax: 0, ay: 0, leanAX: 0, leanAY: 0, actionTimer: 0 };
     const dir = p.dir || "down";
     const phase = (p.phase != null ? p.phase : p.anim) || 0;
     const gaitRaw = clamp01(p.gait != null ? p.gait : (p.moving ? 1 : 0));
@@ -156,10 +157,10 @@ export function posture(p) {
     const back = dir === "up";
     const sideView = dir === "left" || dir === "right";
 
-    // Stride -> swing amplitude. stride/4 units of foot travel per step is
-    // exactly the ground covered per step, so the plant does not slide.
+    // Distance-driven cadence; bound the visual swing by anatomical reach.
     const strideU = (GAIT.strideWalk + (GAIT.strideRun - GAIT.strideWalk) * run) / GAIT.pxPerUnit;
-    const amp = strideU / 4;
+    // Cadence may slow without overextending the legs or pumping the head.
+    const amp = Math.min(3.5, strideU / 4);
     const liftAmp = GAIT.liftWalk + (GAIT.liftRun - GAIT.liftWalk) * run;
     const bobAmp = GAIT.bobWalk + (GAIT.bobRun - GAIT.bobWalk) * run;
 
@@ -167,8 +168,9 @@ export function posture(p) {
     // it the feet swung backwards when the hero walked left.
     const swingN = side * Math.sin(phase) * amp * g;           // near leg, forward+
     const swingF = side * Math.sin(phase + Math.PI) * amp * g; // far leg, antiphase
-    const liftN = Math.max(0, Math.cos(phase)) * liftAmp * g;
-    const liftF = Math.max(0, Math.cos(phase + Math.PI)) * liftAmp * g;
+    const fallen = fallPose(p).amount;
+    const liftN = Math.max(0, Math.cos(phase)) * liftAmp * g + fallen * 3.5;
+    const liftF = Math.max(0, Math.cos(phase + Math.PI)) * liftAmp * g + fallen * 1.4;
 
     // Hips are HIGH when the legs pass under the body, LOW on contact, with an
     // extra dip the instant the heel lands.
@@ -207,7 +209,7 @@ export function posture(p) {
             : Math.sin(((act - ACTION.windUp) / (1 - ACTION.windUp)) * Math.PI) * ACTION.strikeAmp)
         : 0;
 
-    bob += accLift;                       // head-on: push off / settle back
+    bob += accLift - fallPose(p).crouch;                       // head-on: push off / settle back
     // Keep each ankle planted without stretching the shin beyond its IK
     // reach. Previously only the knee target was clamped: the boot was not.
     const reach = BODY.thigh + BODY.shin - 0.08;
@@ -241,6 +243,10 @@ export function armRig(p, pose = posture(p)) {
         ? make(behind ? BODY.nearArmX * side : -BODY.farArmX * side,
             -(behind ? swingN : swingF) * GAIT.armRatio - rest, 0)
         : make(back ? -ax : ax, -rest, (back ? -1 : 1) * swingN * GAIT.armRatio);
+    // The free hand braces the fall; the tool never leaves the right hand.
+    const brace = fallPose(p).amount;
+    left.ex += side * brace * 3; left.ey -= brace * 3;
+    left.mx = (left.sx + left.ex) / 2; left.my = (left.sy + left.ey) / 2 - brace;
     return { right, left, behind };
 }
 
@@ -261,9 +267,9 @@ export function toolAttachment(p) {
     let x = (gx + localX * Math.cos(angle) - flame.y * Math.sin(angle)) * narrow;
     let y = gy + localX * Math.sin(angle) + flame.y * Math.cos(angle);
     if (p.fallTimer > 0) {
-        const a = ATTACH.fallAngle, xx = x;
+        const f = fallPose(p), a = f.angle, xx = x;
         x = xx * Math.cos(a) - y * Math.sin(a);
-        y = xx * Math.sin(a) + y * Math.cos(a) + ATTACH.fallY;
+        y = xx * Math.sin(a) + y * Math.cos(a) + f.y;
     }
     return { x, y, intensity: flame.intensity, gripX: gx, gripY: gy, angle, behind: rig.behind };
 }
@@ -274,8 +280,18 @@ export function toolAttachment(p) {
  *                     actionTimer, tool, idleTime }
  */
 export function drawCharacter(ctx, p) {
+    const fall = fallPose(p);
+    if (!(p.fallTimer > 0)) { paintCharacter(ctx, p); return; }
     ctx.save();
-    if (p.fallTimer > 0) { ctx.translate(0, ATTACH.fallY); ctx.rotate(ATTACH.fallAngle); }
+    // Contact shadow stays on the ground; never rotate it with the body.
+    ctx.fillStyle = "rgba(12,16,17,0.22)"; ctx.beginPath();
+    ctx.ellipse(Math.sin(fall.angle) * 10, 1, 7 + fall.amount * 10, 2.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.translate(0, fall.y); ctx.rotate(fall.angle);
+    paintCharacter(ctx, { ...p, _noShadow: true });
+    ctx.restore();
+}
+function paintCharacter(ctx, p) {
+    ctx.save();
     // A diagonal is drawn as the side view, turned: the body narrows a little
     // and the head leads the travel direction. Cheap, and it stops diagonal
     // movement from looking like the hero is sliding on rails.
@@ -306,6 +322,7 @@ export function drawCharacter(ctx, p) {
     // every prop around him, so he throws the same kind of shadow. The CORE
     // below still sits strictly under the feet — that is what keeps him
     // planted while the cast part stretches away from the light.
+    if (!p._noShadow) {
     ctx.save();
     // In the shallows the water takes the shadow; drawing one under a boot
     // that is underwater reads as a hole in the lake.
@@ -329,6 +346,7 @@ export function drawCharacter(ctx, p) {
     ctx.ellipse(centroid, 0, SHADOW.coreRX * shrink, SHADOW.coreRY * shrink, 0, 0, Math.PI * 2);
     ctx.fill();
 
+    }
     /* ---- legs ---------------------------------------------------------- */
     const drawLeg = (hipX, footX, lift, far, bendDir) => {
         const hx = hipX + sway;
@@ -368,9 +386,9 @@ export function drawCharacter(ctx, p) {
         // value disappears at this size.
         rect(ctx, a.ex - BODY.armW / 2 - 0.2, a.ey - 1.1, BODY.armW + 0.4, 0.7,
             `rgba(0,0,0,${READ.handEdgeA})`, false);
-        rect(ctx, a.ex - BODY.armW / 2, a.ey - 0.5, BODY.armW, BODY.handH,
-            far ? shadeHex(skin, PALETTE.skinDeep) : shadeHex(skin, PALETTE.skinLit),
-            far ? true : "all");
+        ctx.fillStyle = far ? shadeHex(skin, PALETTE.skinDeep) : shadeHex(skin, PALETTE.skinLit);
+        ctx.beginPath(); ctx.ellipse(a.ex, a.ey + BODY.handH / 2 - 0.5,
+            BODY.armW * 0.49, BODY.handH * 0.57, 0.12, 0, Math.PI * 2); ctx.fill();
         rect(ctx, a.ex - BODY.armW / 2, a.ey - 0.5 + BODY.handH - 0.7, BODY.armW, 0.7,
             PALETTE.ao, false);
     };

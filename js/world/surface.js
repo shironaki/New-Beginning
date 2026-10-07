@@ -1,4 +1,5 @@
 /** Shared weather surfaces: moisture, pool contours and winter traction. */
+import { ATTACH } from "../render/charspec.js";
 import { T, tileInfo } from "./tiles.js";
 
 export const SURFACE = {
@@ -9,9 +10,9 @@ export const SURFACE = {
 };
 
 export const ICE = {
-    speed: 0.9, tauMove: 0.28, tauTurn: 0.42, tauStop: 0.65, tauFallen: 0.15,
+    speed: 0.9, tauMove: 0.28, tauTurn: 0.42, tauStop: 0.85, tauFallen: 0.72, tauFallenDry: 0.24, edgeMemory: 0.32,
     checkDistance: 8, chanceRun: 0.25, chanceTurn: 0.45,
-    fallTime: 1.1, cooldown: 5, staminaCost: 8
+    fallTime: ATTACH.fallTime, cooldown: 5, staminaCost: 8
 };
 
 export function clampWet(value) {
@@ -58,11 +59,12 @@ export function rainPuddle(tx, ty, id, wet) {
     const growth = Math.sqrt(amount);
     const x = 7 + hash(tx, ty, 127) * 18;
     const y = 7 + hash(tx, ty, 233) * 18;
+    const broad = hash(tx, ty, 887) < 0.3;
     return {
         x: tx * 32 + x,
         y: ty * 32 + y,
-        rx: Math.min(6 + hash(tx, ty, 317) * 8, x - 2, 30 - x) * growth,
-        ry: Math.min(3 + hash(tx, ty, 419) * 3, y - 1, 31 - y) * growth,
+        rx: (broad ? 20 + hash(tx, ty, 317) * 10 : Math.min(6 + hash(tx, ty, 317) * 8, x - 2, 30 - x)) * growth,
+        ry: (broad ? 11 + hash(tx, ty, 419) * 7 : Math.min(3 + hash(tx, ty, 419) * 3, y - 1, 31 - y)) * growth,
         phase: hash(tx, ty, 521), amount
     };
 }
@@ -79,11 +81,13 @@ export function puddleContains(p, x, y) {
 }
 
 /** Only small rain pools freeze here. The sea is NOT made walkable. */
-export function frozenPuddleAt(zone, x, y, season, wet) {
-    if (season !== "winter" || zone.def?.underground) return false;
+export function frozenPuddleAt(zone, x, y, season, wet, temperature = -1) {
+    if (season !== "winter" || temperature > 0 || zone.def?.underground) return false;
     const tx = Math.floor(x / 32), ty = Math.floor(y / 32);
     if (!receivesRain(zone.map.at(x, y))) return false;
-    return puddleContains(surfacePuddle(zone, tx, ty, wet), x, y);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++)
+        if (puddleContains(surfacePuddle(zone, tx + dx, ty + dy, wet), x, y)) return true;
+    return false;
 }
 
 /** Pool placement and roof exclusion shared by drawing and physics. */

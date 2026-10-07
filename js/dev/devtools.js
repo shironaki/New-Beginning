@@ -251,9 +251,12 @@ export function installDevTools(game, win = window) {
         p.append(el("button", { className: "close", textContent: "✕", title: "закрыть (Ctrl+Shift+D)",
                                 onclick: () => toggle(false) }));
 
-        const relief = el("a", { textContent: "↗ Стенд рельефа: холм и уступ", href: "dev/relief.html", target: "_blank", rel: "noopener" });
+        const relief = el("a", { textContent: "↗ Стенд рельефа: холм и уступ", href: "dev/relief.html", target: "_self" });
         relief.style.color = "#e2c58e";
         p.append(relief);
+        const trial = el("a", { textContent: "↗ Игровой участок: хворост и костёр", href: "?relief=1", target: "_self" });
+        trial.style.color = "#e2c58e";
+        row(trial);
 
         // ---- time
         add("Время");

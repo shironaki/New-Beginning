@@ -19,7 +19,7 @@ export function drawWetGround(ctx, cam, state, time) {
     if (state.underground || wet < 0.005) return;
     const { zone } = state;
     const z = cam.zoom;
-    const winter = state.clock?.season.key === "winter";
+    const winter = state.clock?.season.key === "winter" && (zone.map.waterState?.temperature ?? -1) <= 0;
     const raining = state.weather === "rain" || state.weather === "storm";
     const x0 = Math.max(0, Math.floor(cam.x / TILE_SIZE) - 1);
     const y0 = Math.max(0, Math.floor(cam.y / TILE_SIZE) - 1);

@@ -4,7 +4,7 @@
 import { RELIEF_STEPS } from "../dev/relief-guide.js";
 import { RELIEF, RELIEF_PROPS } from "../world/relief.js";
 import { drawCharacter } from "./character.js";
-import { paintProp, setSun, setFireLights } from "./tilesart.js";
+import { paintProp, paintFlames, setSun, setFireLights } from "./tilesart.js";
 export const RELIEF_OBJECTS = RELIEF_PROPS;
 export function reliefMesh(patch) {
     const mesh = [], step = 8;
@@ -23,13 +23,13 @@ export function reliefMesh(patch) {
     }
     return mesh;
 }
-export function drawRelief(ctx, patch, walker, { mesh = reliefMesh(patch), collected = false, guides = true, routeStep = null } = {}) {
+export function drawRelief(ctx, patch, walker, { mesh = reliefMesh(patch), collected = false, guides = true, routeStep = null, objects: suppliedObjects = null, character = null, fires = null } = {}) {
     const width = ctx.canvas.width, height = ctx.canvas.height;
     ctx.fillStyle = "#283632"; ctx.fillRect(0, 0, width, height);
     const zoom = Math.min((width - 48) / RELIEF.width, (height - 90) / (RELIEF.height * RELIEF.scaleY));
     ctx.save(); ctx.translate((width - RELIEF.width * zoom) / 2, 55); ctx.scale(zoom, zoom);
     setSun(11, 1); setFireLights([]);
-    const objects = RELIEF_OBJECTS.filter((o) => !collected || !o.pickup);
+    const objects = suppliedObjects || RELIEF_OBJECTS.filter((o) => !collected || !o.pickup);
     // Props' art extends a few pixels in front of its ground anchor (boots,
     // buried rock base). Draw after that footprint, not halfway through it.
     const drawables = [...mesh.map((face) => ({ y: face.y, face })), ...objects.map((obj) => ({ y: obj.y + 8, obj })), { y: walker.y + 8, player: true }];
@@ -42,8 +42,14 @@ export function drawRelief(ctx, patch, walker, { mesh = reliefMesh(patch), colle
         } else {
             const o = d.player ? walker : d.obj, p = patch.project(o.x, o.y);
             ctx.save(); ctx.translate(p.x, p.y);
-            if (d.player) drawCharacter(ctx, { dir: walker.dir, phase: walker.phase, gait: walker.gait, idleTime: walker.time, tool: "knife" });
-            else paintProp(ctx, o, walker.time);
+            if (d.player) drawCharacter(ctx, { dir: walker.dir, phase: walker.phase, gait: walker.gait, idleTime: walker.time, tool: "knife", ...character });
+            else {
+                paintProp(ctx, o, walker.time);
+                if (o.kind === "campfire") {
+                    const fire = fires?.get(`${o.tx},${o.ty}`);
+                    paintFlames(ctx, fire?.intensity || 0, walker.time, fire?.stack || []);
+                }
+            }
             ctx.restore();
         }
     }

@@ -359,3 +359,23 @@ html, body {
         transition-duration: 0.001ms !important;
     }
 }
+
+/* Separate sleep fatigue from the short sprint reserve (note 023). */
+.needLabel { width: calc(89 * var(--ui)); font-size: var(--t-xs); color: var(--ink-dim); }
+.staminaHint { max-width: calc(275 * var(--ui)); font-size: var(--t-xs); color: var(--ink-dim); }
+.need[data-need="stamina"] .needVal { display: block; }
+@media(max-width:600px) { .needLabel { width: calc(76 * var(--ui)); } .staminaHint { max-width: 210px; font-size: 10px; } }
+
+/* Bounded opt-in relief gameplay pilot; keep normal HUD and touch controls. */
+.reliefTrialBanner { position: absolute; top: calc(170 * var(--ui)); right: 12px; max-width: min(360px, 55vw); padding: 10px; border-radius: 8px; background: rgba(22,30,24,.9); color: #e5e3d5; pointer-events: auto; display: grid; gap: 6px; font-size: 12px; }
+.reliefTrialBanner a { color: #e6cb8c; }
+.reliefTrialBanner small { opacity: .8; }
+
+.needsCard { min-width: calc(260 * var(--ui)); }
+.needBarOuter { min-width: calc(38 * var(--ui)); }
+@media (max-width: 700px) {
+    .needsCard { min-width: calc(200 * var(--ui)); }
+    .needIcon { display: none; }
+    .needLabel { width: calc(88 * var(--ui)); }
+    .need[data-need="stamina"] .needVal { width: calc(28 * var(--ui)); }
+}

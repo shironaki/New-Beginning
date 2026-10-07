@@ -5,6 +5,7 @@
  * right now). All rules live in their own modules; nothing here should grow
  * into a thousand-line God file.
  */
+import { syncWaterState, waterIce } from "./world/water-state.js";
 import { EventBus } from "./core/events.js";
 import { GameClock } from "./core/time.js";
 import { GameLoop } from "./core/loop.js";
@@ -17,7 +18,7 @@ import { WeatherSystem } from "./world/weather.js";
 import { surfaceTile, SURFACE, frozenPuddleAt } from "./world/surface.js";
 import { UI, pixelRatio } from "./ui/uispec.js";
 import { START_ZONE, biomeDef, oppositeEdge } from "./world/regions.js";
-import { TILE_SIZE, tileInfo } from "./world/tiles.js";
+import { T, TILE_SIZE, tileInfo } from "./world/tiles.js";
 import { bodyBlocked } from "./world/tilemap.js";
 import { Player } from "./entities/player.js";
 import { Inventory } from "./sandbox/inventory.js";
@@ -199,15 +200,16 @@ export class Game {
         this.save.register("clock", () => this.clock.toJSON(), (d) => this.clock.load(d));
         this.save.register("needs", () => this.needs.toJSON(), (d) => this.needs.load(d));
         this.save.register("inv", () => this.inventory.toJSON(), (d) => this.inventory.load(d));
+        this.save.register("weather", () => this.weather.toJSON(), (d) => this.weather.load(d));
         this.save.register("player", () => ({ zone: this.zone.id, p: this.player.toJSON() }),
             (d) => {
                 if (d.zone) this.enterZone(d.zone, null, true);
                 this.player.load(d.p);
+                syncWaterState(this.zone, this.clock, this.weather.current);
                 if (!this.placeSafely(this.player.x, this.player.y)) this.placeSafely(this.zone.spawn.x, this.zone.spawn.y);
             });
         this.save.register("story", () => this.story.toJSON(), (d) => this.story.load(d));
         this.save.register("cook", () => this.cookJournal.toJSON(), (d) => this.cookJournal.load(d));
-        this.save.register("weather", () => this.weather.toJSON(), (d) => this.weather.load(d));
         this.save.register("seed", () => this.seed, () => {});
         this.save.register("fires", () => {
             const out = {};
@@ -637,12 +639,15 @@ export class Game {
         // never arrived (focus lost to a click outside the frame) is dropped
         // here instead of walking the hero away on its own.
         this.input.update(dt);
+        syncWaterState(this.zone, this.clock, this.weather.current);
         const axis = uiBlocking ? { x: 0, y: 0 } : this.input.axis();
         this.player.update(dt, axis, this.zone, {
             speedFactor: this.needs.speedFactor(),
             wantRun: this.input.pressed("sprint"),
             surfaceAt: (x, y) => ({
-                ice: frozenPuddleAt(this.zone, x, y, this.clock.season.key, this.weather.groundWet),
+                ice: frozenPuddleAt(this.zone, x, y, this.clock.season.key, this.weather.groundWet, this.ambient)
+                    || waterIce(this.zone.map, x, y).walkable
+                    || (this.zone.map.at(x, y) === T.WATER && waterIce(this.zone.map, x, y).cover >= 0.55),
                 slope: this.zone.terrain?.slope(x, y, axis.x, axis.y) || 1
             })
         });
@@ -650,7 +655,10 @@ export class Game {
         // (a prop built on top of them, a bad teleport), walk them out instead
         // of letting the game wedge.
         if (!this.player.sleeping && !this.fitsAt(this.player.x, this.player.y)) {
-            this.placeSafely(this.player.x, this.player.y);
+            if (!this.placeSafely(this.player.x, this.player.y)) {
+                this.placeSafely(this.zone.spawn.x, this.zone.spawn.y);
+                this.hud.toast("Поверхность стала непроходимой — возвращение на безопасную землю.", "⚠️");
+            }
         }
 
         // A foot planted: kick up dust the colour of the ground it landed on.
@@ -660,12 +668,13 @@ export class Game {
             this.bus.emit("player:footstep", { side: this.player.stepSide });
             const info = this.zone.map.at(this.player.x, this.player.y);
             const def = tileInfo(info);
-            if (def.liquid) {
+            if (def.liquid && waterIce(this.zone.map, this.player.x, this.player.y, info).cover < 0.55) {
                 // Wading: the boot throws water, not dust.
                 this.particles.splash(this.player.x + this.player.stepSide * 2.5, this.player.y + 1,
                                       this.player.running ? 1.25 : 0.85);
                 this.player.wet = TRACK.wetLife;
-            } else if (!frozenPuddleAt(this.zone, this.player.x, this.player.y, this.clock.season.key, this.weather.groundWet)) {
+            } else if (!frozenPuddleAt(this.zone, this.player.x, this.player.y, this.clock.season.key, this.weather.groundWet, this.ambient)
+                && waterIce(this.zone.map, this.player.x, this.player.y, info).cover < 0.55) {
                 // Soft ground keeps the boot: sand, snow, mud, ash. Soaked
                 // boots print on hard ground too, until they dry out.
                 // The foot line IS player.y — the print belongs there, not
@@ -777,7 +786,7 @@ export class Game {
         this.input.consume();
 
         this.hud.update({
-            needs: this.needs,
+            needs: this.needs, player: this.player,
             clock: this.clock,
             weather: this.weather,
             inventory: this.inventory,
@@ -912,7 +921,7 @@ export class Game {
  * Browser bootstrap
  * ----------------------------------------------------------------------- */
 if (typeof document !== "undefined" && typeof window !== "undefined") {
-    window.addEventListener("DOMContentLoaded", () => {
+    window.addEventListener("DOMContentLoaded", async () => {
         const canvas = document.getElementById("game");
         const hudRoot = document.getElementById("hud");
         if (!canvas || !hudRoot) return;
@@ -952,12 +961,23 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
         };
         window.addEventListener("error", (e) => bootFail(e.error || e.message), { once: true });
 
-        const game = new Game({ canvas, hudRoot, seed: "ashes-and-grain" });
+        const trial = new URLSearchParams(window.location.search).get("relief") === "1";
+        const GameClass = trial ? (await import("./dev/relief-trial.js")).ReliefTrialGame : Game;
+        const game = new GameClass({ canvas, hudRoot, seed: "ashes-and-grain" });
+        if (trial) {
+            const banner = document.createElement("aside");
+            banner.className = "reliefTrialBanner";
+            const link = document.createElement("a"); link.href = "./"; link.textContent = "← Основная игра";
+            game.trialStatus = document.createElement("span");
+            const hint = document.createElement("small");
+            hint.textContent = "Дневной игровой пилот · WASD/стрелки, Shift, E · основное сохранение не меняется. Прогресс участка сбросится после перезагрузки.";
+            banner.append(link, game.trialStatus, hint); hudRoot.append(banner);
+        }
         window.GAME = game;
         // The owner's control room. Loaded lazily and locked behind a
         // password, so an ordinary player never sees it and the module costs
         // nothing until it is asked for.
-        import("./dev/devtools.js")
+        if (!trial) import("./dev/devtools.js")
             .then((m) => m.installDevTools(game, window))
             .catch(() => { /* dev tools are optional */ });
         window.addEventListener("resize", () => fit(game));

@@ -7,6 +7,7 @@
  * is what lets a 96×72 zone with thousands of tiles run at 60 fps on Canvas 2D
  * without a single dependency.
  */
+import { waterIce } from "./water-state.js";
 import { T, TILE_SIZE, tileInfo, isSolidTile, tileSpeed } from "./tiles.js";
 
 export const CHUNK = 16;
@@ -44,8 +45,15 @@ export class TileMap {
     /** Tile under a world-unit position. */
     at(wx, wy) { return this.terrain ? this.terrain.sample(wx, wy).id : this.get(Math.floor(wx / this.tileSize), Math.floor(wy / this.tileSize)); }
 
-    solidAt(wx, wy) { return isSolidTile(this.at(wx, wy)); }
-    speedAt(wx, wy) { return tileSpeed(this.at(wx, wy)); }
+    solidAt(wx, wy) {
+        const id = this.at(wx, wy);
+        if (id === T.DEEP && waterIce(this, wx, wy, id).walkable) return false;
+        return isSolidTile(id);
+    }
+    speedAt(wx, wy) {
+        const id = this.at(wx, wy), ice = waterIce(this, wx, wy, id);
+        return ice.walkable || (id === T.WATER && ice.cover >= 0.55) ? 1 : tileSpeed(id);
+    }
     infoAt(wx, wy) { return tileInfo(this.at(wx, wy)); }
 
     chunkKey(cx, cy) { return cy * this.chunksX + cx; }

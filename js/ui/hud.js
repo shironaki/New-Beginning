@@ -12,7 +12,8 @@ import { UI, applyTheme } from "./uispec.js";
 const NEED_DEFS = [
     { key: "food",    label: "Сытость",   icon: "🍖", color: "#d8a24a" },
     { key: "warmth",  label: "Тепло",     icon: "🔥", color: "#e07a3c" },
-    { key: "fatigue", label: "Силы",      icon: "⚡", color: "#6fb3e0", invert: true },
+    { key: "fatigue", label: "Бодрость",      icon: "⚡", color: "#6fb3e0", invert: true },
+    { key: "stamina", label: "Выносливость", icon: "🏃", color: "#8fbc78" },
     { key: "health",  label: "Здоровье",  icon: "❤️", color: "#cc4a5a" }
 ];
 
@@ -78,7 +79,7 @@ export class HUD {
         this.els.needs.innerHTML = NEED_DEFS.map((n) => `
           <div class="need" data-need="${n.key}" role="meter" aria-label="${n.label}"
                aria-valuemin="0" aria-valuemax="100">
-            <span class="needIcon" aria-hidden="true">${n.icon}</span>
+            <span class="needIcon" aria-hidden="true">${n.icon}</span><span class="needLabel">${n.label}</span>
             <div class="needBarOuter"><div class="needBar" style="background:${n.color}"></div></div>
             <span class="needVal"></span>
           </div>`).join("");
@@ -91,6 +92,12 @@ export class HUD {
             this.needBars[n.key] = row.querySelector(".needBar");
             this.needVals[n.key] = row.querySelector(".needVal");
         });
+
+        this.els.staminaHint = document.createElement("div");
+        this.els.staminaHint.className = "staminaHint";
+        this.els.needs.appendChild(this.els.staminaHint);
+        this.needRows.fatigue.title = "Бодрость зависит от сна. Это не запас для спринта.";
+        this.needRows.stamina.title = "Выносливость расходуется при беге. После истощения отпусти Shift и восстанови запас выше 18%.";
 
         // Hotbar slots.
         this.els.hotbar.innerHTML = Array.from({ length: 6 }, (_, i) =>
@@ -105,7 +112,7 @@ export class HUD {
     update(state) {
         const { needs, clock, weather, inventory, objective, zoneName } = state;
         for (const n of NEED_DEFS) {
-            const raw = needs[n.key];
+            const raw = n.key === "stamina" ? (state.player?.stamina ?? 100) : needs[n.key];
             const v = Math.max(0, Math.min(100, n.invert ? 100 - raw : raw));
             const bar = this.needBars[n.key];
             const row = this.needRows[n.key];
@@ -120,6 +127,10 @@ export class HUD {
             row.classList.toggle("critical", v < UI.bar.critical);
         }
 
+        this.els.staminaHint.textContent = state.player?.fallTimer > 0 ? "Падение · поднимаюсь…"
+            : state.player?.sprintLocked ? "Бег: отпусти Shift, восстановись выше 18%"
+            : state.player?.onIce ? "Лёд · тормози заранее, не разворачивайся резко"
+            : "Shift — бег · бодрость восстанавливается сном";
         const w = weather.info;
         this.els.sky.innerHTML = `
           <div class="skyTime">${clock.clockString()}</div>

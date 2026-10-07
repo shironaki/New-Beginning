@@ -11,6 +11,7 @@
  * Only visible chunks are drawn, and a chunk is re-baked only when a tile in
  * it changes. That is the whole performance story for a 96×72 zone.
  */
+import { syncWaterState, waterIce } from "../world/water-state.js";
 import { CHUNK } from "../world/tilemap.js";
 import { TILE_SIZE, TILES } from "../world/tiles.js";
 import { paintTile, paintSnowGround, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, setWalker, setBreeze, propHeight, propTone, puddleScreenPath, coastReach } from "./tilesart.js";
@@ -600,7 +601,7 @@ export class Renderer {
             let start = -1;
             for (let d = 4; d <= MIRROR.gap; d += 4) {
                 const info = zone.map.infoAt(obj.x, obj.y + d);
-                if (info && info.liquid) { start = d; break; }
+                if (info && info.liquid && waterIce(zone.map, obj.x, obj.y + d).cover < 0.55) { start = d; break; }
             }
             if (start < 0) continue;
             const near = 1 - (start / MIRROR.gap) * (1 - MIRROR.gapFade);
@@ -615,7 +616,7 @@ export class Renderer {
                 // reflection ends, so it never spills onto the bank.
                 const wy = obj.y + start + d;
                 const info = zone.map.infoAt(obj.x, wy);
-                if (!info || !info.liquid) break;
+                if (!info || !info.liquid || waterIce(zone.map, obj.x, wy).cover >= 0.55) break;
                 const wob = Math.sin(t * MIRROR.wobbleHz * Math.PI * 2 - d * MIRROR.wobbleK)
                           * MIRROR.wobbleAmp * (0.4 + f);
                 const w = halfW * (1 - f * MIRROR.taper);
@@ -665,7 +666,7 @@ export class Renderer {
             if (d.kind === "prop") this._occlude(o, player, dt);
             const s = cam.worldToScreen(o.x, o.y);
             ctx.save();
-            ctx.translate(Math.round(s.x), Math.round(s.y));
+            ctx.translate(d.kind === "prop" ? Math.round(s.x) : s.x, d.kind === "prop" ? Math.round(s.y) : s.y);
             ctx.scale(cam.zoom, cam.zoom);
             if (d.kind === "prop") {
                 if (o._fade > 0) ctx.globalAlpha = 1 - (1 - OCCLUDE.alpha) * o._fade;
@@ -693,7 +694,7 @@ export class Renderer {
                     dir: o.dir, phase: o.anim, gait: o.gait, runBlend: o.runBlend,
                     slant: o.slant, moving: o.moving, look: state.look,
                     ax: o.ax, ay: o.ay, leanAX: o.leanAX, leanAY: o.leanAY, faceX: o.faceX, faceY: o.faceY,
-                    fallTimer: o.fallTimer,
+                    fallTimer: o.fallTimer, fallDirX: o.fallDirX, fallDirY: o.fallDirY,
                     actionTimer: o.actionTimer, tool: state.tool, idleTime: this.time,
                     torchWind: state.underground ? 0 : Math.cos(state.windAngle || 0) * (state.windStrength || 0),
                     wading: this._inWater(state.zone, o.x, o.y)
@@ -757,7 +758,7 @@ export class Renderer {
     _inWater(zone, x, y) {
         if (!zone || !zone.map) return false;
         const info = zone.map.infoAt(x, y);
-        return !!(info && info.liquid);
+        return !!(info && info.liquid) && waterIce(zone.map, x, y).cover < 0.55;
     }
 
     /**
@@ -1018,6 +1019,7 @@ export class Renderer {
      */
     render(state, dt = 0) {
         this.time += dt;
+        syncWaterState(state.zone, state.clock, state.weather);
         // A dev jump, natural season change and loading a save all follow
         // this path. Invalidate once on a palette change, not every frame.
         const season = state.underground ? "spring" : state.clock ? state.clock.season.key : "spring";

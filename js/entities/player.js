@@ -40,6 +40,9 @@ export class Player {
         this.runBlend = 0;       // 0 walking .. 1 running, blended
         this.moving = false;
         this.running = false;
+        this.sprintLocked = false;
+        this.iceCarry = 0; this.onIce = false;
+        this.fallDirX = 1; this.fallDirY = 0;
         this.actionTimer = 0;    // tool swing animation
         this.actionKind = null;
         this.fallTimer = 0;
@@ -115,6 +118,7 @@ export class Player {
             return this;
         }
 
+        const sprintRequested = wantRun;
         this.slipCooldown = Math.max(0, this.slipCooldown - dt);
         if (this.fallTimer > 0) {
             this.fallTimer = Math.max(0, this.fallTimer - dt);
@@ -122,12 +126,19 @@ export class Player {
         }
         const surface = surfaceAt ? surfaceAt(this.x, this.y) : null;
         const icy = !!surface?.ice;
+        this.onIce = icy;
+        this.iceCarry = icy ? ICE.edgeMemory : Math.max(0, this.iceCarry - dt);
+        const slick = icy || this.iceCarry > 0;
         const mag = Math.hypot(axis.x, axis.y);
         this.moving = mag > 0.01;
 
         // Separate stop/resume thresholds prevent 70 Hz run/walk chatter at
-        // exhaustion. Holding Shift recovers a useful reserve before retrying.
-        const canRun = wantRun && this.stamina > (this.running ? MOVE.sprintStop : MOVE.sprintResume) && mag > 0.6;
+        // exhaustion. Retrying also requires an actual key release.
+        if (!sprintRequested) this.sprintLocked = false;
+        else if (this.stamina <= (this.running ? MOVE.sprintStop : MOVE.sprintResume)) this.sprintLocked = true;
+        // Exhaustion latches until Shift is released: no automatic bursts
+        // every time a small reserve happens to recover under a held key.
+        const canRun = wantRun && !this.sprintLocked && mag > 0.6;
         this.running = canRun;
         if (canRun) this.stamina = Math.max(0, this.stamina - 16 * dt);
         else this.stamina = Math.min(this.maxStamina, this.stamina + (this.moving ? 7 : 14) * dt);
@@ -147,8 +158,8 @@ export class Player {
         let tau = this.moving ? MOVE.tauStart : MOVE.tauStop * (slippery ? MOVE.slipStop : 1);
         if (this.moving && (this.mvx * wantX + this.mvy * wantY) < 0) tau = MOVE.tauTurn;
         const turningHard = this.moving && (this.mvx * wantX + this.mvy * wantY) < 0;
-        if (icy) tau = this.moving ? (turningHard ? ICE.tauTurn : ICE.tauMove) : ICE.tauStop;
-        if (this.fallTimer > 0) tau = ICE.tauFallen;
+        if (slick) tau = this.moving ? (turningHard ? ICE.tauTurn : ICE.tauMove) : ICE.tauStop;
+        if (this.fallTimer > 0) tau = slick ? ICE.tauFallen : ICE.tauFallenDry;
         // Exact integration of dv/dt = (want - v)/tau over the frame, both
         // for the velocity and for the ground it covers. Euler would make the
         // ramp depend on the frame rate, and 30 FPS would walk a different
@@ -221,13 +232,18 @@ export class Player {
                 const roll = ((Math.imul(this.slipChecks, 1103515245) + 12345) >>> 0) / 4294967296;
                 if (roll < (turningHard ? ICE.chanceTurn : ICE.chanceRun)) {
                     this.fallTimer = ICE.fallTime; this.slipCooldown = ICE.cooldown;
+                    const v = Math.hypot(this.mvx, this.mvy) || 1;
+                    this.fallDirX = this.mvx / v; this.fallDirY = this.mvy / v;
                     this.stamina = Math.max(0, this.stamina - ICE.staminaCost);
                     this.actionTimer = 0; this.running = false;
                     if (this.bus) this.bus.emit("player:slipped", {});
                 }
             }
         } else if (!icy) this.slipDistance = 0;
-        this.advance(dt, moved, canRun);
+        if (this.fallTimer > 0) {
+            this.gait = approach(this.gait, 0, dt, 0.12);
+            this.runBlend = approach(this.runBlend, 0, dt, GAIT.blendRun);
+        } else this.advance(dt, moved, canRun);
 
         const vx = (this.x - x0) / dt, vy = (this.y - y0) / dt;
         // Contact resolution must not kick the torso back and forth. Filter
@@ -247,7 +263,7 @@ export class Player {
     /**
      * Distance-driven walk cycle.
      * One full cycle = `stride` pixels of ground, so the swing amplitude
-     * declared in charspec cancels the ground travel exactly.
+     * declared in charspec is capped to keep the legs within IK reach.
      */
     advance(dt, moved, running) {
         this.runBlend = approach(this.runBlend, running ? 1 : 0, dt, GAIT.blendRun);
@@ -298,13 +314,28 @@ export class Player {
     }
 
     toJSON() { return { x: this.x, y: this.y, dir: this.dir, stamina: this.stamina, name: this.name,
-        slipDistance: this.slipDistance, slipChecks: this.slipChecks, slipCooldown: this.slipCooldown, fallTimer: this.fallTimer }; }
+        slipDistance: this.slipDistance, slipChecks: this.slipChecks, slipCooldown: this.slipCooldown, fallTimer: this.fallTimer,
+        sprintLocked: this.sprintLocked, fallDirX: this.fallDirX, fallDirY: this.fallDirY,
+        fallMotion: this.fallTimer > 0 ? [this.mvx, this.mvy, this.iceCarry] : null }; }
     load(d) {
         if (d) Object.assign(this, d);
+        this.fallTimer = d?.fallTimer ?? 0;
+        this.sprintLocked = !!d?.sprintLocked;
+        this.mvx = this.mvy = this.iceCarry = 0; this.onIce = false;
         for (const [key, max] of [["fallTimer", ICE.fallTime], ["slipCooldown", ICE.cooldown], ["slipDistance", ICE.checkDistance], ["slipChecks", 4294967295]]) {
             this[key] = Number.isFinite(this[key]) ? Math.max(0, Math.min(max, this[key])) : 0;
         }
         this.slipChecks = Math.floor(this.slipChecks);
+        this.sprintLocked = !!this.sprintLocked;
+        this.fallDirX = Number.isFinite(this.fallDirX) ? Math.max(-1, Math.min(1, this.fallDirX)) : 1;
+        this.fallDirY = Number.isFinite(this.fallDirY) ? Math.max(-1, Math.min(1, this.fallDirY)) : 0;
+        if (this.fallTimer > 0 && Array.isArray(d?.fallMotion)) {
+            const [x, y, carry] = d.fallMotion;
+            this.mvx = Number.isFinite(x) ? Math.max(-300, Math.min(300, x)) : 0;
+            this.mvy = Number.isFinite(y) ? Math.max(-300, Math.min(300, y)) : 0;
+            this.iceCarry = Number.isFinite(carry) ? Math.max(0, Math.min(ICE.edgeMemory, carry)) : 0;
+        }
+        delete this.fallMotion;
         return this;
     }
 }

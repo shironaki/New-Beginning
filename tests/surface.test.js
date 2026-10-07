@@ -59,7 +59,7 @@ test("footprints use snow, slush and wet soil, but not underground", () => {
     assert.not(receivesSnow(T.CLIFF)); assert.not(receivesSnow(T.VOID));
 });
 
-test("puddles are seeded, grow in place and never cross a tile into water", () => {
+test("puddles are seeded, grow in place and stay within neighbouring-cell query reach", () => {
     let count = 0;
     for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) {
         const p = rainPuddle(x, y, T.ASH, 1);
@@ -69,10 +69,10 @@ test("puddles are seeded, grow in place and never cross a tile into water", () =
         const smaller = rainPuddle(x, y, T.ASH, 0.5);
         assert.eq(smaller.x, p.x); assert.eq(smaller.y, p.y);
         assert.lt(smaller.rx, p.rx); assert.lt(smaller.ry, p.ry);
-        assert.gte(p.x - p.rx - 2, x * 32);
-        assert.lte(p.x + p.rx + 2, (x + 1) * 32);
-        assert.gte(p.y - p.ry - 1, y * 32);
-        assert.lte(p.y + p.ry + 1, (y + 1) * 32);
+        assert.gte(p.x - p.rx - 2, (x - 1) * 32);
+        assert.lte(p.x + p.rx + 2, (x + 2) * 32);
+        assert.gte(p.y - p.ry - 1, (y - 1) * 32);
+        assert.lte(p.y + p.ry + 1, (y + 2) * 32);
     }
     assert.gt(count, 20); assert.lt(count, 150);
     for (const t of [T.WATER, T.DEEP, T.VOID, T.CLIFF, T.PLANK]) assert.eq(rainPuddle(1, 1, t, 1), null);

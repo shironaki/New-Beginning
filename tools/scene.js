@@ -11,6 +11,7 @@
  *   node tools/scene.js --list
  *
  * Flags
+ *   --relief           isolated daytime gameplay relief pilot
  *   --zone <id>        zone to enter (default: the starting valley)
  *   --at x,y           world position for the hero (default: the zone spawn)
  *   --near <kind>      stand next to the closest prop of that kind (--gap px)
@@ -76,7 +77,8 @@ globalThis.document.getElementById = (id) => (id === "game" ? screen : hudRoot);
 const { Game } = await import("../js/main.js");
 const seedArg = flag("seed", "ashes-and-grain");
 const seed = /^\d+$/.test(String(seedArg)) ? Number(seedArg) : String(seedArg);
-const game = new Game({ canvas: screen, hudRoot, seed });
+const GameClass = flag("relief", false) ? (await import("../js/dev/relief-trial.js")).ReliefTrialGame : Game;
+const game = new GameClass({ canvas: screen, hudRoot, seed });
 game.hud.hideStory();
 game.paused = false;
 

@@ -2,6 +2,7 @@
  * No overlapping per-tile coastline/cliff rectangles. Built floors keep their
  * authored square geometry; water animation queries the very same field.
  */
+import { waterIce } from "../world/water-state.js";
 import { T, tileInfo } from "../world/tiles.js";
 import { groundPalette, paintTile, paintSnowGround } from "./tilesart.js";
 import { woodedEdge } from "../world/edges.js";
@@ -36,6 +37,11 @@ export function terrainColour(field, wx, wy, season, palette) {
     let tone = grain * 7 + (field.noise(wx, wy, 57, 82) - 0.5) * 5;
     if (water) {
         if (field.biome === "shore") [r, g, b] = seaColour(s.coast);
+        const ice = waterIce(field.map, wx, wy, s.id);
+        if (ice.cover > 0) {
+            const c = ice.marine ? [166, 192, 204] : [183, 207, 217];
+            r += (c[0] - r) * ice.cover; g += (c[1] - g) * ice.cover; b += (c[2] - b) * ice.cover;
+        }
         tone *= 0.45;
         if (s.water < 0.58) {
             const foam = (0.58 - s.water) / 0.08 * 0.28;
@@ -91,6 +97,14 @@ export function bakeTerrain(ctx, zone, cx, cy, size, season) {
     for (let y = ((3 - oy) % 9 + 9) % 9; y < size; y += 9) for (let x = ((3 - ox) % 11 + 11) % 11; x < size; x += 11) {
         const wx = ox + x, wy = oy + y, v = field.noise(wx, wy, 3, 778);
         const s = field.sample(wx, wy);
+        if (tileInfo(s.id).liquid && waterIce(zone.map, wx, wy, s.id).cover >= 0.55) {
+            if (v > 0.75) {
+                ctx.strokeStyle = "rgba(238,248,251,0.65)"; ctx.lineWidth = 0.55;
+                ctx.beginPath(); ctx.moveTo(x - 4, y - 3); ctx.lineTo(x, y); ctx.lineTo(x + 6, y - 1);
+                ctx.moveTo(x, y); ctx.lineTo(x + 2, y + 4); ctx.stroke();
+            }
+            continue;
+        }
         if (tileInfo(s.id).liquid || s.id === T.CLIFF || built.has(s.id) || v < 0.63) continue;
         if (zone.def.biome === "shore" && s.id === T.SAND && season !== "winter") {
             const wrack = s.coast > -42 && s.coast < -12;
@@ -125,6 +139,7 @@ export function drawTerrainWater(ctx, zone, camera, time, daylight) {
             const xx = x + Math.sin(y * 0.14 + time * 0.6) * 6;
             const yy = y + Math.sin(x * 0.027 + time * 0.7) * 2;
             if (!tileInfo(zone.terrain.sample(xx, yy).id).liquid || !tileInfo(zone.terrain.sample(xx + 9, yy).id).liquid) continue;
+            if (waterIce(zone.map, xx, yy).cover >= 0.55) continue;
             const p = camera.worldToScreen(xx, yy);
             ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + (5 + Math.sin(time + x) * 3) * z, p.y - z * 0.4);
         }

@@ -41,7 +41,7 @@ for (const file of ["index.html", ...fs.readdirSync(path.join(ROOT, "dev")).filt
         const url = m[1];
         if (/^(https?:|data:|#|\/\/)/.test(url)) continue;
         checked++;
-        const target = path.relative(ROOT, path.resolve(ROOT, path.dirname(file), url)).split(path.sep).join("/");
+        const target = path.relative(ROOT, path.resolve(ROOT, path.dirname(file), url.split(/[?#]/)[0] || ".")).split(path.sep).join("/");
         if (url.startsWith("/")) problems.push(`${file}: абсолютный путь "${url}" — на Pages сайт лежит в подпапке`);
         else if (!exists(target)) problems.push(`${file}: нет файла ${url}`);
     }

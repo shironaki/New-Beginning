@@ -19,8 +19,8 @@
  *           0  └──────┘   ground, feet
  */
 
-/** Quantisation grid: 0.5 u = exactly 1 screen pixel at zoom 2. */
-export const QUANT = 0.5;
+/** Fine geometry grid: avoid whole-pixel joint jumps at fractional zooms. */
+export const QUANT = 0.125;
 
 /**
  * Body proportions — "Albion lean": small head, heavy shoulders, waist pulled
@@ -30,25 +30,25 @@ export const QUANT = 0.5;
  * head : body ≈ 1 : 4.4
  */
 export const BODY = {
-    total: 33,
+    total: 36,
 
-    headH: 7.5,
+    headH: 7.2,
     headW: 6.8,
-    headY: -33,              // top of the skull
+    headY: -36,              // top of the skull
 
-    torsoY: -25,             // shoulder line
-    torsoH: 13,
+    torsoY: -28.4,             // shoulder line
+    torsoH: 12.4,
     shoulderW: 11.5,           // front/back view
     shoulderWSide: 8.0,      // profile is narrower — that is what sells the turn
     waistW: 8.5,             // the pinch, at 72% down the torso
     waistAt: 0.72,
     hipW: 9,
 
-    hipY: -12,
+    hipY: -15.8,
     legW: 3.8,
     legGap: 1.0,
-    thigh: 5.0,
-    shin: 4.8,
+    thigh: 7.0,
+    shin: 6.6,
 
     ankleY: -2.4,
     bootW: 5.2,
@@ -56,8 +56,8 @@ export const BODY = {
     bootToe: 1.5,            // how far the toe sticks out past the ankle
     idleStance: 1.2,         // profile: feet part this much when standing
 
-    armY: -24,               // shoulder pivot, just under the shoulder line
-    armLen: 11,
+    armY: -27.4,               // shoulder pivot, just under the shoulder line
+    armLen: 12.2,
     armW: 2.5,
     sleeveW: 1.3,            // the shoulder is wider than the forearm
     handH: 2.2,              // readable fingers, not a square cuff
@@ -119,11 +119,11 @@ export const PALETTE = {
     // Selective contour: dark only where the form turns AWAY from the sun.
     // A uniform outline makes an icon; this makes an object in a world.
     outline: "rgba(26,20,14,0.55)",
-    outlineW: QUANT,
+    outlineW: 0.4,
     ao: "rgba(0,0,0,0.22)",  // ambient occlusion in the joints
-    aoW: QUANT,
+    aoW: 0.4,
     rim: "rgba(255,236,200,0.34)",
-    rimW: QUANT
+    rimW: 0.4
 };
 
 /** Contact shadow — anchored to the centroid of the feet, not the sprite. */
@@ -170,19 +170,15 @@ export const SHADOW = {
     // the hero planted. Only the soft halo leans with the sun, and never more
     // than this, so the hero is lit by the same sun as the trees without ever
     // looking like he is hovering next to his own shadow.
-    castHeight: 26,          // u of body that actually throws a shadow
+    castHeight: 29,          // u of body that actually throws a shadow
     sunLean: 2.6,            // u of halo offset at a full-length sun shadow
     sunStretch: 0.35         // halo radii gained along the sun direction
 };
 
 /**
- * Locomotion. The whole point: the phase is driven by DISTANCE, so the feet
- * cannot outrun or lag behind the ground.
- *
- *   stride  — screen pixels of ground covered by one full cycle (two steps)
- *   swing   — foot travel amplitude; strideUnits / 4 means zero slip:
- *             one step covers stride/2 px = stride/4 u, and the foot moves
- *             2 * swing = stride/4 u relative to the hip. Exactly matched.
+ * Distance-driven locomotion with an IK-bounded foot swing. This is not a
+ * world-space foot-lock solver: cadence follows travel, amplitude stays
+ * inside the leg's reach so a longer stride does not pump the head.
  */
 /**
  * Ground physics of the hero. Instant velocity made the hero feel weightless:
@@ -212,14 +208,14 @@ export const MOVE = {
 
 export const GAIT = {
     strideWalk: 24,          // px of ground per cycle  -> 2.83 cycles/s at 68 px/s
-    strideRun: 34,           //                         -> 3.47 cycles/s at 118 px/s
+    strideRun: 46,           //                         -> 3.47 cycles/s at 118 px/s
     pxPerUnit: 2,            // camera zoom; stride is quoted in screen px
     cadenceCap: 4.2,         // cycles/s, guards against a sewing machine on buffs
 
     liftWalk: 1.8,           // max foot lift
     liftRun: 2.6,
-    bobWalk: 0.9,            // hips rise when the legs PASS, i.e. |cos(phase)|
-    bobRun: 1.4,
+    bobWalk: 0.45,            // hips rise when the legs PASS, i.e. |cos(phase)|
+    bobRun: 0.65,
     armRatio: 0.75,          // arm swing relative to leg swing
     armRatioTool: 0.40,      // the hand holding a tool swings less
     leanRun: 1.2,            // torso offset into the direction of travel
@@ -230,7 +226,7 @@ export const GAIT = {
     leanAccel: 2.6,          // px of torso offset at the reference acceleration
     accelRef: 900,           // px/s² — full-tilt start from standing
     leanAccelTau: 0.09,      // s — the torso itself has a little give
-    squash: 0.015,           // ±1.5% on contact — a hint, not a bounce
+    squash: 0.006,           // ±1.5% on contact — a hint, not a bounce
     kneeBend: 0.6,           // how hard the IK pushes the knee forward (0..1)
 
     blendWalk: 0.12,         // s, idle <-> walk
@@ -245,7 +241,7 @@ export const GAIT = {
     hipSway: 0,              // lateral pelvis travel, head-on — DO NOT RAISE
     shoulderCounter: 0,      // follows the sway; zero while the sway is zero
     clothLagPhase: 0.5,      // rad the belt flap trails the pelvis
-    heelStrike: 0.6,         // extra dip on contact — this is where weight lives
+    heelStrike: 0.12,         // extra dip on contact — this is where weight lives
 
     // Diagonals. There is no separate three-quarter pose; the side view is
     // used (it is the only one with a readable stride) and the body is
@@ -293,4 +289,16 @@ export function approach(cur, target, dt, seconds) {
 }
 
 /** Shared whole-body fall transform and held-light anchor (world units). */
-export const ATTACH = { fallAngle: 1.15, fallY: 2, flameHeight: 16 };
+export const ATTACH = { fallAngle: 1.32, fallY: 2, fallTime: 1.65, flameHeight: 16 };
+
+/** Continuous stumble → slide → get-up; shared by body and held light. */
+export function fallPose(p) {
+    if (!(p.fallTimer > 0)) return { angle: 0, y: 0, crouch: 0, amount: 0 };
+    const elapsed = Math.max(0, ATTACH.fallTime - p.fallTimer);
+    const down = easeInOutSine(elapsed / 0.32);
+    const stand = easeInOutSine((elapsed - 1.05) / 0.6);
+    const amount = down * (1 - stand);
+    const sign = Math.abs(p.fallDirX || 0) > 0.05 ? Math.sign(p.fallDirX) : Math.abs(p.fallDirY || 0) > 0.05 ? Math.sign(p.fallDirY) : p.dir === "left" ? -1 : 1;
+    return { angle: ATTACH.fallAngle * amount * sign, y: ATTACH.fallY * amount,
+        crouch: 2.5 * Math.sin(stand * Math.PI) + 1.5 * Math.sin(down * Math.PI), amount };
+}
