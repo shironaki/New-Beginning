@@ -79,6 +79,16 @@ test("larger puddles have matching collision beyond their origin tile", () => {
     }
     assert.ok(found);
 });
+test("broad puddle edges do not extend under a tent roof", () => {
+    const z = generateZone("ashfall", 1066618561); let p = null, tx = 0, ty = 0;
+    for (let y = 4; y < z.h - 4 && !p; y++) for (let x = 4; x < z.w - 4 && !p; x++) {
+        const candidate = surfacePuddle(z, x, y, 1);
+        if (candidate?.rx > 20) { p = candidate; tx = x; ty = y; }
+    }
+    assert.ok(p);
+    z.objects.push({ kind: "tent", x: p.x + p.rx + 20, y: p.y });
+    assert.eq(surfacePuddle(z, tx, ty, 1), null);
+});
 const winter = (daylight = 0) => ({ season: { key: "winter" }, daylight });
 function lake() {
     const map = new TileMap(10, 10, T.GRASS);

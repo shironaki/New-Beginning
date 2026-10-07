@@ -257,6 +257,7 @@ export function installDevTools(game, win = window) {
         const trial = el("a", { textContent: "↗ Игровой участок: хворост и костёр", href: "?relief=1", target: "_self" });
         trial.style.color = "#e2c58e";
         row(trial);
+        p.append(el("small", { textContent: "Откроется в этой вкладке: текущий запуск игры будет закрыт. Сохранения не удаляются." }));
 
         // ---- time
         add("Время");

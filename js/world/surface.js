@@ -98,6 +98,6 @@ export function surfacePuddle(zone, tx, ty, wet) {
     for (const dx of [-p.rx, 0, p.rx]) for (const dy of [-p.ry, 0, p.ry]) {
         if (!receivesRain(zone.map.at(p.x + dx, p.y + dy))) return null;
     }
-    if (zone.objects?.some((o) => !o.removed && o.kind === "tent" && Math.abs(o.x - p.x) < 28 && Math.abs(o.y - p.y) < 18)) return null;
+    if (zone.objects?.some((o) => !o.removed && o.kind === "tent" && Math.abs(o.x - p.x) < 28 + p.rx && Math.abs(o.y - p.y) < 18 + p.ry)) return null;
     return p;
 }
