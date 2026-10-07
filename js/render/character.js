@@ -18,7 +18,7 @@
  * Body frame: origin between the feet, on the ground; up is negative Y.
  */
 import { SUN, castShadow } from "./tilesart.js";
-import { BODY, GEAR, TONE, PALETTE, READ, SHADOW, WADE, GAIT, ACTION, clamp01, easeInOutSine, q } from "./charspec.js";
+import { BODY, GEAR, TONE, PALETTE, READ, SHADOW, WADE, GAIT, ACTION, ATTACH, clamp01, easeInOutSine, q } from "./charspec.js";
 
 export const DEFAULT_LOOK = {
     skin: "#e2b48a",
@@ -209,12 +209,59 @@ export function posture(p) {
         lean, squash, stance, swing };
 }
 
+/** Anatomical RIGHT hand: screen-left head-on, screen-right from behind;
+ * near in right profile, far in left profile. Never swaps hands for visibility. */
+export function armRig(p, pose = posture(p)) {
+    const { sideView, side, back, bob, counter, lean, swingN, swingF, swing, g, idle } = pose;
+    const make = (x, reach, lift) => {
+        const sx = x + counter + lean, sy = BODY.armY - bob;
+        const ex = sx + reach, ey = sy + BODY.armLen - Math.abs(reach) * 0.25 - lift;
+        return { sx, sy, ex, ey, mx: (sx + ex) / 2 + reach * 0.1, my: (sy + ey) / 2 };
+    };
+    const ax = BODY.shoulderW / 2 + BODY.armW / 2 - 1;
+    const behind = p.dir === "left" || back;
+    const rest = Math.sin(idle * 1.3) * 0.45 * (1 - g);
+    const right = sideView
+        ? make(behind ? -BODY.farArmX * side : BODY.nearArmX * side,
+            -(behind ? swingF : swingN) * GAIT.armRatioTool + side * swing * 2.2 + rest,
+            Math.max(0, swing) * 1.5)
+        : make(back ? ax : -ax, rest, (back ? 1 : -1) * swingN * GAIT.armRatioTool - swing * 2.2);
+    const left = sideView
+        ? make(behind ? BODY.nearArmX * side : -BODY.farArmX * side,
+            -(behind ? swingN : swingF) * GAIT.armRatio - rest, 0)
+        : make(back ? -ax : ax, -rest, (back ? -1 : 1) * swingN * GAIT.armRatio);
+    return { right, left, behind };
+}
+
+function heldToolAngle(dir, side, swing) {
+    const lean = dir === "up" ? 0.35 : dir === "down" ? -0.4 : side * 0.45;
+    return lean - side * swing * 1.9;
+}
+
+/** Shared attachment for sprite and light map, relative to the foot line. */
+export function toolAttachment(p) {
+    const pose = posture(p), rig = armRig(p, pose);
+    const dir = p.dir || "down";
+    const angle = heldToolAngle(dir, pose.side, pose.swing);
+    const gx = rig.right.ex, gy = rig.right.ey + BODY.handH / 2 - 0.5;
+    const narrow = pose.sideView ? 1 - GAIT.slantNarrow * Math.abs(p.slant || 0) : 1;
+    let x = (gx + Math.sin(angle) * ATTACH.flameHeight) * narrow, y = gy - Math.cos(angle) * ATTACH.flameHeight;
+    if (p.fallTimer > 0) {
+        const a = ATTACH.fallAngle, xx = x;
+        x = xx * Math.cos(a) - y * Math.sin(a);
+        y = xx * Math.sin(a) + y * Math.cos(a) + ATTACH.fallY;
+    }
+    return { x, y, gripX: gx, gripY: gy, angle, behind: rig.behind };
+}
+
 /**
  * @param {CanvasRenderingContext2D} ctx translated to the character's feet
  * @param {object} p { dir, phase|anim, gait|moving, runBlend, look,
  *                     actionTimer, tool, idleTime }
  */
 export function drawCharacter(ctx, p) {
+    ctx.save();
+    if (p.fallTimer > 0) { ctx.translate(0, ATTACH.fallY); ctx.rotate(ATTACH.fallAngle); }
     // A diagonal is drawn as the side view, turned: the body narrows a little
     // and the head leads the travel direction. Cheap, and it stops diagonal
     // movement from looking like the hero is sliding on rails.
@@ -300,12 +347,6 @@ export function drawCharacter(ctx, p) {
     };
 
     /* ---- arms: kinematics first, the tool needs the hand --------------- */
-    const armPose = (shoulderX, reach, lift) => {
-        const sx = shoulderX + counter, sy = BODY.armY - bob + lean;
-        const ex = sx + reach, ey = sy + BODY.armLen - Math.abs(reach) * 0.25 - lift;
-        return { sx, sy, ex, ey, mx: (sx + ex) / 2 + reach * 0.1, my: (sy + ey) / 2 };
-    };
-
     const paintHand = (a, far) => {
         // The cuff line: a hand that butts straight onto a sleeve of the same
         // value disappears at this size.
@@ -331,21 +372,12 @@ export function drawCharacter(ctx, p) {
         if (hand) paintHand(a, far);
     };
 
-    // Arms counter-swing the legs: the far arm goes with the NEAR leg. Head-on
-    // the tool is in the right hand, from behind it is on the left, so the free
-    // arm swaps sides too — otherwise the hero loses an arm.
-    const ax0 = BODY.shoulderW / 2 + BODY.armW / 2 - 1.0;      // outside, slight overlap
-    const farArm = sideView
-        ? armPose(-BODY.farArmX * side, -swingF * GAIT.armRatio, 0)
-        : armPose(back ? ax0 : -ax0, 0, (back ? 1 : -1) * swingN * GAIT.armRatio);
-    const toolArm = sideView
-        ? armPose(BODY.nearArmX * side,
-            -swingN * GAIT.armRatioTool + side * swing * 2.2, Math.max(0, swing) * 1.5)
-        : armPose(back ? -ax0 : ax0, 0,
-            (back ? -1 : 1) * swingN * GAIT.armRatioTool - swing * 2.2);
-
-    if (sideView) paintArm(farArm, true);
-    if (p.tool && back) { drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, true); paintHand(toolArm, false); }
+    const rig = armRig(p);
+    const toolArm = rig.right, farArm = rig.left;
+    if (rig.behind) {
+        paintArm(toolArm, true, !p.tool);
+        if (p.tool) { drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, true); paintHand(toolArm, true); }
+    } else paintArm(farArm, true);
 
     if (sideView) {
         drawLeg(-0.9 * side, swingF - stance, liftF, true, side);
@@ -371,7 +403,8 @@ export function drawCharacter(ctx, p) {
     const waistY = top + BODY.torsoH * BODY.waistAt;
     const narrow = sideView ? BODY.shoulderWSide / BODY.shoulderW : 1;
     const rows = [
-        [top, BODY.shoulderW / 2 * narrow],
+        [top, BODY.shoulderW * 0.36 * narrow],
+        [top + 1.5, BODY.shoulderW / 2 * narrow],
         [waistY, BODY.waistW / 2 * narrow],
         [bottom, BODY.hipW / 2 * narrow]
     ];
@@ -387,6 +420,11 @@ export function drawCharacter(ctx, p) {
         rect(ctx, -2, top, 4, 1.5, band(shirt, "dark"), false);                        // collar
     }
 
+    if (!back) {
+        poly(ctx, [[-3, top], [3, top + 0.5], [1, top + 3], [-1.5, top + 2.5]], look.accent, false);
+        poly(ctx, [[1, top + 2], [3, top + 2], [2.5 + Math.sin(idle * 1.7) * 0.7, top + 6], [0.5, top + 5]],
+            shadeHex(look.accent, -16), false);
+    }
     // Belt, buckle and the accent flap that trails the pelvis.
     const beltY = bottom - 2.2;
     rect(ctx, -rows[2][1] - 0.2, beltY, rows[2][1] * 2 + 0.4, 2.2, PALETTE.belt);
@@ -423,17 +461,19 @@ export function drawCharacter(ctx, p) {
     };
 
     /* ---- near arm ------------------------------------------------------- */
-    if (!sideView) paintArm(farArm, false);
-    paintArm(toolArm, false, !p.tool);        // with a tool the hand comes later
     paintPauldrons();
 
     /* ---- head ----------------------------------------------------------- */
     let headY = BODY.headY - bob;
     const headH = BODY.headH, headW = BODY.headW;
-    const headX = (sideView ? side * 0.5 : 0) + counter * 0.5;
+    const headX = (sideView ? side * 0.5 : 0) + counter * 0.5
+        + Math.sin(idle * 0.65) * 0.45 * (1 - g);
     if (turning) headY += GAIT.slantHead * slant;      // look where you are going
     rect(ctx, -2.2, headY + headH - 0.5, 4.4, 1.6, PALETTE.ao, false);          // neck
-    rect(ctx, headX - headW / 2, headY, headW, headH, skin);
+    poly(ctx, [[headX - headW / 2 + 1, headY], [headX + headW / 2 - 1, headY],
+        [headX + headW / 2, headY + 2], [headX + headW / 2 - 0.5, headY + headH - 1.5],
+        [headX + 1.5, headY + headH], [headX - 1.5, headY + headH],
+        [headX - headW / 2, headY + headH - 2], [headX - headW / 2, headY + 2]], skin);
     rect(ctx, headX + headW / 2 - 1.8, headY + 1, 1.8, headH - 1, shadeHex(skin, PALETTE.skinShade), false);
     rect(ctx, headX - headW / 2, headY + 1, 1.3, headH - 2, shadeHex(skin, PALETTE.skinLit), false);
     rect(ctx, headX - headW / 2, headY + 1, PALETTE.rimW, headH - 3, PALETTE.rim, false);
@@ -480,9 +520,12 @@ export function drawCharacter(ctx, p) {
 
     ctx.restore();
 
-    // Tool in the near hand, in front of the body; the fist closes over the
+    if (rig.behind) paintArm(farArm, false);
+    else paintArm(toolArm, false, !p.tool);
+
+    // Tool in the anatomical right hand, with direction-correct occlusion; the fist closes over the
     // handle afterwards so the grip reads as a grip and not as a loose block.
-    if (p.tool && !back) {
+    if (p.tool && !rig.behind) {
         drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, false);
         paintHand(toolArm, false);
     }
@@ -511,6 +554,7 @@ export function drawCharacter(ctx, p) {
     }
 
     if (turning) ctx.restore();
+    ctx.restore();
 }
 
 /**
@@ -521,8 +565,7 @@ function drawHeldTool(ctx, tool, dir, side, swing, arm, behind) {
     // The grip IS the hand of the tool arm — passing a fixed GRIP_Y used to
     // leave the knife floating next to a second, phantom hand.
     const gx = arm.ex, gy = arm.ey + BODY.handH / 2 - 0.5;
-    const lean = dir === "up" ? -0.35 : dir === "down" ? 0.3 : side * 0.45;
-    const angle = lean - side * swing * 1.9;
+    const angle = heldToolAngle(dir, side, swing);
 
     ctx.save();
     ctx.translate(gx, gy);

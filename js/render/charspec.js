@@ -289,3 +289,6 @@ export function approach(cur, target, dt, seconds) {
     if (cur > target) return Math.max(target, cur - step);
     return target;
 }
+
+/** Shared whole-body fall transform and held-light anchor (world units). */
+export const ATTACH = { fallAngle: 1.15, fallY: 2, flameHeight: 16 };

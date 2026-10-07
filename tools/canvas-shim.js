@@ -398,7 +398,16 @@ export class ShimContext {
         }
         return { data: out, width: w, height: h };
     }
-    putImageData() {}
+    createImageData(w, h) { return { data: new Uint8ClampedArray(w * h * 4), width: w, height: h }; }
+    putImageData(image, x, y) {
+        // Like Canvas: raw pixels ignore transform, alpha and clip.
+        for (let j = 0; j < image.height; j++) for (let i = 0; i < image.width; i++) {
+            const px = x + i, py = y + j;
+            if (px < 0 || py < 0 || px >= this.canvas.width || py >= this.canvas.height) continue;
+            const si = (j * image.width + i) * 4, di = (py * this.canvas.width + px) * 4;
+            this.canvas.data.set(image.data.subarray(si, si + 4), di);
+        }
+    }
 
     createRadialGradient(x0, y0, r0, x1, y1, r1) {
         const p0 = this._pt(x0, y0), p1 = this._pt(x1, y1), k = this._scaleFactor();

@@ -14,8 +14,9 @@
 import { CHUNK } from "../world/tilemap.js";
 import { TILE_SIZE, TILES } from "../world/tiles.js";
 import { paintTile, paintSnowGround, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, setWalker, setBreeze, propHeight, propTone, puddleScreenPath, coastReach } from "./tilesart.js";
-import { drawCharacter, drawSleeping } from "./character.js";
+import { drawCharacter, drawSleeping, toolAttachment } from "./character.js";
 import { LightMap, LIGHT } from "./lighting.js";
+import { bakeTerrain, drawTerrainWater } from "./terrain.js";
 import { drawWetGround } from "./surface.js";
 import { itemEmoji } from "../sandbox/items.js";
 
@@ -220,6 +221,11 @@ export class Renderer {
         cv.width = size; cv.height = size;
         const c = cv.getContext("2d");
         c.imageSmoothingEnabled = false;
+        if (zone.terrain) {
+            bakeTerrain(c, zone, cx, cy, size, this.season);
+            this.stats.baked++;
+            return cv;
+        }
         for (let ty = 0; ty < CHUNK; ty++) {
             for (let tx = 0; tx < CHUNK; tx++) {
                 const wx = cx * CHUNK + tx, wy = cy * CHUNK + ty;
@@ -339,6 +345,7 @@ export class Renderer {
      * visible tiles, two strokes each.
      */
     drawWater(zone, daylight = 1, hour = 12, underground = false) {
+        if (zone.terrain) { drawTerrainWater(this.ctx, zone, this.camera, this.time, daylight); return this; }
         const cam = this.camera;
         const ctx = this.ctx;
         const t = this.time;
@@ -590,10 +597,9 @@ export class Renderer {
             if (!cam.isVisible(obj.x, obj.y, 120)) continue;
             // Where does the water start below it? A tree may stand a little
             // way up the bank and still be mirrored — but only a little.
-            const tx = Math.floor(obj.x / TILE_SIZE);
             let start = -1;
             for (let d = 4; d <= MIRROR.gap; d += 4) {
-                const info = TILES[zone.map.get(tx, Math.floor((obj.y + d) / TILE_SIZE))];
+                const info = zone.map.infoAt(obj.x, obj.y + d);
                 if (info && info.liquid) { start = d; break; }
             }
             if (start < 0) continue;
@@ -608,16 +614,20 @@ export class Renderer {
                 // The bar has to be ON water: the map decides where the
                 // reflection ends, so it never spills onto the bank.
                 const wy = obj.y + start + d;
-                const info = TILES[zone.map.get(Math.floor(obj.x / TILE_SIZE), Math.floor(wy / TILE_SIZE))];
+                const info = zone.map.infoAt(obj.x, wy);
                 if (!info || !info.liquid) break;
                 const wob = Math.sin(t * MIRROR.wobbleHz * Math.PI * 2 - d * MIRROR.wobbleK)
                           * MIRROR.wobbleAmp * (0.4 + f);
                 const w = halfW * (1 - f * MIRROR.taper);
                 const a = strength * near * (1 - f * MIRROR.fade);
                 if (a <= 0.004) break;
-                const sc = cam.worldToScreen(obj.x + wob - w, wy);
                 ctx.globalAlpha = a;
-                ctx.fillRect(sc.x, sc.y, w * 2 * z, MIRROR.rowStep * MIRROR.barFill * z + 1);
+                for (let dx = -w; dx < w; dx += 2) {
+                    const wx = obj.x + wob + dx, width = Math.min(2, w - dx);
+                    if (!zone.map.infoAt(wx, wy).liquid || !zone.map.infoAt(wx + width, wy + 2).liquid) continue;
+                    const sc = cam.worldToScreen(wx, wy);
+                    ctx.fillRect(sc.x, sc.y, width * z, MIRROR.rowStep * MIRROR.barFill * z);
+                }
             }
             ctx.globalAlpha = 1;
         }
@@ -682,6 +692,8 @@ export class Renderer {
                 drawCharacter(ctx, {
                     dir: o.dir, phase: o.anim, gait: o.gait, runBlend: o.runBlend,
                     slant: o.slant, moving: o.moving, look: state.look,
+                    ax: o.ax, ay: o.ay, faceX: o.faceX, faceY: o.faceY,
+                    fallTimer: o.fallTimer,
                     actionTimer: o.actionTimer, tool: state.tool, idleTime: this.time,
                     wading: this._inWater(state.zone, o.x, o.y)
                 });
@@ -728,7 +740,11 @@ export class Renderer {
                 push(obj.x, obj.y, fire.lightRadius, 0.55 + fire.intensity * 0.45);
             }
         }
-        if (state.playerLight > 0) push(state.player.x, state.player.y - 8, state.playerLight, 0.8);
+        if (state.playerLight > 0) {
+            const p = state.player;
+            const attachment = toolAttachment({ ...p, phase: p.anim, idleTime: this.time });
+            push(p.x + attachment.x, p.y + attachment.y, state.playerLight, 0.8);
+        }
         for (const L of state.extraLights || []) push(L.x, L.y, L.r, L.i || 0.7);
         out.length = n;
         setFireLights(out);
@@ -738,7 +754,7 @@ export class Renderer {
     /** Is this world point standing in water? (Used for the waterline.) */
     _inWater(zone, x, y) {
         if (!zone || !zone.map) return false;
-        const info = TILES[zone.map.get(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE))];
+        const info = zone.map.infoAt(x, y);
         return !!(info && info.liquid);
     }
 

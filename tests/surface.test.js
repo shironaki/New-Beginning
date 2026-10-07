@@ -170,7 +170,7 @@ test("note 003 is four dirt tiles, now blended continuously on all four sides", 
 });
 
 test("wet layer persists in clear weather; disabled underground and when dry", () => {
-    const zone = { map: { w: 8, h: 8, get: () => T.ASH }, objects: [] };
+    const zone = { map: { w: 8, h: 8, get: () => T.ASH, at: () => T.ASH }, objects: [] };
     const cam = { x: 0, y: 0, viewW: 256, viewH: 256, zoom: 1, worldToScreen: (x, y) => ({ x, y }) };
     const render = (wet, underground = false) => {
         const cv = new ShimCanvas(256, 256);

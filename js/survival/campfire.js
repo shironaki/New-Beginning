@@ -6,6 +6,7 @@
  * it, and the fire itself is light, warmth, safety and the place where (later)
  * the settlers gather in the evening.
  */
+import { fireExposure } from "./fire-weather.js";
 import { burnValue, itemDef } from "../sandbox/items.js";
 import { resolveSpit, resolvePot } from "./cooking.js";
 
@@ -67,6 +68,10 @@ export class Campfire {
         this.pot = null;            // { ingredients: [], water: bool, progress, result, time }
         this.hasPot = false;
         this.flicker = 0;           // render-only animation phase
+        this.damp = 0;
+        this.ignitionProgress = 0;
+        this.exposure = fireExposure();
+        this.lastFailure = "";
         this.ashes = 0;             // charcoal/ash accumulating under the fire
     }
 
@@ -81,6 +86,8 @@ export class Campfire {
             return false;
         }
         const left = Math.min(burn, this.maxFuel - this.fuel);
+        // Fuel carried in the pack is drier than the exposed pile.
+        this.damp *= this.fuel / (this.fuel + left);
         this.pieces.push({ id: itemId, left, total: burn, seed: Math.floor(Math.random() * 1000) });
         this.fuel = Math.min(this.maxFuel, this.fuel + burn);
         if (this.bus) this.bus.emit("fire:fuel", { itemId, fuel: this.fuel, burn });
@@ -102,6 +109,7 @@ export class Campfire {
 
     /** Light it. Needs fuel and something to spark with. */
     light({ hasFlint = true } = {}) {
+        this.lastFailure = "";
         if (this.lit) return false;
         if (this.fuel <= 0) {
             if (this.bus) this.bus.emit("fire:fail", { reason: "no_fuel" });
@@ -111,6 +119,15 @@ export class Campfire {
             if (this.bus) this.bus.emit("fire:fail", { reason: "no_flint" });
             return false;
         }
+        const attempts = this.exposure.ignition + Math.floor(this.damp * 2);
+        this.ignitionProgress++;
+        if (this.ignitionProgress < attempts) {
+            this.lastFailure = `Сырой розжиг: попытка ${this.ignitionProgress}/${attempts}. Прикрой трут и попробуй ещё`;
+            if (this.bus) this.bus.emit("fire:fail", { reason: "weather", text: this.lastFailure });
+            return false;
+        }
+        this.ignitionProgress = 0;
+        this.lastFailure = "";
         this.lit = true;
         if (this.bus) this.bus.emit("fire:lit", {});
         return true;
@@ -131,8 +148,9 @@ export class Campfire {
     get intensity() {
         if (!this.lit) return 0;
         const FADE = 600;                       // in-game seconds of dying down
-        if (this.fuel > FADE) return 1;
-        return Math.max(0.22, this.fuel / FADE);
+        const strength = this.exposure.heat * (1 - this.damp * 0.45);
+        if (this.fuel > FADE) return strength;
+        return Math.max(0.12, this.fuel / FADE * strength);
     }
 
     get warmth() { return this.intensity * 26; }      // °C added at the fire
@@ -221,7 +239,11 @@ export class Campfire {
      * Integrated in sub-steps so that a single large dt (sleeping, loading a
      * save) burns fuel and cooks food exactly like many small frames would.
      */
-    update(dt) {
+    setExposure(environment) { this.exposure = fireExposure(environment); return this; }
+
+    update(dt, environment = null) {
+        if (environment) this.setExposure(environment);
+        if (!Number.isFinite(dt) || dt <= 0) return this;
         const MAX = 5;
         while (dt > MAX) { this._step(MAX); dt -= MAX; }
         return this._step(dt);
@@ -229,9 +251,14 @@ export class Campfire {
 
     _step(dt) {
         this.flicker += dt;
+        // A well-fed blaze dries itself; a dying fire can be drowned by rain.
+        const drying = this.lit && this.fuel > 900 ? 0.00065 : 0.00006;
+        this.damp = Math.max(0, Math.min(1, this.damp + dt * (this.exposure.rain * 0.0008 - drying)));
+        if (this.lit && this.exposure.rain > 0.4 && this.fuel < 600 && this.damp > 0.3) this.extinguish("rain");
         if (this.lit) {
             // Burn through the pile piece by piece, oldest first.
-            let rest = dt;
+            const burn = dt * this.exposure.burn;
+            let rest = burn;
             while (rest > 0 && this.pieces.length) {
                 const piece = this.pieces[0];
                 const used = Math.min(rest, piece.left);
@@ -242,7 +269,7 @@ export class Campfire {
                     this.ashes += 1;
                 }
             }
-            this.fuel = Math.max(0, this.fuel - dt);
+            this.fuel = Math.max(0, this.fuel - burn);
             if (this.fuel <= 0 || !this.pieces.length) {
                 this.fuel = 0;
                 this.pieces.length = 0;
@@ -266,7 +293,7 @@ export class Campfire {
     /** Short status line for the interaction prompt. */
     status() {
         if (!this.lit) return this.fuel > 0 ? "Костёр готов к розжигу" : "Холодное кострище";
-        const mins = Math.ceil(this.fuel / 60);
+        const mins = Math.ceil(this.fuel / (60 * this.exposure.burn));
         if (mins >= 60) {
             const h = Math.floor(mins / 60);
             return `Горит · топлива на ~${h} ч ${mins % 60} мин`;
@@ -276,6 +303,7 @@ export class Campfire {
 
     toJSON() {
         return {
+            damp: this.damp, ignitionProgress: this.ignitionProgress,
             lit: this.lit, fuel: this.fuel, hasPot: this.hasPot, ashes: this.ashes,
             pieces: this.pieces.map((p) => ({ id: p.id, left: p.left, total: p.total, seed: p.seed })),
             spit: this.spit.map((s) => (s ? s.toJSON() : null)),
@@ -286,6 +314,8 @@ export class Campfire {
 
     load(d) {
         if (!d) return this;
+        this.damp = Number.isFinite(d.damp) ? Math.max(0, Math.min(1, d.damp)) : 0;
+        this.ignitionProgress = Number.isFinite(d.ignitionProgress) ? Math.floor(Math.max(0, Math.min(5, d.ignitionProgress))) : 0;
         this.lit = !!d.lit; this.fuel = d.fuel || 0; this.hasPot = !!d.hasPot; this.ashes = d.ashes || 0;
         this.pieces = (d.pieces || []).map((p) => ({ id: p.id, left: p.left, total: p.total, seed: p.seed || 0 }));
         // Saves from before the pile existed: rebuild one anonymous piece.

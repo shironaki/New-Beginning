@@ -38,7 +38,7 @@ export class TileMap {
     }
 
     /** Tile under a world-unit position. */
-    at(wx, wy) { return this.get(Math.floor(wx / this.tileSize), Math.floor(wy / this.tileSize)); }
+    at(wx, wy) { return this.terrain ? this.terrain.sample(wx, wy).id : this.get(Math.floor(wx / this.tileSize), Math.floor(wy / this.tileSize)); }
 
     solidAt(wx, wy) { return isSolidTile(this.at(wx, wy)); }
     speedAt(wx, wy) { return tileSpeed(this.at(wx, wy)); }
@@ -49,11 +49,11 @@ export class TileMap {
     markDirtyAt(x, y) {
         const cx = Math.floor(x / CHUNK), cy = Math.floor(y / CHUNK);
         this.dirtyChunks.add(this.chunkKey(cx, cy));
-        // Neighbouring chunks may blend across the seam (autotiling).
-        if (x % CHUNK === 0 && cx > 0) this.dirtyChunks.add(this.chunkKey(cx - 1, cy));
-        if (y % CHUNK === 0 && cy > 0) this.dirtyChunks.add(this.chunkKey(cx, cy - 1));
-        if (x % CHUNK === CHUNK - 1 && cx < this.chunksX - 1) this.dirtyChunks.add(this.chunkKey(cx + 1, cy));
-        if (y % CHUNK === CHUNK - 1 && cy < this.chunksY - 1) this.dirtyChunks.add(this.chunkKey(cx, cy + 1));
+        // Bilinear natural contours also cross diagonal chunk boundaries.
+        for (const dx of [-1, 0, 1]) for (const dy of [-1, 0, 1]) {
+            const nx = Math.floor((x + dx) / CHUNK), ny = Math.floor((y + dy) / CHUNK);
+            if (nx >= 0 && ny >= 0 && nx < this.chunksX && ny < this.chunksY) this.dirtyChunks.add(this.chunkKey(nx, ny));
+        }
         return this;
     }
 

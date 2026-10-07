@@ -12,6 +12,7 @@ import path from "node:path";
 import { ShimCanvas, encodePNG } from "./canvas-shim.js";
 import { drawCharacter } from "../js/render/character.js";
 
+const torch = process.argv.includes("--torch");
 const OUT = path.resolve(".artifacts");
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -51,12 +52,12 @@ DIRS.forEach((dir, row) => {
         drawCharacter(ctx, {
             dir, phase: col.phase, gait: col.gait, runBlend: col.run,
             actionTimer: col.act, idleTime: 1.2 + row * 0.7,
-            tool: { id: "axe_stone", tool: "axe" }
+            tool: torch ? { id: "torch", tool: "torch" } : { id: "axe_stone", tool: "axe" }
         });
         ctx.restore();
     });
 });
 
-const file = path.join(OUT, "hero-sheet.png");
+const file = path.join(OUT, torch ? "hero-torch-sheet.png" : "hero-sheet.png");
 fs.writeFileSync(file, encodePNG(canvas));
 console.log(`🧍 ${DIRS.length}×${COLS.length} поз героя → ${path.relative(process.cwd(), file)}`);

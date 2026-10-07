@@ -14,7 +14,7 @@ import { Input } from "./engine/input.js";
 import { Camera } from "./engine/camera.js";
 import { WorldMap } from "./world/worldgen.js";
 import { WeatherSystem } from "./world/weather.js";
-import { surfaceTile, SURFACE } from "./world/surface.js";
+import { surfaceTile, SURFACE, frozenPuddleAt } from "./world/surface.js";
 import { UI, pixelRatio } from "./ui/uispec.js";
 import { START_ZONE, biomeDef, oppositeEdge } from "./world/regions.js";
 import { TILE_SIZE, tileInfo } from "./world/tiles.js";
@@ -153,9 +153,10 @@ export class Game {
             this.particles.sparks(this.lastFireObj ? this.lastFireObj.x : this.player.x,
                                   this.lastFireObj ? this.lastFireObj.y : this.player.y, 14);
         });
-        bus.on("fire:out", () => this.hud.toast("Костёр погас", "💨"));
+        bus.on("fire:out", ({ reason }) => this.hud.toast(reason === "rain" ? "Дождь залил угли. Добавь сухое топливо и разожги снова" : "Костёр погас", "💨"));
         bus.on("weather:change", ({ info }) => this.hud.toast(`${info.emoji} ${info.name}`));
         bus.on("player:collapse", () => this.onCollapse());
+        bus.on("player:slipped", () => this.hud.toast("Поскользнулся! По льду лучше идти шагом", "🧊"));
         this.hud.onAction = () => { this.paused = false; };
     }
 
@@ -202,6 +203,7 @@ export class Game {
             (d) => {
                 if (d.zone) this.enterZone(d.zone, null, true);
                 this.player.load(d.p);
+                if (!this.placeSafely(this.player.x, this.player.y)) this.placeSafely(this.zone.spawn.x, this.zone.spawn.y);
             });
         this.save.register("story", () => this.story.toJSON(), (d) => this.story.load(d));
         this.save.register("cook", () => this.cookJournal.toJSON(), (d) => this.cookJournal.load(d));
@@ -308,6 +310,11 @@ export class Game {
             if (d < 90) best = Math.max(best, f.warmth * (1 - d / 90));
         }
         return best;
+    }
+
+    fireEnvironment(zone, obj) {
+        const sheltered = !!zone.def.underground || !!obj?.sheltered;
+        return { weather: this.weather.current, season: this.clock.season.key, sheltered };
     }
 
     /** Is the player under a roof (tent, later: a house)? */
@@ -439,18 +446,19 @@ export class Game {
         let fire = this.fires.get(key);
         if (!fire) { fire = new Campfire({ bus: this.bus }); this.fires.set(key, fire); }
         this.lastFireObj = obj;
+        fire.setExposure(this.fireEnvironment(this.zone, obj));
         const refresh = () => this.openFire(obj);
         this.hud.openPanel("Костёр", fireRows(fire, this.inventory, {
             canCook: (id) => isCookable(id),
             addFuel: (id) => {
-                if (this.inventory.remove(id, 1) && fire.addFuel(id)) {
+                if (this.inventory.has(id) && fire.addFuel(id) && this.inventory.remove(id, 1)) {
                     this.particles.sparks(obj.x, obj.y - 6, 5);
                 }
                 refresh();
             },
             light: () => {
                 const ok = fire.light({ hasFlint: this.inventory.has("flint") });
-                if (!ok) this.hud.toast("Нужен кремень и топливо", "🪨");
+                if (!ok) this.hud.toast(fire.lastFailure || "Нужен кремень и топливо", "🪨");
                 refresh();
             },
             putOnSpit: (id) => {
@@ -598,7 +606,11 @@ export class Game {
     simulateMinutes(minutes, sleeping = false) {
         this.weather.updateSurface(minutes);
         const seconds = minutes * 60;
-        for (const [, fire] of this.fires) fire.update(seconds / this.weather.fuelPenalty);
+        for (const [key, fire] of this.fires) {
+            const zone = this.world.get(key.split(":")[0]);
+            const obj = zone.objects.find((o) => this.fireKey(zone, o) === key);
+            fire.update(seconds, this.fireEnvironment(zone, obj));
+        }
         this.needs.update(minutes, {
             ambient: this.ambient,
             fireWarmth: this.fireWarmthNear(this.player.x, this.player.y),
@@ -628,7 +640,11 @@ export class Game {
         const axis = uiBlocking ? { x: 0, y: 0 } : this.input.axis();
         this.player.update(dt, axis, this.zone, {
             speedFactor: this.needs.speedFactor(),
-            wantRun: this.input.pressed("sprint")
+            wantRun: this.input.pressed("sprint"),
+            surfaceAt: (x, y) => ({
+                ice: frozenPuddleAt(this.zone, x, y, this.clock.season.key, this.weather.groundWet),
+                slope: this.zone.terrain?.slope(x, y, axis.x, axis.y) || 1
+            })
         });
         // Safety net: if anything ever leaves the hero inside a solid thing
         // (a prop built on top of them, a bad teleport), walk them out instead
@@ -642,15 +658,14 @@ export class Game {
         if (this.player.stepEvent) {
             this.player.stepEvent = false;
             this.bus.emit("player:footstep", { side: this.player.stepSide });
-            const info = this.zone.map.get(
-                Math.floor(this.player.x / TILE_SIZE), Math.floor(this.player.y / TILE_SIZE));
+            const info = this.zone.map.at(this.player.x, this.player.y);
             const def = tileInfo(info);
             if (def.liquid) {
                 // Wading: the boot throws water, not dust.
                 this.particles.splash(this.player.x + this.player.stepSide * 2.5, this.player.y + 1,
                                       this.player.running ? 1.25 : 0.85);
                 this.player.wet = TRACK.wetLife;
-            } else {
+            } else if (!frozenPuddleAt(this.zone, this.player.x, this.player.y, this.clock.season.key, this.weather.groundWet)) {
                 // Soft ground keeps the boot: sand, snow, mud, ash. Soaked
                 // boots print on hard ground too, until they dry out.
                 // The foot line IS player.y — the print belongs there, not
@@ -705,7 +720,7 @@ export class Game {
 
         // Interaction.
         this.interact = uiBlocking ? null : this.findInteractable();
-        if (!uiBlocking && this.input.justPressed("action")) this.doInteract();
+        if (!uiBlocking && this.player.fallTimer <= 0 && this.input.justPressed("action")) this.doInteract();
         else if (uiBlocking && this.input.justPressed("action") && this.hud.isStoryOpen) this.hud.hideStory();
 
         // Zone travel.

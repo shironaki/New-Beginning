@@ -1,4 +1,4 @@
-/** Surface weather: cosmetic ground state, never changes the terrain/collisions. */
+/** Shared weather surfaces: moisture, pool contours and winter traction. */
 import { T, tileInfo } from "./tiles.js";
 
 export const SURFACE = {
@@ -6,6 +6,12 @@ export const SURFACE = {
     dryMinutes: 240,
     puddleAt: 0.22,
     wetBootsAt: 0.4
+};
+
+export const ICE = {
+    speed: 0.9, tauMove: 0.28, tauTurn: 0.42, tauStop: 0.65, tauFallen: 0.15,
+    checkDistance: 8, chanceRun: 0.25, chanceTurn: 0.45,
+    fallTime: 1.1, cooldown: 5, staminaCost: 8
 };
 
 export function clampWet(value) {
@@ -17,7 +23,7 @@ export function advanceWet(wet, minutes, weather, season = "spring") {
     wet = clampWet(wet);
     if (!Number.isFinite(minutes) || minutes <= 0) return wet;
     const rain = weather === "storm" ? 1.6 : weather === "rain" ? 1 : 0;
-    const dry = season === "winter" ? 0.3 : weather === "wind" ? 1.7
+    const dry = season === "winter" ? 0 : weather === "wind" ? 1.7
         : weather === "clear" ? 1.2 : 0.65;
     return clampWet(wet + minutes * (rain ? rain / SURFACE.soakMinutes : -dry / SURFACE.dryMinutes));
 }
@@ -59,4 +65,35 @@ export function rainPuddle(tx, ty, id, wet) {
         ry: Math.min(3 + hash(tx, ty, 419) * 3, y - 1, 31 - y) * growth,
         phase: hash(tx, ty, 521), amount
     };
+}
+
+/** The same irregular contour used by the painter and foot contact. */
+export function puddleRadius(angle, phase) {
+    return 0.85 + Math.sin(angle * 3 + phase * 9) * 0.1 + Math.cos(angle * 5 + phase * 4) * 0.05;
+}
+
+export function puddleContains(p, x, y) {
+    if (!p || p.rx <= 0 || p.ry <= 0) return false;
+    const dx = (x - p.x) / p.rx, dy = (y - p.y) / p.ry;
+    return Math.hypot(dx, dy) <= puddleRadius(Math.atan2(dy, dx), p.phase);
+}
+
+/** Only small rain pools freeze here. The sea is NOT made walkable. */
+export function frozenPuddleAt(zone, x, y, season, wet) {
+    if (season !== "winter" || zone.def?.underground) return false;
+    const tx = Math.floor(x / 32), ty = Math.floor(y / 32);
+    if (!receivesRain(zone.map.at(x, y))) return false;
+    return puddleContains(surfacePuddle(zone, tx, ty, wet), x, y);
+}
+
+/** Pool placement and roof exclusion shared by drawing and physics. */
+export function surfacePuddle(zone, tx, ty, wet) {
+    const p = rainPuddle(tx, ty, zone.map.get(tx, ty), wet);
+    if (!p || !receivesRain(zone.map.at(p.x, p.y))) return null;
+    // Keep the entire pool inside the natural bank, not only its centre.
+    for (const dx of [-p.rx, 0, p.rx]) for (const dy of [-p.ry, 0, p.ry]) {
+        if (!receivesRain(zone.map.at(p.x + dx, p.y + dy))) return null;
+    }
+    if (zone.objects?.some((o) => !o.removed && o.kind === "tent" && Math.abs(o.x - p.x) < 28 && Math.abs(o.y - p.y) < 18)) return null;
+    return p;
 }

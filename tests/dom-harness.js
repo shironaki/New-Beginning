@@ -42,6 +42,7 @@ export function makeContext(canvas) {
     const gradient = { addColorStop() {} };
     ctx.createRadialGradient = () => gradient;
     ctx.createLinearGradient = () => gradient;
+    ctx.createImageData = (w, h) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h });
     ctx.getImageData = (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h });
     return ctx;
 }
