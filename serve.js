@@ -15,6 +15,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 
@@ -100,6 +101,43 @@ export const DEVAPI = {
     index: "docs/notes/README.md",
     maxBody: 12 * 1024 * 1024      // a PNG of a 4K frame fits with room to spare
 };
+
+/**
+ * A note written only to disk is a note one sandbox restart away from being
+ * lost — and that is exactly how the first batch disappeared. So every note
+ * is committed and pushed the moment it lands. Only `docs/notes/` is ever
+ * staged: the tool must never sweep up unrelated work in progress.
+ */
+export function commitNotes(files, message, root = ROOT) {
+    const git = (...args) => execFileSync("git", args, {
+        cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000
+    });
+    try {
+        const branch = git("rev-parse", "--abbrev-ref", "HEAD").trim();
+        git("add", "--", ...files);
+        // Nothing staged (a re-post of the same note) is not an error.
+        const staged = git("diff", "--cached", "--name-only", "--", DEVAPI.dir).trim();
+        if (!staged) return { ok: true, pushed: false, reason: "nothing to commit" };
+        git("-c", "user.name=shironaki", "-c", "user.email=63105852+shironaki@users.noreply.github.com",
+            "commit", "-m", message, "--only", "--", ...files);
+        try {
+            git("push", "origin", branch);
+            return { ok: true, pushed: true, branch };
+        } catch (e) {
+            // Someone else pushed first: catch up and try once more.
+            try {
+                git("fetch", "origin", branch);
+                git("rebase", `origin/${branch}`);
+                git("push", "origin", branch);
+                return { ok: true, pushed: true, branch, rebased: true };
+            } catch (e2) {
+                return { ok: true, pushed: false, reason: String(e2.message || e2).slice(0, 200) };
+            }
+        }
+    } catch (e) {
+        return { ok: false, pushed: false, reason: String(e.message || e).slice(0, 200) };
+    }
+}
 
 /** The SHA-256 the client has to present, or "" when dev mode is off. */
 export function devHash(root = ROOT) {
@@ -187,7 +225,16 @@ export function createServer(opts = {}) {
                 delete note.shot;
                 fs.writeFileSync(path.join(dir, stem + ".md"), noteMarkdown(note, shotName));
                 console.log(`📝 заметка: ${DEVAPI.dir}/${stem}.md`);
-                json(res, 200, { ok: true, file: stem + ".md" });
+                // Straight into git: a note that only exists in a sandbox is
+                // one restart away from being lost.
+                const files = [`${DEVAPI.dir}/${stem}.md`];
+                if (shotName) files.push(`${DEVAPI.dir}/${shotName}`);
+                const git = cfg.commitNotes === false
+                    ? { ok: true, pushed: false, reason: "commit disabled" }
+                    : commitNotes(files, `notes: ${String(note.text || "").slice(0, 60)}`);
+                console.log(git.pushed ? `   ↳ запушено в ${git.branch}`
+                                       : `   ↳ не запушено: ${git.reason}`);
+                json(res, 200, { ok: true, file: stem + ".md", pushed: !!git.pushed });
             });
             return;
         }

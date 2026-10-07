@@ -595,6 +595,9 @@ export function installDevTools(game, win = window) {
             });
             if (!r.ok) return null;
             const j = await r.json();
+            // The server tells us whether the note made it into git; if it
+            // only reached the disk, say so — a sandbox can be wiped.
+            if (j.file && j.pushed === false) toast("заметка сохранена, но НЕ запушена", 4000);
             return j.file || "ok";
         } catch { return null; }
     }

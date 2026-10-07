@@ -821,11 +821,36 @@ export const COAST = {
     slow: 19,          // tiles per period of the big bays
     fast: 6.5,         // tiles per period of the small ones
     wet: 7,            // px of wet ground inland of the waterline
+    wetA: 0.22,        // α of it — a hint of damp, not a drawn border
     wetPuddle: 4,
     foamLine: 2.6,     // px of dried foam just inland of it (×wobble)
     crestIn: 7,        // px — the drier crest of the bank's tongues
-    shallowA: 0.3
+    shallowA: 0.3,
+    grid: 16,          // samples per tile the shore is walked with
+    mid: 1.0,          // wobble at which the waterline sits on the tile border
+    rim: 3             // px of lighter water along a waterline that came ashore
 };
+
+/**
+ * How far the bank reaches into the water at this point of the shore, px.
+ * Both tiles of a seam call this with the same (along, across), so they
+ * agree on where the water actually starts.
+ */
+export function coastDepthAt(along, across, salt = 37) {
+    const n = soft(along, across, COAST.slow, salt);
+    const n2 = soft(along, across, COAST.fast, salt + 3);
+    const wobble = 0.3 + n * 1.0 + n2 * 0.45;
+    // SIGNED: positive means the bank pushed into the water, negative means
+    // the water came ashore. Clamped to nothing, the waterline could only
+    // ever retreat inside the water tile — and the tile's own rectangle
+    // stayed visible as the outer silhouette of every pond.
+    return (wobble - COAST.mid) * COAST.tongue;
+}
+
+/** The same line, asked for in tiles instead of in the bake's own units. */
+export function coastReach(u, v, salt = 37) {
+    return coastDepthAt(u * COAST.grid, v * COAST.grid, salt);
+}
 
 export const CORNER = {
     dry: 1.15,         // dry ground bites a little deeper than a coast
@@ -1050,7 +1075,11 @@ export function paintEdges(ctx, map, tx, ty, px, py, size, season = "spring") {
         // Low-frequency wobble: the band's inner edge is a slow wave along
         // the coast. High-frequency noise here turns into a comb of teeth.
         const along = (i) => (side === "n" || side === "s") ? tx * steps + i : ty * steps + i;
-        const across = (side === "n" || side === "s") ? ty * steps : tx * steps;
+        // The line BETWEEN the two tiles, not the tile's own row: both
+        // neighbours have to read the same noise or their waterlines differ
+        // and the tile border shows as a seam.
+        const across = (side === "n" ? ty : side === "s" ? ty + 1
+                      : side === "w" ? tx : tx + 1) * steps;
         const wobble = (i, salt) => {
             const n = soft(along(i), across, COAST.slow, salt);     // big bays
             const n2 = soft(along(i), across, COAST.fast, salt + 3); // small ones
@@ -1114,11 +1143,19 @@ export function paintEdges(ctx, map, tx, ty, px, py, size, season = "spring") {
             // Smooth curves, not bars: the wet rim and the dried foam used to
             // trace the tile border exactly, and that pale rectangle around
             // every pond was the most visible "square world" in the game.
-            bandPoly((i) => wobble(i, 11) * (puddle ? COAST.wetPuddle : COAST.wet),
-                     "rgba(96,78,52,1)", 0.32);
-            if (!puddle) {
-                bandPoly((i) => wobble(i, 23) * COAST.foamLine, "rgba(255,255,255,1)", 0.3);
-            }
+            // This tile is land — but the same waterline says where the
+            // water came ashore, and that part of the tile is water. This is
+            // the half that kills the rectangle: without it the pond could
+            // never be wider than its tiles.
+            const outTo = (i) => Math.max(0, -coastDepthAt(along(i), across));
+            // Damp ground only where the water actually came ashore: drawn
+            // everywhere, its inner edge is the tile border and the ring is
+            // back.
+            bandPoly((i) => (outTo(i) > 0
+                        ? outTo(i) + wobble(i, 11) * (puddle ? COAST.wetPuddle : COAST.wet)
+                        : 0), "rgba(96,78,52,1)", COAST.wetA);
+            bandPoly(outTo, oi.colors[0]);
+            bandPoly((i) => outTo(i) - COAST.rim, oi.colors[2] || oi.colors[0], 0.6);
         } else if (hi.liquid && oi.liquid) {
             // Shallow meeting deep: a soft lip instead of a hard rectangle.
             // A wide, ragged blend — the step from shallow to deep is the
@@ -1163,9 +1200,16 @@ export function paintEdges(ctx, map, tx, ty, px, py, size, season = "spring") {
             // reads as a swimming pool however nice the foam is.
             // The bank pushes into the water as a curve, not as a comb: this
             // is what takes the coastline off the tile grid.
-            bandPoly((i) => (wobble(i, 37) - 0.95) * COAST.tongue, oi.colors[0]);
-            bandPoly((i) => (wobble(i, 37) - 1.25) * COAST.crest, oi.colors[1]);
-            bandPoly((i) => wobble(i, 17) * COAST.shallow, "rgba(190,215,205,1)", COAST.shallowA);
+            // This tile is water. Where the shared waterline says the bank
+            // pushed in, paint the bank — outward-in, so every layer trims
+            // the one before it: shallows → damp strip → bank → dry crest.
+            const inTo = (i) => Math.max(0, coastDepthAt(along(i), across));
+            bandPoly((i) => (inTo(i) > 0 ? inTo(i) + wobble(i, 17) * COAST.shallow : 0),
+                     "rgba(190,215,205,1)", COAST.shallowA);
+            bandPoly((i) => (inTo(i) > 0 ? inTo(i) + wobble(i, 11) * COAST.wet : 0),
+                     "rgba(96,78,52,1)", COAST.wetA);
+            bandPoly(inTo, oi.colors[0]);
+            bandPoly((i) => inTo(i) - COAST.crestIn, oi.colors[1]);
         }
     }
     ctx.globalAlpha = 1;
@@ -1209,14 +1253,10 @@ export function paintEdges(ctx, map, tx, ty, px, py, size, season = "spring") {
             cornerPath(ctx, px, py, size, sx, sy, bite * 0.7, seed + 3);
             ctx.fill();
             ctx.restore();
-            // Foam follows the carved line, not the tile edge — but a lone
-            // puddle has no surf, only a shape.
-            if (!isPuddle) {
-                ctx.strokeStyle = "rgba(236,252,255,0.45)";
-                ctx.lineWidth = 1.6;
-                cornerPath(ctx, px, py, size, sx, sy, bite, seed);
-                ctx.stroke();
-            }
+            // No white outline here: a stroke on a carved corner printed four
+            // bright claws around every pond. The surf is drawn along the
+            // waterline itself, by the water tile.
+
         } else if (!hereLiquid && a.liquid && b.liquid && d.liquid) {
             // A headland sticking into the water gets its point rounded off.
             const sea = tileInfo(a.id).colors;

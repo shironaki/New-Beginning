@@ -8,7 +8,8 @@ import { MOVE, GAIT as gaitSpec } from "../js/render/charspec.js";
 import { LIGHT, ambientAt } from "../js/render/lighting.js";
 import { SUN, SHADOW, setSun, castShadow, setFireLights, setShadowOrigin, propHeight,
          ROCK, pick, rockOutline, BEND, setWalker, plantBend, BREEZE, setBreeze, windLean,
-         ASH, PUDDLE, puddleGeom, loneWaterFloor, propTone, PATCH, SCREE, COAST, CORNER } from "../js/render/tilesart.js";
+         ASH, PUDDLE, puddleGeom, loneWaterFloor, propTone, PATCH, SCREE, COAST, CORNER,
+         coastDepthAt, coastReach } from "../js/render/tilesart.js";
 import { Renderer, OCCLUDE, CLOUDS, MIRROR, WATER } from "../js/render/renderer.js";
 import { READ, PALETTE, BODY } from "../js/render/charspec.js";
 import { moonFactor } from "../js/render/lighting.js";
@@ -774,6 +775,31 @@ test("notes queue instead of raining files when there is no server", () => {
     assert.gt(DEV.shotMax, 600);           // the frame is still readable
     assert.gt(DEV.dragMin, 2);             // a click is not a tiny drag
     assert.ok(DEV.queueKey.startsWith("minirpg"));
+});
+
+suite("the waterline");
+
+test("the waterline is signed: water can come ashore, not only retreat", () => {
+    // Sampled along a stretch of coast it has to go BOTH ways — if it were
+    // clamped at zero the pond could never be wider than its tiles, and the
+    // tile rectangle stayed visible as the outline of every pond.
+    let neg = 0, pos = 0, maxAbs = 0;
+    for (let i = 0; i < 400; i++) {
+        const d = coastDepthAt(i * 3, 64);
+        if (d < -0.5) neg++;
+        if (d > 0.5) pos++;
+        maxAbs = Math.max(maxAbs, Math.abs(d));
+    }
+    assert.gt(neg, 20, "the water comes ashore somewhere");
+    assert.gt(pos, 20, "and the bank juts out somewhere else");
+    assert.lt(maxAbs, 32, "but never further than a tile");
+});
+
+test("both tiles of a seam read the same waterline", () => {
+    // The bake asks in its own grid units, the live surf asks in tiles.
+    for (const [u, v] of [[3, 7], [12.5, 2], [0.25, 19]]) {
+        assert.near(coastReach(u, v), coastDepthAt(u * COAST.grid, v * COAST.grid), 1e-9);
+    }
 });
 
 run("v3 core");

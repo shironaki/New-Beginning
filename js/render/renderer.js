@@ -13,7 +13,7 @@
  */
 import { CHUNK } from "../world/tilemap.js";
 import { TILE_SIZE, TILES } from "../world/tiles.js";
-import { paintTile, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, setWalker, setBreeze, propHeight, propTone, puddleScreenPath } from "./tilesart.js";
+import { paintTile, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, setWalker, setBreeze, propHeight, propTone, puddleScreenPath, coastReach } from "./tilesart.js";
 import { drawCharacter, drawSleeping } from "./character.js";
 import { LightMap, LIGHT } from "./lighting.js";
 import { itemEmoji } from "../sandbox/items.js";
@@ -463,12 +463,14 @@ export class Renderer {
                         const u = tx + c / cols;
                         const wob = 0.55 + 0.45 * Math.sin(u * 2.3 + ty * 1.7)
                                   * Math.sin(u * 0.7 + ty * 0.9 + 1.3);
+                        const top = Math.max(0, coastReach(u, ty)) * z;
                         for (let i = 0; i < steps; i++) {
                             const a = WATER.skyBandA * daylight * (1 - i / steps) * wob;
                             if (a <= 0.004) continue;
                             ctx.fillStyle = `rgba(214,232,246,${a.toFixed(3)})`;
                             const hgt = S * WATER.skyBandH * wob / steps;
-                            ctx.fillRect(s.x + c * cw, s.y + (i / steps) * S * WATER.skyBandH * wob,
+                            ctx.fillRect(s.x + c * cw,
+                                         s.y + top + (i / steps) * S * WATER.skyBandH * wob,
                                          cw + 0.6, hgt + 0.6);
                         }
                     }
@@ -503,8 +505,14 @@ export class Renderer {
                         const f = i / seg;
                         // World-space wobble: the line continues into the next
                         // tile instead of restarting at the seam.
-                        const u = dy ? tx + f : ty + f, v = dy ? ty : tx;
-                        const wob = (Math.sin(t * 1.3 + u * 3.1 + v * 2.3) * 0.34
+                        const u = dy ? tx + f : ty + f;
+                        // The shared waterline: the surf has to break where
+                        // the bank was actually painted, not on the tile
+                        // border a dozen pixels away from it.
+                        const seam = dy < 0 ? ty : dy > 0 ? ty + 1 : dx < 0 ? tx : tx + 1;
+                        const v = dy ? ty : tx;
+                        const shift = coastReach(u, seam) * z;
+                        const wob = shift + (Math.sin(t * 1.3 + u * 3.1 + v * 2.3) * 0.34
                                    + Math.sin(t * 0.7 + u * 7.9 + v * 1.1) * 0.16 + 0.5) * amp * z;
                         let X, Y;
                         if (dy < 0) { X = s.x + f * S; Y = s.y + 1.5 * z + wob; }
@@ -520,7 +528,9 @@ export class Renderer {
                         const f = frac(seed * 7 + i * 0.37);
                         const life = frac(t * 0.9 + seed * 5 + i * 0.41);
                         if (life > 0.5) continue;
-                        const push = (1.5 + life * 5) * z;
+                        const seam2 = dy < 0 ? ty : dy > 0 ? ty + 1 : dx < 0 ? tx : tx + 1;
+                        const u3 = dy ? tx + f : ty + f;
+                        const push = (1.5 + life * 5) * z + coastReach(u3, seam2) * z;
                         let X, Y;
                         if (dy < 0) { X = s.x + f * S; Y = s.y + push; }
                         else if (dy > 0) { X = s.x + f * S; Y = s.y + S - push; }
