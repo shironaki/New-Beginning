@@ -50,7 +50,7 @@ export class ReliefWalker {
         this.patch = patch; this.x = 408; this.y = 410; this.dir = "up";
         this.phase = 0; this.gait = 0; this.time = 0; this.accumulator = 0; this.blocked = false;
     }
-    reset(top = false) { this.x = top ? 480 : 408; this.y = top ? 180 : 410; this.accumulator = 0; this.gait = 0; return this; }
+    reset(top = false) { this.x = top ? 480 : 408; this.y = top ? 180 : 410; this.accumulator = 0; this.gait = 0; this.phase = 0; this.blocked = false; this.dir = "up"; return this; }
     update(dt, input) {
         if (!Number.isFinite(dt) || dt <= 0) return;
         this.accumulator += Math.min(0.2, dt);

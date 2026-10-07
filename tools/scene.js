@@ -171,9 +171,10 @@ const walk = flag("walk", null);
 if (walk && walk !== true) {
     const [dx, dy] = String(walk).split(",").map(Number);
     game.input.axis = () => ({ x: dx || 0, y: dy || 0 });
-    game.input.pressed = () => false;
+    game.input.pressed = (action) => action === "sprint" && !!flag("run", false);
 }
 
+game.player.stamina = Math.max(0, Math.min(game.player.maxStamina, num("stamina", game.player.stamina)));
 const frames = num("frames", 8);
 for (let i = 0; i < frames; i++) { game.update(1 / 60); game.render(); }
 

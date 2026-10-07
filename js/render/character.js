@@ -191,7 +191,7 @@ export function posture(p) {
     // How much of the acceleration points the way the hero faces: positive
     // while starting off, negative while braking.
     const fmag = Math.hypot(p.faceX || 0, p.faceY || 0) || 1;
-    const accAlong = ((p.ax || 0) * (p.faceX || 0) + (p.ay || 0) * (p.faceY || 0)) / fmag;
+    const accAlong = ((p.leanAX ?? p.ax ?? 0) * (p.faceX || 0) + (p.leanAY ?? p.ay ?? 0) * (p.faceY || 0)) / fmag;
     const accK = Math.max(-1, Math.min(1, accAlong / GAIT.accelRef));
     const lean = (sideView ? side * GAIT.leanRun * run * g : 0)
                + (sideView ? side * GAIT.leanAccel * accK : 0);
@@ -208,6 +208,13 @@ export function posture(p) {
         : 0;
 
     bob += accLift;                       // head-on: push off / settle back
+    // Keep each ankle planted without stretching the shin beyond its IK
+    // reach. Previously only the knee target was clamped: the boot was not.
+    const reach = BODY.thigh + BODY.shin - 0.08;
+    for (const [travel, lift] of [[sideView ? swingN + stance : 0, liftN], [sideView ? swingF - stance : 0, liftF]]) {
+        const vertical = Math.sqrt(Math.max(0, reach * reach - travel * travel));
+        bob = Math.min(bob, BODY.hipY - BODY.ankleY + lift + vertical);
+    }
     return { dir, phase, g, run, idle, side, back, sideView, amp,
         swingN, swingF, liftN, liftF, bob, sway, counter, flagX,
         lean, squash, stance, swing };
@@ -410,7 +417,8 @@ export function drawCharacter(ctx, p) {
     const top = BODY.torsoY - bob;
     const bottom = top + BODY.torsoH;
     const waistY = top + BODY.torsoH * BODY.waistAt;
-    const narrow = sideView ? BODY.shoulderWSide / BODY.shoulderW : 1;
+    const quarter = sideView ? Math.abs(slant) : 0;
+    const narrow = sideView ? (BODY.shoulderWSide + quarter * 2) / BODY.shoulderW : 1;
     const rows = [
         [top, BODY.shoulderW * 0.36 * narrow],
         [top + 1.5, BODY.shoulderW / 2 * narrow],
@@ -418,9 +426,9 @@ export function drawCharacter(ctx, p) {
         [bottom, BODY.hipW / 2 * narrow]
     ];
     poly(ctx, silhouette(rows), band(shirt, "base"));
-    poly(ctx, stripe(rows, -1, 0, 2.4), band(shirt, "lit"), false);      // sun side
-    poly(ctx, stripe(rows, 1, 0, 2.0), band(shirt, "dark"), false);
-    poly(ctx, stripe(rows, 1, 0, 0.8), band(shirt, "deep"), false);
+    poly(ctx, stripe(rows, -1, 0, sideView ? 1.4 : 2.0), band(shirt, "lit"), false);      // sun side
+    poly(ctx, stripe(rows, 1, 0, sideView ? 1.2 : 1.6), band(shirt, "dark"), false);
+    poly(ctx, stripe(rows, 1, 0, 0.5), band(shirt, "deep"), false);
     rect(ctx, -rows[0][1], top, rows[0][1] * 2, PALETTE.aoW * 2, PALETTE.ao, false);   // under the collar
 
     if (back) {
@@ -486,7 +494,7 @@ export function drawCharacter(ctx, p) {
     drawHead(ctx, {
         x: (sideView ? side * 0.5 : 0) + counter * 0.5 + Math.sin(idle * 0.65) * 0.35 * (1 - g),
         y: BODY.headY - bob + (turning ? GAIT.slantHead * slant : 0),
-        dir, look, time: idle
+        dir, slant, look, time: idle
     });
 
     ctx.restore();

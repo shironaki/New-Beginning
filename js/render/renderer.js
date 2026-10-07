@@ -692,7 +692,7 @@ export class Renderer {
                 drawCharacter(ctx, {
                     dir: o.dir, phase: o.anim, gait: o.gait, runBlend: o.runBlend,
                     slant: o.slant, moving: o.moving, look: state.look,
-                    ax: o.ax, ay: o.ay, faceX: o.faceX, faceY: o.faceY,
+                    ax: o.ax, ay: o.ay, leanAX: o.leanAX, leanAY: o.leanAY, faceX: o.faceX, faceY: o.faceY,
                     fallTimer: o.fallTimer,
                     actionTimer: o.actionTimer, tool: state.tool, idleTime: this.time,
                     torchWind: state.underground ? 0 : Math.cos(state.windAngle || 0) * (state.windStrength || 0),

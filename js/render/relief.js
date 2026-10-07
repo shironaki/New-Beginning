@@ -1,6 +1,7 @@
 /** CPU mesh prototype, isolated from the production chunk renderer.
  * Mesh rows and objects are sorted by ground depth so an elevated terrace
  * can hide a walker behind it; objects are NOT pasted over the finished map. */
+import { RELIEF_STEPS } from "../dev/relief-guide.js";
 import { RELIEF, RELIEF_PROPS } from "../world/relief.js";
 import { drawCharacter } from "./character.js";
 import { paintProp, setSun, setFireLights } from "./tilesart.js";
@@ -22,7 +23,7 @@ export function reliefMesh(patch) {
     }
     return mesh;
 }
-export function drawRelief(ctx, patch, walker, { mesh = reliefMesh(patch), collected = false, guides = true } = {}) {
+export function drawRelief(ctx, patch, walker, { mesh = reliefMesh(patch), collected = false, guides = true, routeStep = null } = {}) {
     const width = ctx.canvas.width, height = ctx.canvas.height;
     ctx.fillStyle = "#283632"; ctx.fillRect(0, 0, width, height);
     const zoom = Math.min((width - 48) / RELIEF.width, (height - 90) / (RELIEF.height * RELIEF.scaleY));
@@ -45,6 +46,29 @@ export function drawRelief(ctx, patch, walker, { mesh = reliefMesh(patch), colle
             else paintProp(ctx, o, walker.time);
             ctx.restore();
         }
+    }
+    if (guides && routeStep !== null) {
+        const step = RELIEF_STEPS[routeStep];
+        if (step) {
+            ctx.strokeStyle = "rgba(247,221,146,0.65)"; ctx.lineWidth = 1.1; ctx.setLineDash([4, 5]);
+            ctx.beginPath();
+            step.route.forEach(([x, y], i) => {
+                const from = i ? step.route[i - 1] : [x, y];
+                const n = Math.max(1, Math.ceil(Math.hypot(x - from[0], y - from[1]) / 4));
+                for (let j = 0; j <= n; j++) {
+                    const p = patch.project(from[0] + (x - from[0]) * j / n, from[1] + (y - from[1]) * j / n);
+                    if (i || j) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y);
+                }
+            });
+            ctx.stroke(); ctx.setLineDash([]);
+        }
+        RELIEF_STEPS.forEach((s, i) => {
+            const p = patch.project(...s.point);
+            ctx.fillStyle = i < routeStep ? "#4c704c" : i === routeStep ? "#b2924d" : "#39493a";
+            ctx.strokeStyle = i === routeStep ? "#ffe9a4" : "#819276"; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(p.x, p.y + 12, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+            ctx.fillStyle = "#fff1ce"; ctx.font = "10px monospace"; ctx.fillText(String(i + 1), p.x - 3, p.y + 15);
+        });
     }
     if (guides) {
         const p = patch.project(walker.x, walker.y), z = patch.heightAt(walker.x, walker.y);

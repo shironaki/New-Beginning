@@ -16,6 +16,7 @@ export class Player {
     constructor({ x = 0, y = 0, bus = null } = {}) {
         this.x = x; this.y = y;
         this.vx = 0; this.vy = 0;       // measured, after collision
+        this.leanAX = 0; this.leanAY = 0; // filtered physical acceleration, visual only
         this.ax = 0; this.ay = 0;       // wanted acceleration, from the model
         this.mvx = 0; this.mvy = 0;     // wanted velocity carried between frames
         this.radius = 9;
@@ -106,7 +107,8 @@ export class Player {
     _step(dt, axis, zone, { speedFactor = 1, wantRun = false, surfaceAt = null } = {}) {
         if (this.actionTimer > 0) this.actionTimer = Math.max(0, this.actionTimer - dt);
         if (this.sleeping) {
-            this.moving = false;
+            this.moving = this.running = false;
+            this.updateLean(dt, 0, 0);
             this.ax = this.ay = 0;
             this.gait = approach(this.gait, 0, dt, GAIT.blendWalk);
             this.runBlend = approach(this.runBlend, 0, dt, GAIT.blendRun);
@@ -123,8 +125,9 @@ export class Player {
         const mag = Math.hypot(axis.x, axis.y);
         this.moving = mag > 0.01;
 
-        // Sprint costs stamina; walking and standing restore it.
-        const canRun = wantRun && this.stamina > 6 && mag > 0.6;
+        // Separate stop/resume thresholds prevent 70 Hz run/walk chatter at
+        // exhaustion. Holding Shift recovers a useful reserve before retrying.
+        const canRun = wantRun && this.stamina > (this.running ? MOVE.sprintStop : MOVE.sprintResume) && mag > 0.6;
         this.running = canRun;
         if (canRun) this.stamina = Math.max(0, this.stamina - 16 * dt);
         else this.stamina = Math.min(this.maxStamina, this.stamina + (this.moving ? 7 : 14) * dt);
@@ -166,6 +169,7 @@ export class Player {
             this.mvx = this.mvy = 0;
             this.vx = this.vy = 0;
             this.ax = this.ay = 0;
+            this.updateLean(dt, 0, 0);
             this.settle(dt);
             return this;
         }
@@ -225,8 +229,19 @@ export class Player {
         } else if (!icy) this.slipDistance = 0;
         this.advance(dt, moved, canRun);
 
-        this.vx = (this.x - x0) / dt; this.vy = (this.y - y0) / dt;
+        const vx = (this.x - x0) / dt, vy = (this.y - y0) / dt;
+        // Contact resolution must not kick the torso back and forth. Filter
+        // ACTUAL acceleration at the fixed physics step, never in the painter.
+        this.updateLean(dt, (vx - this.vx) / dt, (vy - this.vy) / dt);
+        this.vx = vx; this.vy = vy;
         return this;
+    }
+
+    updateLean(dt, ax, ay) {
+        const blend = 1 - Math.exp(-dt / GAIT.leanAccelTau);
+        const limit = (v) => Math.max(-GAIT.accelRef, Math.min(GAIT.accelRef, v));
+        this.leanAX += (limit(ax) - this.leanAX) * blend;
+        this.leanAY += (limit(ay) - this.leanAY) * blend;
     }
 
     /**
@@ -236,7 +251,7 @@ export class Player {
      */
     advance(dt, moved, running) {
         this.runBlend = approach(this.runBlend, running ? 1 : 0, dt, GAIT.blendRun);
-        this.gait = approach(this.gait, 1, dt, GAIT.blendWalk);
+        this.gait = approach(this.gait, Math.min(1, moved / dt / MOVE.strideFullSpeed), dt, GAIT.blendWalk);
         const stride = GAIT.strideWalk + (GAIT.strideRun - GAIT.strideWalk) * this.runBlend;
         const step = (moved / stride) * Math.PI * 2;
         const cap = GAIT.cadenceCap * Math.PI * 2 * dt;      // no sewing machine

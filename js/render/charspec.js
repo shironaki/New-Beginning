@@ -194,6 +194,8 @@ export const MOVE = {
     // The simulation step the hero moves on, independent of the frame rate.
     // 1/120 s divides every rate we care about (30, 60, 120), so all three
     // walk exactly the same ground; the leftover is carried to the next frame.
+    sprintStop: 6, sprintResume: 18,
+    strideFullSpeed: 12, // fade legs when pushing into a wall, not while walking slowly
     step: 1 / 120,
     maxCatchUp: 0.25,        // s — a hitch is dropped, not replayed in full
     stepEps: 1e-9,           // binary dust guard on the step accumulator

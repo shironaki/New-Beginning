@@ -13,10 +13,11 @@ import { ShimCanvas, encodePNG } from "./canvas-shim.js";
 import { drawCharacter } from "../js/render/character.js";
 
 const torch = process.argv.includes("--torch");
+const diagonal = process.argv.includes("--diagonal");
 const OUT = path.resolve(".artifacts");
 fs.mkdirSync(OUT, { recursive: true });
 
-const DIRS = ["down", "left", "right", "up"];
+const DIRS = diagonal ? ["left", "right", "left", "right"] : ["down", "left", "right", "up"];
 const COLS = [
     { label: "idle",    phase: 0,            gait: 0, run: 0, act: 0 },
     { label: "walk 1",  phase: 0,            gait: 1, run: 0, act: 0 },
@@ -50,7 +51,7 @@ DIRS.forEach((dir, row) => {
         ctx.translate(i * CW + CW / 2, row * CH + CH - 6);
         ctx.scale(S / 1.6, S / 1.6);
         drawCharacter(ctx, {
-            dir, phase: col.phase, gait: col.gait, runBlend: col.run,
+            dir, slant: diagonal ? (row < 2 ? -1 : 1) : 0, phase: col.phase, gait: col.gait, runBlend: col.run,
             actionTimer: col.act, idleTime: 1.2 + row * 0.7,
             tool: torch ? { id: "torch", tool: "torch" } : { id: "axe_stone", tool: "axe" }
         });
@@ -58,6 +59,6 @@ DIRS.forEach((dir, row) => {
     });
 });
 
-const file = path.join(OUT, torch ? "hero-torch-sheet.png" : "hero-sheet.png");
+const file = path.join(OUT, `hero${torch ? "-torch" : ""}${diagonal ? "-diagonal" : ""}-sheet.png`);
 fs.writeFileSync(file, encodePNG(canvas));
 console.log(`🧍 ${DIRS.length}×${COLS.length} поз героя → ${path.relative(process.cwd(), file)}`);
