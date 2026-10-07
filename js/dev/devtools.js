@@ -1,5 +1,5 @@
 /**
- * v3 dev tools — the owner's control room.
+ * dev tools — the owner's control room.
  *
  * Everything you need to check the game without playing it: jump between
  * zones, set the hour, the day, the season and the weather, fill or empty the
@@ -9,7 +9,7 @@
  *
  * Access
  *   Ctrl+Shift+D asks for the password; the SHA-256 of the right one lives in
- *   dev.config.json (default: ashes2026, change it with tools/devpass.js).
+ *   dev.config.json (default: nachalo2026, change it with tools/devpass.js).
  *   An unlocked session is remembered in localStorage until you lock it again.
  *   Be honest about what this is: the client is open source, so the gate keeps
  *   an ordinary player out of the panel, it is not a security boundary. The

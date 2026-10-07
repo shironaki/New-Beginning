@@ -1,5 +1,5 @@
 /**
- * v3 world — procedural zone generation.
+ * world — procedural zone generation.
  *
  * Authoring 41 000 tiles by hand is impossible; authoring *rules* is not.
  * Every zone is a deterministic function of (worldSeed, zoneId): terrain from

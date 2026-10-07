@@ -1,5 +1,5 @@
 /**
- * v3 render — the frame.
+ * render — the frame.
  *
  * Five layers, in order:
  *   1. ground      — baked per 16×16 chunk into offscreen canvases (static)

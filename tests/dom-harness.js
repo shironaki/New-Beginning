@@ -1,5 +1,5 @@
 /**
- * v3 tests — a minimal fake DOM + Canvas 2D context.
+ * tests — a minimal fake DOM + Canvas 2D context.
  *
  * Enough of a browser for `Game` to boot, build its HUD, bake chunks and draw
  * frames, so wiring bugs (a bad selector, a missing context method, a null

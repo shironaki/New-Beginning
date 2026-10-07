@@ -1,9 +1,9 @@
 /**
- * v3 — «Пепел и Зерно». Bootstrap and orchestration.
+ * «Новое начало». Bootstrap and orchestration.
  *
  * This file wires systems together and owns the player's *intent* (what E does
  * right now). All rules live in their own modules; nothing here should grow
- * into v2's thousand-line main.js.
+ * into a thousand-line God file.
  */
 import { EventBus } from "./core/events.js";
 import { GameClock } from "./core/time.js";
@@ -869,7 +869,7 @@ export class Game {
     start() {
         // Opening narration, then the loop.
         this.bus.emit("story:step", {
-            title: "Пепел и Зерно",
+            title: "Новое начало",
             text: "Неделю назад долина выгорела за одну ночь. Ты вернулся к тому, что было " +
                   "твоим домом: печь, балки и зола по колено. До темноты — пара часов. " +
                   "Палатка стоит, костёр — холодный.",

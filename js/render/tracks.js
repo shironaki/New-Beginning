@@ -1,5 +1,5 @@
 /**
- * v3 render — footprints.
+ * render — footprints.
  *
  * A separate, very cheap layer between the ground and the objects: the hero
  * leaves prints on soft ground (sand, snow, mud, ash) and they fade away.

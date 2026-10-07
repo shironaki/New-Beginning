@@ -1,5 +1,5 @@
 /**
- * v3 UI — the contract.
+ * UI — the contract.
  *
  * Every number the interface uses lives here, so the CSS has no magic values
  * and the HUD has no inline styling decisions. The palette is the source of

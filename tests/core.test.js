@@ -1,4 +1,4 @@
-/** v3 tests — core: RNG, noise, events, ECS, clock, save, loop. */
+/** tests — core: RNG, noise, events, ECS, clock, save, loop. */
 import { suite, test, assert, run } from "./tiny.js";
 import * as cameraMod from "../js/engine/camera.js";
 import * as serveMod from "../serve.js";
@@ -802,4 +802,4 @@ test("both tiles of a seam read the same waterline", () => {
     }
 });
 
-run("v3 core");
+run("core");

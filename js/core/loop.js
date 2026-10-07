@@ -1,5 +1,5 @@
 /**
- * v3 core — fixed-timestep game loop.
+ * core — fixed-timestep game loop.
  *
  * Simulation runs at a fixed 60 Hz regardless of monitor refresh rate, so
  * physics, hunger drain and NPC work never depend on frame rate. Rendering

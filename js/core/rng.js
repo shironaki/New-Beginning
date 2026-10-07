@@ -1,5 +1,5 @@
 /**
- * v3 core — deterministic pseudo-random numbers.
+ * core — deterministic pseudo-random numbers.
  *
  * Every procedural thing in the valley (terrain, loot rolls, weather, NPC
  * quirks) must be reproducible from a single world seed, otherwise saves and

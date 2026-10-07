@@ -1,5 +1,5 @@
 /**
- * v3 tests — headless prologue playthrough.
+ * tests — headless prologue playthrough.
  *
  * No DOM, no renderer: we drive the same systems main.js drives and play
  * "Act I" start to finish — wake up on the ashes, read the diary, gather
@@ -225,4 +225,4 @@ test("a long session stays stable: 3 in-game days of simulation", () => {
     assert.gte(g.needs.health, 30);
 });
 
-run("v3 smoke");
+run("smoke");

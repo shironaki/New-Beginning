@@ -1,5 +1,5 @@
 /**
- * v3 render — the character visual contract.
+ * render — the character visual contract.
  *
  * EVERY number that decides how a person looks or moves lives here. The
  * drawing code in character.js must not contain a single magic literal, and

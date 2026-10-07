@@ -1,5 +1,5 @@
 /**
- * v3 tests — a 60-line test runner. No dependencies, by project rule.
+ * tests — a 60-line test runner. No dependencies, by project rule.
  * Usage:  import { test, assert, run } from "./tiny.js";
  */
 const tests = [];
@@ -45,7 +45,7 @@ export const assert = {
     }
 };
 
-export async function run(label = "v3") {
+export async function run(label = "tests") {
     let passed = 0;
     const failures = [];
     for (const t of tests) {

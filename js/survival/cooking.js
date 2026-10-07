@@ -1,5 +1,5 @@
 /**
- * v3 survival — cooking rules.
+ * survival — cooking rules.
  *
  * Design rule from the owner: **no recipe catalogue**. You do not pick "fish
  * soup" from a list — you put things on the fire and find out. Everything here

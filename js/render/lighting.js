@@ -1,5 +1,5 @@
 /**
- * v3 render — light map.
+ * render — light map.
  *
  * Darkness is a BUFFER, never a flat veil over the frame:
  *

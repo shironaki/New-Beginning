@@ -1,5 +1,5 @@
 /**
- * v3 survival — thermal model.
+ * survival — thermal model.
  *
  * Cold is the prologue's real antagonist. Ambient temperature comes from the
  * season, the hour, the weather and the biome; what the body actually feels

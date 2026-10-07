@@ -1,5 +1,5 @@
 /**
- * v3 core — event bus.
+ * core — event bus.
  *
  * Systems never reach into each other. The campfire does not know the quest
  * log exists; it just emits "cook:done" and whoever cares listens. This is what

@@ -1,5 +1,5 @@
 /**
- * v3 core — game clock, day phases and seasons.
+ * core — game clock, day phases and seasons.
  *
  * One in-game minute = `realSecondsPerMinute` real seconds (default: a 24h day
  * takes ~16 real minutes). The clock is the heartbeat of survival: temperature,

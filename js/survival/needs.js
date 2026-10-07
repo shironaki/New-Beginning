@@ -1,5 +1,5 @@
 /**
- * v3 survival — body needs: сытость, тепло, усталость, здоровье, дух.
+ * survival — body needs: сытость, тепло, усталость, здоровье, дух.
  *
  * Difficulty is "средняя" (the owner's choice): hunger and cold really do
  * kill, but death is not a game over — `onCollapse` hands control back to the

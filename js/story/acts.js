@@ -1,5 +1,5 @@
 /**
- * v3 story — the campaign spine.
+ * story — the campaign spine.
  *
  * A step is a small piece of narrative plus an objective and the event that
  * completes it. The story never blocks the sandbox: steps watch what the

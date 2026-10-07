@@ -1,5 +1,5 @@
 /**
- * v3 world — tile table.
+ * world — tile table.
  *
  * Tiles are numeric ids stored in typed arrays (one byte per tile), so a
  * 96×72 zone costs ~7 KB instead of thousands of objects. Everything a tile
@@ -72,5 +72,5 @@ export function isLiquid(id) { return tileInfo(id).liquid === true; }
 /** Water you can stand in: the shallows, not the deep. */
 export function isShallow(id) { const t = tileInfo(id); return t.liquid === true && t.solid === false; }
 
-/** World units per tile. Everything positional in v3 is in world units. */
+/** World units per tile. Everything positional is in world units. */
 export const TILE_SIZE = 32;

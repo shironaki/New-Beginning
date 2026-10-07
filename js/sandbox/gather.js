@@ -1,5 +1,5 @@
 /**
- * v3 sandbox — world props and how you harvest them.
+ * sandbox — world props and how you harvest them.
  *
  * One table describes every interactable object in the valley: what tool it
  * needs, how long it takes, what it drops and whether it grows back. The

@@ -1,5 +1,5 @@
 /**
- * v3 entities — the hero.
+ * entities — the hero.
  *
  * Movement is analogue (gentle stick = walk, full push = run), stamina gates
  * sprinting and — from stage 2 — attacks. Collision uses the zone's combined

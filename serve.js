@@ -1,5 +1,5 @@
 /**
- * v3 dev server — zero dependencies.
+ * dev server — zero dependencies.
  *
  *   node serve.js                      port 3000, host 0.0.0.0
  *   node serve.js 8080                 positional port
@@ -343,7 +343,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const cfg = parseArgs(process.argv.slice(2), process.env);
     process.on("uncaughtException", (err) => console.error("[serve] ", err.message));
     createServer(cfg).listen(cfg.port, cfg.host, () => {
-        console.log(`Пепел и Зерно (v3) → http://${cfg.host}:${cfg.port}`
+        console.log(`«Новое начало» → http://${cfg.host}:${cfg.port}`
             + (cfg.reload ? "  (live reload)" : ""));
     });
 }

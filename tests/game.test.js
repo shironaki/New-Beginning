@@ -1,5 +1,5 @@
 /**
- * v3 tests — the real Game object, booted against a fake DOM.
+ * tests — the real Game object, booted against a fake DOM.
  *
  * Catches wiring bugs that pure-logic tests cannot: a broken selector, a
  * missing canvas call, a null in the render path, an interaction that does
@@ -375,7 +375,7 @@ test("the hero keeps his boots wet after wading", () => {
     assert.lt(game.player.wet, 4, "and the boots dry out");
 });
 
-run("v3 game");
+run("game");
 
 /* ---------------------------------------------------------------------- *
  * UI contract

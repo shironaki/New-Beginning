@@ -1,4 +1,4 @@
-/** v3 tests — world: tiles, chunked map, collision, zone generation, weather. */
+/** tests — world: tiles, chunked map, collision, zone generation, weather. */
 import { suite, test, assert, run } from "./tiny.js";
 import { T, TILES, tileInfo, isSolidTile, TILE_SIZE } from "../js/world/tiles.js";
 import { TileMap, moveAndCollide, bodyBlocked, CHUNK } from "../js/world/tilemap.js";
@@ -562,4 +562,4 @@ test("doorways stay open through the ragged wall", () => {
     }
 });
 
-run("v3 world");
+run("world");

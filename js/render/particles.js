@@ -1,5 +1,5 @@
 /**
- * v3 render — particles and floating text.
+ * render — particles and floating text.
  *
  * Sparks over the fire, smoke, rain, snow, dust from an axe hit, and the
  * "+2 🪵" numbers that make every action feel like it paid out.

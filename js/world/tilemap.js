@@ -1,5 +1,5 @@
 /**
- * v3 world — chunked tile map.
+ * world — chunked tile map.
  *
  * Tiles live in one flat Uint8Array per zone (cheap), but everything the
  * renderer does is organised in 16×16 **chunks**: each chunk bakes its static

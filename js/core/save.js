@@ -1,5 +1,5 @@
 /**
- * v3 core — save system.
+ * core — save system.
  *
  * Subsystems register a provider: a name plus `save()` / `load(data)`. The
  * manager stitches those into one versioned blob. Storage is injectable, so

@@ -1,4 +1,4 @@
-/** v3 tests — survival: needs, temperature, campfire, cooking, inventory, gathering. */
+/** tests — survival: needs, temperature, campfire, cooking, inventory, gathering. */
 import { suite, test, assert, run } from "./tiny.js";
 import { EventBus } from "../js/core/events.js";
 import { RNG } from "../js/core/rng.js";
@@ -648,4 +648,4 @@ test("a hitch is dropped, not replayed frame by frame", () => {
     assert.gt(p.x, 0);
 });
 
-run("v3 survival");
+run("survival");

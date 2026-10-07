@@ -1,5 +1,5 @@
 /**
- * v3 render — procedural character sprite.
+ * render — procedural character sprite.
  *
  * Drawn from primitives so appearance (gear, hair, skin) is data, not an
  * atlas: the same function draws settlers, travellers and raiders by swapping

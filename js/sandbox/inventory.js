@@ -1,5 +1,5 @@
 /**
- * v3 sandbox — slot-based inventory with stacking, weight and a hotbar.
+ * sandbox — slot-based inventory with stacking, weight and a hotbar.
  *
  * Slot-based (not a dictionary) because survival needs scarcity: a backpack
  * has a limited number of pockets, and deciding what to leave behind is part

@@ -1,5 +1,5 @@
 /**
- * v3 engine — camera with dead-zone follow, world clamping, zoom and shake.
+ * engine — camera with dead-zone follow, world clamping, zoom and shake.
  *
  * The dead zone keeps the view still during small steps (less motion sickness
  * than a camera glued to the player) and catches up smoothly on longer moves.

@@ -1,5 +1,5 @@
 /**
- * v3 core — ECS-lite.
+ * core — ECS-lite.
  *
  * Entities are plain objects with an id and a `tags` set; components are plain
  * data fields on that object. Systems are functions over queries. Deliberately

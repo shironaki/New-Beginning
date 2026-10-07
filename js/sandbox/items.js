@@ -1,5 +1,5 @@
 /**
- * v3 sandbox — item catalogue (data, not logic).
+ * sandbox — item catalogue (data, not logic).
  *
  * Items are described by **tags**, not by hard-coded recipe ids. A campfire
  * does not know what "rabbit leg" is; it knows the item is tagged `meat` and

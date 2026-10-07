@@ -1,5 +1,5 @@
 /**
- * v3 engine — input.
+ * engine — input.
  *
  * Keyboard (WASD/arrows + action keys), mouse and an analogue touch joystick,
  * normalised into one tiny API: `axis()`, `pressed(action)`, `justPressed(action)`.

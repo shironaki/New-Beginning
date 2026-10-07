@@ -1,5 +1,5 @@
 /**
- * v3 world — the valley: 12 zones, their biomes and how they connect.
+ * world — the valley: 12 zones, their biomes and how they connect.
  *
  * v2 had a single 26×18 map (~470 tiles). The valley below is ~41 000 tiles
  * plus interiors — roughly 85× the walkable area, and, more importantly, it is

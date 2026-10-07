@@ -1,4 +1,4 @@
-/** v3 tests — story engine and the prologue script. */
+/** tests — story engine and the prologue script. */
 import { suite, test, assert, run } from "./tiny.js";
 import { EventBus } from "../js/core/events.js";
 import { StoryEngine, STORY_STEPS, ACTS } from "../js/story/acts.js";
@@ -87,4 +87,4 @@ test("an unfinished objective is always readable for the HUD", () => {
     assert.ok(story.objective.length > 3);
 });
 
-run("v3 story");
+run("story");

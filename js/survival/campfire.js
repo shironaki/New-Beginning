@@ -1,5 +1,5 @@
 /**
- * v3 survival — the campfire as a physical object, not a menu.
+ * survival — the campfire as a physical object, not a menu.
  *
  * You walk up, put a thing on the spit, and watch it cook. Fuel burns down in
  * real time, food goes raw → cooking → done → burnt → charcoal if you forget

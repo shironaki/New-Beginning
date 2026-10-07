@@ -1,5 +1,5 @@
 /**
- * v3 world — weather.
+ * world — weather.
  *
  * Weather is rolled once per day (plus an afternoon re-roll) from the season's
  * table, deterministically from the world seed, so the forecast on a notice

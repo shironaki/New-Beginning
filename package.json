@@ -1,14 +1,14 @@
 {
-  "name": "ashes-and-grain",
-  "version": "3.0.0-alpha.2",
-  "description": "«Пепел и Зерно» — survival-песочница с колонией и сюжетом. Чистый JS без зависимостей.",
+  "name": "new-beginning",
+  "version": "0.1.0",
+  "description": "«Новое начало» — survival-песочница с колонией и сюжетом. Чистый JS без зависимостей.",
   "private": true,
   "type": "module",
   "author": "shironaki",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/shironaki/MiniRPG---test.git"
+    "url": "https://github.com/shironaki/New-Beginning.git"
   },
   "scripts": {
     "start": "node serve.js 3000",

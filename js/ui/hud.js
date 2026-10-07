@@ -1,5 +1,5 @@
 /**
- * v3 UI — HUD and panels (DOM over the canvas).
+ * UI — HUD and panels (DOM over the canvas).
  *
  * Diegetic and quiet: four need bars in the corner, a sky card with the clock,
  * a hotbar, one line of objective, and toasts for everything else. Panels
