@@ -12,6 +12,7 @@
  *   • Props are silhouettes first: dark base, mid body, one bright rim light.
  */
 import { T, tileInfo } from "../world/tiles.js";
+import { receivesSnow } from "../world/surface.js";
 
 /* ------------------------------------------------------------------ utils */
 
@@ -72,13 +73,8 @@ const LIVING = new Set([T.GRASS, T.MEADOW, T.MOSS, T.GRASS_DRY, T.PINE_FLOOR]);
 const DUSTABLE = new Set([T.DIRT, T.PATH, T.SAND, T.FARM, T.FARM_WET, T.GRAVEL, T.STONE, T.COBBLE, T.ASH, T.SOOT]);
 const WINTER_DUST = 0.42;       // share of the winter tint such ground takes
 
-/* ------------------------------------------------------------------ ground */
-
-/**
- * Paint one ground tile.
- * Draws in 8 px cells with noise-driven tone, then a type-specific detail pass.
- */
-export function paintTile(ctx, id, px, py, size, tx, ty, season = "spring") {
+/** Shared palette for the tile AND its transitions. */
+export function groundPalette(id, season = "spring") {
     const info = tileInfo(id);
     let [base, dark, light] = info.colors;
 
@@ -96,10 +92,61 @@ export function paintTile(ctx, id, px, py, size, tx, ty, season = "spring") {
         light = mix(light, st.c, st.t * WINTER_DUST * 1.2);
     }
 
+    return [base, dark, light];
+}
+
+// Burnt ground is a continuous mixture, not four tiles ringed by a flat fringe.
+const BLEND_GROUND = new Set([T.ASH, T.SOOT, T.DIRT]);
+
+/** Smooth, warped weights at a WORLD point; identical across chunk boundaries. */
+export function groundWeights(map, wx, wy) {
+    const original = map.get(Math.floor(wx / 32), Math.floor(wy / 32));
+    if (!BLEND_GROUND.has(original)) return [[original, 1]];
+    const x = (wx + (soft(wx, wy, 43, 811) - 0.5) * 28) / 32 - 0.5;
+    const y = (wy + (soft(wx, wy, 39, 823) - 0.5) * 28) / 32 - 0.5;
+    const ix = Math.floor(x), iy = Math.floor(y);
+    const smooth = (v) => v * v * (3 - 2 * v);
+    const fx = smooth(x - ix), fy = smooth(y - iy);
+    const result = [];
+    for (let dy = 0; dy <= 1; dy++) for (let dx = 0; dx <= 1; dx++) {
+        const id = map.get(ix + dx, iy + dy);
+        result.push([BLEND_GROUND.has(id) ? id : original,
+            (dx ? fx : 1 - fx) * (dy ? fy : 1 - fy)]);
+    }
+    return result;
+}
+
+/** Snowdrifts cover litter too. Baked after edges, never a screen-wide white veil. */
+export function paintSnowGround(ctx, id, px, py, size, tx, ty) {
+    if (!receivesSnow(id)) return;
+    ctx.save();
+    const step = size / 16;
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const wx = tx * 32 + x * 2, wy = ty * 32 + y * 2;
+        const drift = soft(wx, wy, 48, 719);
+        const packed = id === T.PATH || id === T.COBBLE || id === T.PLANK;
+        const a = (packed ? 0.30 : 0.68) + drift * (packed ? 0.25 : 0.26);
+        const tone = Math.round(220 + soft(wx, wy, 19, 727) * 24);
+        ctx.fillStyle = `rgba(${tone - 9},${tone},${Math.min(255, tone + 9)},${a})`;
+        ctx.fillRect(px + x * step, py + y * step, step, step);
+    }
+    ctx.restore();
+}
+
+/* ------------------------------------------------------------------ ground */
+
+/**
+ * Paint one ground tile.
+ * Draws in 8 px cells with noise-driven tone, then a type-specific detail pass.
+ */
+export function paintTile(ctx, id, px, py, size, tx, ty, season = "spring", map = null) {
+    const [base, dark, light] = groundPalette(id, season);
     // Tone is computed per 8 px cell from noise sampled in *continuous* world
     // space, so there is no tile-sized step anywhere — that was the grid
     // artefact of the first pass.
     const [br, bg, bb] = rgb(base);
+    const palettes = map && BLEND_GROUND.has(id)
+        ? new Map([...BLEND_GROUND].map((t) => [t, rgb(groundPalette(t, season)[0])])) : null;
     // How strongly the ground varies across metres. Burnt and bare ground is
     // blotchy; grass and snow are even.
     const amp = (id === T.ASH || id === T.SOOT) ? 26
@@ -117,11 +164,24 @@ export function paintTile(ctx, id, px, py, size, tx, ty, season = "spring") {
             const macro = soft(gx, gy, 52, 11) - 0.5;      // broad sun/shade
             const meso = soft(gx, gy, 14, 23) - 0.5;       // patches
             const micro = soft(gx, gy, 3.2, 31) - 0.5;     // grain
-            const tone = macro * amp + meso * (amp * 0.7) + micro * 5;
+            const weights = palettes ? groundWeights(map, tx * 32 + (cx + 0.5) * 32 / cells,
+                                                     ty * 32 + (cy + 0.5) * 32 / cells) : null;
+            const burnt = weights ? weights.reduce((sum, [t, w]) => sum + (t === T.DIRT ? 0 : w), 0)
+                : id === T.ASH || id === T.SOOT ? 1 : 0;
+            const amplitude = weights ? 18 + burnt * 8 : amp;
+            const tone = macro * amplitude + meso * (amplitude * 0.7) + micro * 5;
             // Hue drifts too, not just brightness: dry yellow-green here,
             // cold blue-green there. Flat colour is what kills ground art.
             const warm = (soft(gx, gy, 38, 97) - 0.5) * (LIVING.has(id) ? 20 : 10);
-            ctx.fillStyle = css(br + tone + warm, bg + tone + warm * 0.45, bb + tone - warm * 0.7);
+            let r = br, g = bg, b = bb;
+            if (palettes) {
+                r = g = b = 0;
+                for (const [t, weight] of weights) {
+                    const c = palettes.get(t);
+                    r += c[0] * weight; g += c[1] * weight; b += c[2] * weight;
+                }
+            }
+            ctx.fillStyle = css(r + tone + warm, g + tone + warm * 0.45, b + tone - warm * 0.7);
             ctx.fillRect(px + cx * cs, py + cy * cs, cs + 0.5, cs + 0.5);
             // Living ground: thin, trodden patches where earth shows through,
             // and deeper pools of shade. Continuous noise, so no tile edges.
@@ -138,13 +198,13 @@ export function paintTile(ctx, id, px, py, size, tx, ty, season = "spring") {
 
             // Burnt ground keeps the memory of the fire: soft scorch smears
             // and pale drifts of ash, both continuous across tiles.
-            if (id === T.ASH || id === T.SOOT) {
+            if (burnt > 0) {
                 const scorch = soft(gx, gy, 26, 71);
                 if (scorch > 0.58) {
-                    ctx.fillStyle = `rgba(26,21,18,${(scorch - 0.58) * 1.1})`;
+                    ctx.fillStyle = `rgba(26,21,18,${(scorch - 0.58) * 1.1 * burnt})`;
                     ctx.fillRect(px + cx * cs, py + cy * cs, cs + 0.5, cs + 0.5);
                 } else if (scorch < 0.3) {
-                    ctx.fillStyle = `rgba(206,196,182,${(0.3 - scorch) * 0.55})`;
+                    ctx.fillStyle = `rgba(206,196,182,${(0.3 - scorch) * 0.55 * burnt})`;
                     ctx.fillRect(px + cx * cs, py + cy * cs, cs + 0.5, cs + 0.5);
                 }
             }
@@ -163,12 +223,14 @@ export function paintTile(ctx, id, px, py, size, tx, ty, season = "spring") {
         }
     }
 
-    detailPass(ctx, id, px, py, size, tx, ty, { base, dark, light, season });
+    detailPass(ctx, palettes ? T.ASH : id, px, py, size, tx, ty, { base, dark, light, season }, palettes ? map : null);
     ctx.globalAlpha = 1;
 }
 
-function detailPass(ctx, id, px, py, size, tx, ty, pal) {
+function detailPass(ctx, id, px, py, size, tx, ty, pal, blendMap = null) {
     const { dark, light, season } = pal;
+    const burnAt = (wx, wy) => blendMap
+        ? groundWeights(blendMap, wx, wy).reduce((sum, [t, w]) => sum + (t === T.DIRT ? 0 : w), 0) : 1;
 
     switch (id) {
         case T.GRASS: case T.MEADOW: case T.MOSS: case T.GRASS_DRY: case T.PINE_FLOOR: {
@@ -257,6 +319,8 @@ function detailPass(ctx, id, px, py, size, tx, ty, pal) {
                 for (let cy2 = 0; cy2 < CELLS; cy2++) {
                     for (let cx2 = 0; cx2 < CELLS; cx2++) {
                         const gx = tx * CELLS + cx2, gy = ty * CELLS + cy2;
+                        ctx.globalAlpha = burnAt(tx * 32 + (cx2 + 0.5) * 32 / CELLS,
+                                                ty * 32 + (cy2 + 0.5) * 32 / CELLS);
                         const n = soft(gx, gy, 26, 71) * 0.7 + soft(gx, gy, 9, 17) * 0.3;
                         // A second, slower field decides what KIND of burn this
                         // patch is: scorched earth still holds the fire's rust,
@@ -289,9 +353,11 @@ function detailPass(ctx, id, px, py, size, tx, ty, pal) {
             for (let i = 0; i < 6; i++) {
                 const a = h(tx, ty, i * 5 + 3);
                 const gx = px + a * (size - 2), gy = py + h(tx, ty, i * 9 + 4) * (size - 2);
+                ctx.globalAlpha = burnAt(tx * 32 + (gx - px), ty * 32 + (gy - py));
                 ctx.fillStyle = a > 0.55 ? "rgba(28,24,22,0.55)" : "rgba(150,142,134,0.3)";
                 ctx.fillRect(gx, gy, a > 0.85 ? 2 : 1, 1);
             }
+            ctx.globalAlpha = burnAt(tx * 32 + 16, ty * 32 + 16);
             const ember = h(tx, ty, 61);
             if (ember > 0.95) {
                 ctx.fillStyle = "rgba(220,110,50,0.55)";
@@ -1030,7 +1096,7 @@ export function paintEdges(ctx, map, tx, ty, px, py, size, season = "spring") {
         // read as squares. Coasts are handled separately below — a gravel
         // comb poking into the sea looks terrible.
         const steps = 16;
-        if (!oi.liquid && !hi.liquid) {
+        if (!oi.liquid && !hi.liquid && !(BLEND_GROUND.has(here) && BLEND_GROUND.has(other))) {
             // Two soft lobes of the neighbour's ground reaching across the
             // seam. Drawn as curves, not as a comb of rectangles: a patch of
             // ash in grass used to end in a staircase of 2 px teeth, and that
@@ -1265,7 +1331,8 @@ export function paintEdges(ctx, map, tx, ty, px, py, size, season = "spring") {
             ctx.fill();
         } else if (!hereLiquid && !a.liquid && !b.liquid
                    && a.id === b.id && a.id !== here && a.id !== T.VOID
-                   && !tileInfo(a.id).solid && !tileInfo(here).solid) {
+                   && !tileInfo(a.id).solid && !tileInfo(here).solid
+                   && !(BLEND_GROUND.has(here) && BLEND_GROUND.has(a.id))) {
             // Dry ground meeting dry ground: round the corner off too. A
             // patch of ash in grass used to end in four perfect right angles,
             // and nothing in a burnt valley has a right angle in it.
@@ -2065,7 +2132,7 @@ function facet(ctx, pts, lx, ly, keepLit, alpha, color) {
  * One stone, standing at the origin, already scaled by the caller.
  * @param {number} grade 0..1 — size of this particular stone
  */
-function stoneBody(ctx, seedA, seedB, grade, tone, archetype, ore = null) {
+function stoneBody(ctx, seedA, seedB, grade, tone, archetype, ore = null, snow = false) {
     const n = Math.round(ROCK.verts[0] + h(seedA, seedB, 71) * (ROCK.verts[1] - ROCK.verts[0]));
     const asp = ROCK.aspect[archetype] || 0.8;
     const rx = ROCK.radius * grade;
@@ -2163,6 +2230,24 @@ function stoneBody(ctx, seedA, seedB, grade, tone, archetype, ore = null) {
         ctx.fillRect(2, -3.9, 0.8, 0.8);
         ctx.restore();
     }
+    if (snow) {
+        // Follow every upward-facing edge inside the actual silhouette. The
+        // clipping and burial transform are shared with rock and ore, so no
+        // archetype (including the little cluster stones) can get a flying cap.
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        for (const [width, color] of [[6 * grade, "#b7ccdc"], [3.6 * grade, "#edf5fa"]]) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = width;
+            ctx.beginPath();
+            for (let i = 0; i < pts.length; i++) {
+                const a = pts[i], b = pts[(i + 1) % pts.length];
+                if ((a[1] + b[1]) / 2 >= -ry * 0.18) continue;
+                ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+            }
+            ctx.stroke();
+        }
+    }
     ctx.restore();
     ctx.restore();
 
@@ -2202,6 +2287,22 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
     if (lean) {
         ctx.transform(1, 0, -lean, 1, 0, 0);
         ctx.scale(1, 1 - Math.abs(lean) / BEND.maxLean * BEND.squash);
+    }
+
+    if (season === "winter" && (kind === "flower" || kind === "herb")) {
+        // Seed heads survive above the snow; summer flowers do not. Keep the
+        // object visible/harvestable instead of removing gameplay resources.
+        ctx.strokeStyle = "#827861"; ctx.lineWidth = 1.1 * s;
+        for (let i = -1; i <= 1; i++) {
+            const x = i * 3 * s, top = -(8 + h(obj.tx + i, obj.ty, 751) * 5) * s;
+            ctx.beginPath(); ctx.moveTo(i * s, 0);
+            ctx.quadraticCurveTo(x, top * 0.6, x + s, top); ctx.stroke();
+            ctx.fillStyle = "#a49a83";
+            ctx.beginPath(); ctx.ellipse(x + s, top, 1.4 * s, 2 * s, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "#e8f1f7";
+            ctx.beginPath(); ctx.ellipse(x + s, top - s, 1.4 * s, 0.6 * s, 0, 0, Math.PI * 2); ctx.fill();
+        }
+        return;
     }
 
     switch (kind) {
@@ -2554,6 +2655,12 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
             ctx.quadraticCurveTo(0, topY - 0.8, rx0 * 0.7, topY + 0.4);
             ctx.stroke();
 
+            if (season === "winter") {
+                ctx.fillStyle = "#dfeaf2";
+                ctx.beginPath(); ctx.ellipse(0, topY, rx0, ry0, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = "#f4f8fa";
+                ctx.beginPath(); ctx.ellipse(-0.8, topY - 0.7, rx0 * 0.85, ry0 * 0.65, 0, 0, Math.PI * 2); ctx.fill();
+            }
             // Two splinters left standing where the trunk tore off.
             ctx.fillStyle = "#3a302b";
             ctx.beginPath();
@@ -2591,6 +2698,15 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
                 ctx.lineTo(len / 2 - 4, -thick + n1 + 2.2);
                 ctx.lineTo(-len / 2 + 1.5, -thick + 2.4);
                 ctx.closePath(); ctx.fill();
+                if (season === "winter") {
+                    ctx.fillStyle = "#dce8f0";
+                    ctx.beginPath();
+                    ctx.moveTo(-len / 2, -thick);
+                    ctx.lineTo(len / 2 - 2 - n0 * 3, -thick + n1);
+                    ctx.lineTo(len / 2 - 4, -thick + n1 + 1.8);
+                    ctx.lineTo(-len / 2 + 1.5, -thick + 2);
+                    ctx.closePath(); ctx.fill();
+                }
                 // Cracks across the char — the grain the fire opened up.
                 ctx.fillStyle = "#4e4239";
                 const cracks = 3 + Math.floor(n1 * 4);
@@ -2642,25 +2758,17 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
             if (arch === "cluster") {
                 // Little ones first, so the big stone sits in front of them.
                 ctx.save(); ctx.translate(-7 * grow, -1.5 * grow);
-                stoneBody(ctx, obj.tx * 5 + 1, obj.ty * 3, grow * 0.52, tone, "boulder");
+                stoneBody(ctx, obj.tx * 5 + 1, obj.ty * 3, grow * 0.52, tone, "boulder", null, season === "winter");
                 ctx.restore();
                 ctx.save(); ctx.translate(8 * grow, -0.5 * grow);
-                stoneBody(ctx, obj.tx + 7, obj.ty * 9 + 2, grow * 0.44, tone, "shard");
+                stoneBody(ctx, obj.tx + 7, obj.ty * 9 + 2, grow * 0.44, tone, "shard", null, season === "winter");
                 ctx.restore();
             }
-            const geo = stoneBody(ctx, obj.tx, obj.ty, grow, tone, arch, obj.ore || null);
+            const geo = stoneBody(ctx, obj.tx, obj.ty, grow, tone, arch, obj.ore || null, season === "winter");
             if (arch === "cluster") {
                 ctx.save(); ctx.translate(6 * grow, 1.5 * grow);
-                stoneBody(ctx, obj.tx * 11, obj.ty + 5, grow * 0.38, tone, "slab");
+                stoneBody(ctx, obj.tx * 11, obj.ty + 5, grow * 0.38, tone, "slab", null, season === "winter");
                 ctx.restore();
-            }
-            if (season === "winter") {
-                // Snow settles on the upward faces only.
-                ctx.fillStyle = "rgba(240,248,255,0.62)";
-                ctx.beginPath();
-                ctx.ellipse(-geo.rx * 0.12, -geo.ry * 1.5, geo.rx * 0.74, geo.ry * 0.3,
-                            -0.12, Math.PI, Math.PI * 2);
-                ctx.fill();
             }
             // Chips knocked off the bigger stones, lying around the foot.
             if (n0 > 1 - ROCK.chips) {
@@ -2696,6 +2804,13 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
             ctx.lineTo(13, topR - 1);
             ctx.lineTo(13, 0);
             ctx.closePath(); ctx.fill();
+            if (season === "winter") {
+                ctx.strokeStyle = "#e4eef5"; ctx.lineWidth = 2.2;
+                ctx.beginPath(); ctx.moveTo(-13, topL);
+                ctx.lineTo(-6, topL + 3); ctx.lineTo(-2, topL - 2);
+                ctx.lineTo(3, topR); ctx.lineTo(9, topR + 4); ctx.lineTo(13, topR - 1);
+                ctx.stroke();
+            }
             // Courses of stone.
             for (let r = 0; r < 6; r++) {
                 const y = -3 - r * 4.5;
@@ -3095,6 +3210,19 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
                 ctx.strokeRect(-W * 0.55, -Hh * 0.52, 5.5, 4.4);
                 ctx.setLineDash([]);
             }
+            if (season === "winter") {
+                // Snow follows the sagging cloth; door and ropes remain readable.
+                for (const dir of [-1, 1]) {
+                    ctx.save(); wall(dir); ctx.clip();
+                    ctx.fillStyle = dir < 0 ? "#e8f0f5" : "#bacddc";
+                    ctx.beginPath();
+                    ctx.moveTo(-W, -Hh - 2); ctx.lineTo(W, -Hh - 2);
+                    ctx.lineTo(W, -Hh * 0.36);
+                    ctx.quadraticCurveTo(W * 0.4, -Hh * 0.64, 0, -Hh * 0.48);
+                    ctx.quadraticCurveTo(-W * 0.4, -Hh * 0.36, -W, -Hh * 0.5);
+                    ctx.closePath(); ctx.fill(); ctx.restore();
+                }
+            }
             // Door: rolled back to one side, dark inside, bedroll showing.
             ctx.fillStyle = "#15110c";
             ctx.beginPath();
@@ -3192,6 +3320,11 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
             ctx.fillStyle = "#6b5044"; ctx.fillRect(-9, -36, 12, 10);
             ctx.fillStyle = "#523d33"; ctx.fillRect(-9, -36, 12, 2.4);
             ctx.fillStyle = "rgba(20,16,14,0.55)"; ctx.fillRect(-7, -36, 8, 4);
+            if (season === "winter") {
+                ctx.fillStyle = "#dce8f0";
+                ctx.fillRect(-14, -27, 28, 2.5);
+                ctx.fillRect(-9, -37, 12, 2);
+            }
             // Mouth.
             ctx.fillStyle = "#0f0c0a";
             ctx.beginPath();

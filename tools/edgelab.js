@@ -60,7 +60,7 @@ ctx.scale(SCALE, SCALE);
 
 for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
-        paintTile(ctx, map.get(x, y), x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, x, y, "spring");
+        paintTile(ctx, map.get(x, y), x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, x, y, "spring", map);
     }
 }
 if (LAYER === "edges" || LAYER === "all") {

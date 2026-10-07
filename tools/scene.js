@@ -19,6 +19,7 @@
  *   --hour <0..24>     clock, fractional hours allowed        (default 12)
  *   --day <n>          day number — picks the season          (default 1)
  *   --weather <key>    clear|wind|cloudy|rain|storm|fog|snow  (default clear)
+ *   --wet <0..1>      ground moisture (default 0; does not imply instant rain)
  *   --zoom <n>         camera zoom                            (default 2.6)
  *   --size WxH         canvas size                            (default 960x560)
  *   --frames <n>       frames to simulate before the shot     (default 8)
@@ -70,7 +71,9 @@ const hudRoot = globalThis.document.getElementById("hud");
 globalThis.document.getElementById = (id) => (id === "game" ? screen : hudRoot);
 
 const { Game } = await import("../js/main.js");
-const game = new Game({ canvas: screen, hudRoot, seed: String(flag("seed", "ashes-and-grain")) });
+const seedArg = flag("seed", "ashes-and-grain");
+const seed = /^\d+$/.test(String(seedArg)) ? Number(seedArg) : String(seedArg);
+const game = new Game({ canvas: screen, hudRoot, seed });
 game.hud.hideStory();
 game.paused = false;
 
@@ -141,9 +144,10 @@ if (at && at !== true) {
 }
 
 game.clock.day = num("day", game.clock.day);
-game.clock.minute = Math.max(0, Math.min(24, num("hour", 12))) * 60;
+game.clock.minute = Math.min(1439, Math.round(Math.max(0, Math.min(24, num("hour", 12))) * 60));
 const weather = flag("weather", null);
 if (weather && weather !== true) game.weather.current = String(weather);
+game.weather.groundWet = Math.max(0, Math.min(1, num("wet", 0)));
 
 if (flag("torch", false)) {
     game.inventory.add("torch", 1);

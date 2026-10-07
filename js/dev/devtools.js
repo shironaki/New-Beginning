@@ -305,6 +305,16 @@ export function installDevTools(game, win = window) {
         });
         p.append(windSlider);
 
+        const wetLabel = el("span", { className: "val" });
+        const wetSlider = el("input", { type: "range", min: "0", max: "100", step: "1" });
+        wetSlider.addEventListener("input", () => {
+            game.weather.groundWet = Number(wetSlider.value) / 100;
+            refresh();
+        });
+        p.append(wetLabel, wetSlider);
+        row(btn("Сухо", () => { game.weather.groundWet = 0; refresh(); }),
+            btn("После ливня", () => { game.weather.groundWet = 0.85; refresh(); }));
+
         // ---- zones
         add("Локации");
         const zoneWrap = el("div", { className: "row" });
@@ -415,6 +425,8 @@ export function installDevTools(game, win = window) {
             hourLabel.textContent = `${game.clock.clockString()}  ${game.clock.season.name}`;
             hourSlider.value = String(Math.round(game.clock.minute));
             dayLabel.textContent = `день ${game.clock.day} · ${game.clock.season.name}`;
+            wetLabel.textContent = `Влажность земли: ${Math.round(game.weather.groundWet * 100)}%`;
+            wetSlider.value = String(Math.round(game.weather.groundWet * 100));
             windLabel.textContent = `ветер ${(game.weather.windAngle * 57.3).toFixed(0)}°`;
             windSlider.value = String(Math.round(game.weather.windAngle * 100));
             freezeBtn.classList.toggle("on", state.freezeWeather);
@@ -645,6 +657,7 @@ export function installDevTools(game, win = window) {
             day: game.clock.day, time: game.clock.clockString(),
             season: game.clock.season.key,
             weather: game.weather.current,
+            groundWet: game.weather.groundWet,
             zoom: Number(game.camera.zoom.toFixed(2)),
             seed: game.seed,
             at: new Date().toISOString(),

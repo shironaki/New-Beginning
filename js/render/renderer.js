@@ -13,9 +13,10 @@
  */
 import { CHUNK } from "../world/tilemap.js";
 import { TILE_SIZE, TILES } from "../world/tiles.js";
-import { paintTile, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, setWalker, setBreeze, propHeight, propTone, puddleScreenPath, coastReach } from "./tilesart.js";
+import { paintTile, paintSnowGround, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, setWalker, setBreeze, propHeight, propTone, puddleScreenPath, coastReach } from "./tilesart.js";
 import { drawCharacter, drawSleeping } from "./character.js";
 import { LightMap, LIGHT } from "./lighting.js";
+import { drawWetGround } from "./surface.js";
 import { itemEmoji } from "../sandbox/items.js";
 
 /**
@@ -224,7 +225,7 @@ export class Renderer {
                 const wx = cx * CHUNK + tx, wy = cy * CHUNK + ty;
                 if (!zone.map.inBounds(wx, wy)) continue;
                 const id = zone.map.get(wx, wy);
-                paintTile(c, id, tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, wx, wy, this.season);
+                paintTile(c, id, tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, wx, wy, this.season, zone.map);
             }
         }
         // Second pass so edges blend over finished neighbours.
@@ -233,6 +234,13 @@ export class Renderer {
                 const wx = cx * CHUNK + tx, wy = cy * CHUNK + ty;
                 if (!zone.map.inBounds(wx, wy)) continue;
                 paintEdges(c, zone.map, wx, wy, tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, this.season);
+            }
+        }
+        if (this.season === "winter") {
+            for (let ty = 0; ty < CHUNK; ty++) for (let tx = 0; tx < CHUNK; tx++) {
+                const wx = cx * CHUNK + tx, wy = cy * CHUNK + ty;
+                if (!zone.map.inBounds(wx, wy)) continue;
+                paintSnowGround(c, zone.map.get(wx, wy), tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, wx, wy);
             }
         }
         this.stats.baked++;
@@ -992,7 +1000,10 @@ export class Renderer {
      */
     render(state, dt = 0) {
         this.time += dt;
-        this.season = state.clock ? state.clock.season.key : "spring";
+        // A dev jump, natural season change and loading a save all follow
+        // this path. Invalidate once on a palette change, not every frame.
+        const season = state.underground ? "spring" : state.clock ? state.clock.season.key : "spring";
+        if (season !== this.season) { this.season = season; this.invalidate(); }
         setSun(state.clock ? state.clock.minute / 60 : 12, state.clock ? state.clock.daylight : 1);
         const ctx = this.ctx;
         ctx.fillStyle = "#0a0c10";
@@ -1013,6 +1024,7 @@ export class Renderer {
                        state.clock ? state.clock.daylight : 1,
                        state.clock ? state.clock.minute / 60 : 12,
                        !!state.underground);
+        drawWetGround(ctx, this.camera, state, this.time);
         this.drawCloudShadows(state.weather,
                               state.clock ? state.clock.daylight : 1,
                               !!state.underground,
@@ -1030,7 +1042,7 @@ export class Renderer {
             ctx.restore();
         }
         this.drawInteractHint(state.interact && state.interact.target, state.interact && state.interact.label);
-        this.drawWeather(state.weather, dt, state.windAngle || 0);
+        if (!state.underground) this.drawWeather(state.weather, dt, state.windAngle || 0);
 
         // --- lights ---------------------------------------------------------
         // The very list the shadows were thrown from, now in screen space.

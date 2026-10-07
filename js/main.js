@@ -14,6 +14,7 @@ import { Input } from "./engine/input.js";
 import { Camera } from "./engine/camera.js";
 import { WorldMap } from "./world/worldgen.js";
 import { WeatherSystem } from "./world/weather.js";
+import { surfaceTile, SURFACE } from "./world/surface.js";
 import { UI, pixelRatio } from "./ui/uispec.js";
 import { START_ZONE, biomeDef, oppositeEdge } from "./world/regions.js";
 import { TILE_SIZE, tileInfo } from "./world/tiles.js";
@@ -595,6 +596,7 @@ export class Game {
 
     /** Advance world systems by `minutes` in-game minutes. */
     simulateMinutes(minutes, sleeping = false) {
+        this.weather.updateSurface(minutes);
         const seconds = minutes * 60;
         for (const [, fire] of this.fires) fire.update(seconds / this.weather.fuelPenalty);
         this.needs.update(minutes, {
@@ -653,11 +655,21 @@ export class Game {
                 // boots print on hard ground too, until they dry out.
                 // The foot line IS player.y — the print belongs there, not
                 // two pixels further down the screen.
+                const outside = !this.zone.def.underground && !this.shelteredAt(this.player.x, this.player.y);
+                const wet = outside ? this.weather.groundWet : 0;
+                const season = this.clock.season.key;
+                const ground = surfaceTile(info, season, wet, !outside);
+                const snowy = outside && season === "winter";
+                if (wet > SURFACE.wetBootsAt) this.player.wet = TRACK.wetLife;
                 this.tracks.add(this.player.x, this.player.y,
                                 this.player.faceX, this.player.faceY,
-                                this.player.stepSide, info, this.player.wet > 0);
-                this.particles.dust(this.player.x + this.player.stepSide * 2.5, this.player.y + 1,
-                    this.player.running ? FX.dust.run : FX.dust.walk, dustColor(def));
+                                this.player.stepSide, ground, !snowy && this.player.wet > 0);
+                if (wet > SURFACE.wetBootsAt) {
+                    this.particles.splash(this.player.x + this.player.stepSide * 2.5, this.player.y + 1, 0.3);
+                } else {
+                    this.particles.dust(this.player.x + this.player.stepSide * 2.5, this.player.y + 1,
+                        this.player.running ? FX.dust.run : FX.dust.walk, dustColor(tileInfo(ground)));
+                }
             }
         }
 
@@ -850,6 +862,7 @@ export class Game {
             player: this.player,
             clock: this.clock,
             weather: this.weather.current,
+            groundWet: this.weather.groundWet,
             windAngle: this.weather.windAngle,
             windStrength: this.windStrength === undefined ? WIND_BY_WEATHER.clear : this.windStrength,
             particles: this.particles,
