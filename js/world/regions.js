@@ -1,7 +1,7 @@
 /**
  * world — the valley: 12 zones, their biomes and how they connect.
  *
- * v2 had a single 26×18 map (~470 tiles). The valley below is ~41 000 tiles
+ * The valley below is ~41 000 tiles
  * plus interiors — roughly 85× the walkable area, and, more importantly, it is
  * connected by *transition* zones (a broken road, a forest ride, a mountain
  * pass) instead of teleporting at the screen edge.

@@ -3,7 +3,7 @@
  *
  * One table describes every interactable object in the valley: what tool it
  * needs, how long it takes, what it drops and whether it grows back. The
- * strict tool rule from v2 stays — you cannot fell a pine with your fists —
+ * strict tool rule applies — you cannot fell a pine with your fists —
  * but bare-hand foraging (berries, herbs, firewood) always works, so the
  * prologue is playable with nothing in your pockets.
  */

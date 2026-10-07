@@ -3,7 +3,7 @@
  *
  * Systems never reach into each other. The campfire does not know the quest
  * log exists; it just emits "cook:done" and whoever cares listens. This is what
- * keeps a colony sim from turning into the 1000-line main.js of v2.
+ * keeps a colony sim from turning into a 1000-line God file.
  */
 export class EventBus {
     constructor() {

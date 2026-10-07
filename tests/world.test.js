@@ -101,10 +101,10 @@ test("collision keeps the mover inside the map", () => {
 
 suite("regions");
 
-test("the valley is far bigger than the v2 village", () => {
-    const v2Tiles = 26 * 18;                    // the whole v2 map
+test("the valley is far bigger than a single starter map", () => {
+    const starterTiles = 26 * 18;               // one starter map
     const total = valleyTileCount();
-    assert.gt(total, v2Tiles * 5, "world must be at least 5× bigger");
+    assert.gt(total, starterTiles * 5, "world must be at least 5× bigger");
     assert.gt(total, 40000, `expected 40k+ tiles, got ${total}`);
 });
 
