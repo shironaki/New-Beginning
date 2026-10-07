@@ -71,7 +71,7 @@ export class Game {
         this.particles = new Particles();
         this.tracks = new Tracks();
         this.fires = new Map();          // `${zoneId}:${tx},${ty}` -> Campfire
-        this.look = { skin: "#e2b48a", hair: "#3f2d20", shirt: "#77684a", pants: "#524636", accent: "#8a4b32" };
+        this.look = { skin: "#d3ae86", hair: "#493b2d", shirt: "#65786f", pants: "#4e4337", accent: "#996847" };
 
         this.zone = this.world.get(START_ZONE);
         this.player = new Player({ x: this.zone.spawn.x, y: this.zone.spawn.y, bus: this.bus });
@@ -103,7 +103,7 @@ export class Game {
 
         this.loop = new GameLoop({
             update: (dt) => this.update(dt),
-            render: () => this.render()
+            render: (_alpha, dt) => this.render(dt)
         });
     }
 
@@ -869,7 +869,7 @@ export class Game {
         return this;
     }
 
-    render() {
+    render(dt = 1 / 60) {
         const active = this.inventory.active;
         const activeDef = active ? itemDef(active.id) : null;
         this.renderer.render({
@@ -891,7 +891,7 @@ export class Game {
             playerLight: activeDef && activeDef.light ? activeDef.light : 0,
             underground: !!this.zone.def.underground,
             entities: []
-        }, 1 / 60);
+        }, dt);
     }
 
     start() {

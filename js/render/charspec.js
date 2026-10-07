@@ -27,19 +27,19 @@ export const QUANT = 0.5;
  * in, hips and boots wide again. The pyramid is what makes a 60 px figure
  * read as a person with gear instead of a cute doll.
  *
- * head : body = 1 : 3.9
+ * head : body ≈ 1 : 4.4
  */
 export const BODY = {
-    total: 31,
+    total: 33,
 
-    headH: 8,
-    headW: 8,
-    headY: -31,              // top of the skull
+    headH: 7.5,
+    headW: 6.8,
+    headY: -33,              // top of the skull
 
-    torsoY: -23,             // shoulder line
-    torsoH: 11,
-    shoulderW: 13,           // front/back view
-    shoulderWSide: 9.5,      // profile is narrower — that is what sells the turn
+    torsoY: -25,             // shoulder line
+    torsoH: 13,
+    shoulderW: 11.5,           // front/back view
+    shoulderWSide: 8.0,      // profile is narrower — that is what sells the turn
     waistW: 8.5,             // the pinch, at 72% down the torso
     waistAt: 0.72,
     hipW: 9,
@@ -56,11 +56,11 @@ export const BODY = {
     bootToe: 1.5,            // how far the toe sticks out past the ankle
     idleStance: 1.2,         // profile: feet part this much when standing
 
-    armY: -22,               // shoulder pivot, just under the shoulder line
-    armLen: 9.5,
-    armW: 3.0,
+    armY: -24,               // shoulder pivot, just under the shoulder line
+    armLen: 11,
+    armW: 2.5,
     sleeveW: 1.3,            // the shoulder is wider than the forearm
-    handH: 2.8,              // big hands — an Albion marker
+    handH: 2.2,              // readable fingers, not a square cuff
     farArmX: 1.6,            // profile: how far the hidden arm peeks out
     nearArmX: 0.9,
 

@@ -3,6 +3,7 @@
  * reconstructed from neighbouring centres, not four unrelated edge strips.
  */
 import { T, TILE_SIZE, tileInfo } from "./tiles.js";
+import { coastDistances } from "./coast.js";
 import { valueNoise2D } from "../core/rng.js";
 
 const BUILT = new Set([T.PLANK, T.COBBLE, T.FARM, T.FARM_WET]);
@@ -27,6 +28,25 @@ export class TerrainField {
         if (!len) return 1;
         const rise = (this.elevation(x + dx / len * 12, y + dy / len * 12) - this.elevation(x, y)) / 12;
         return Math.max(0.72, Math.min(1.04, 1 - Math.max(0, rise) * 0.7));
+    }
+
+    refreshCoast() {
+        if (this._revision !== (this.map.revision || 0)) {
+            this._coast = coastDistances(this.map);
+            this._revision = this.map.revision || 0;
+        }
+    }
+
+    /** Interpolate the same warped coordinates used for the natural contour. */
+    coastAt(ix, iy, fx, fy) {
+        this.refreshCoast();
+        let distance = 0;
+        for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+            const x = Math.max(0, Math.min(this.map.w - 1, ix + dx));
+            const y = Math.max(0, Math.min(this.map.h - 1, iy + dy));
+            distance += this._coast[y * this.map.w + x] * (dx ? fx : 1 - fx) * (dy ? fy : 1 - fy);
+        }
+        return distance;
     }
 
     sample(wx, wy) {
@@ -60,6 +80,7 @@ export class TerrainField {
             best = -1;
             for (const [t, w] of weights) if (!tileInfo(t).liquid && t !== T.CLIFF && w > best) { best = w; id = t; }
         }
-        return { id, water, cliff, weights };
+        const coast = this.coastAt(ix, iy, x - ix, y - iy);
+        return { id, water, cliff, weights, coast, depth: deep };
     }
 }

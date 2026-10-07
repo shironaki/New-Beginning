@@ -9,6 +9,7 @@
  */
 import { RNG, mixSeeds, hashSeed, fbm2D, valueNoise2D } from "../core/rng.js";
 import { T, TILE_SIZE, tileInfo } from "./tiles.js";
+import { edgeScenery } from "./edges.js";
 import { TerrainField } from "./terrain.js";
 import { TileMap } from "./tilemap.js";
 import { ZONES, BIOMES, biomeDef, zoneDef } from "./regions.js";
@@ -313,7 +314,22 @@ export function generateZone(zoneId, worldSeed = 1) {
     scatterProps(zone, rng, biome);
     placeStoryProps(zone, rng);
     restoreCoast(zone);
+    // Final topology first; otherwise the border overwrites the shallow rim.
+    // Do this after scattering so existing land loot is not rerolled.
+    if (def.biome === "shore") {
+        deepenWater(zone, seed);
+        // Smoothing must not turn the first wet cell next to land into a
+        // deep hole, particularly at narrow spits and the outer border.
+        for (let y = 0; y < map.h; y++) for (let x = 0; x < map.w; x++) {
+            if (map.get(x, y) !== T.DEEP) continue;
+            if ([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) =>
+                map.inBounds(x + dx, y + dy) && !tileInfo(map.get(x + dx, y + dy)).liquid)) {
+                map.data[y * map.w + x] = T.WATER;
+            }
+        }
+    }
     zone.terrain = map.terrain = new TerrainField(map, seed, def.biome);
+    zone.edgeScenery = edgeScenery(zone, seed);
     pickSpawn(zone, rng);
 
     map.markAllDirty();
@@ -669,8 +685,8 @@ function scatterProps(zone, rng, biome) {
                 const ore = (oreCountry && rng.chance(0.42))
                     ? rng.weighted([["copper", 5], ["iron", 3], ["coal", 4], ["gem", 1]])
                     : null;
-                addProp(zone, ore ? "ore_rock" : "rock", x, y, {
-                    variant: rng.int(0, 2), ore, hp: ore ? 5 : 3, yields: ore || "stone"
+                addProp(zone, def.biome === "shore" ? "beach_pebbles" : ore ? "ore_rock" : "rock", x, y, {
+                    variant: rng.int(0, 2), ore, hp: def.biome === "shore" ? 1 : ore ? 5 : 3, yields: ore || "stone"
                 });
                 continue;
             }

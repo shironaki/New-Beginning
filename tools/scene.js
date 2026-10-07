@@ -182,6 +182,8 @@ if (["down", "up", "left", "right"].includes(dir)) game.player.dir = dir;
 if (flag("fallen", false)) game.player.fallTimer = 1;
 game.camera.zoom = num("zoom", 2.6);
 game.camera.snapTo(game.player.x, game.player.y - 8);
+// Pin visual time without replaying hundreds of software-rendered frames.
+if (flag("pose-time", null) !== null) game.renderer.time = num("pose-time", 0) - 1 / 60;
 game.render();
 
 fs.writeFileSync(OUT, encodePNG(screen));

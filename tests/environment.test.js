@@ -59,7 +59,13 @@ test("sea route is removed at the note coordinate, land and objects survive", ()
 });
 test("shore keeps all 321 original prop/loot payloads, including overseas supplies", () => {
     const z = generateZone("shore", 1066618561);
-    const payload = z.objects.map(({ x, y, tx, ty, ...keep }) => keep);
+    const payload = z.objects.map(({ x, y, tx, ty, ...keep }) => {
+        // Note 016 explicitly replaces large beach rocks with hand-picked
+        // pebbles. Normalise ONLY these authored visual/interaction changes;
+        // all seeded resource payloads still match the pre-change digest.
+        if (keep.kind === "beach_pebbles") return { ...keep, kind: "rock", hp: 3, block: 6.5 };
+        return keep;
+    });
     // Golden digest captured from unmodified 7503f9b, not the new generator.
     assert.eq(createHash("sha256").update(JSON.stringify(payload)).digest("hex"),
         "04587bf9578fbfce8d707c06e9a4c0adae75080f95032c7129da537e2a832791");

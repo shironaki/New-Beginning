@@ -1639,7 +1639,7 @@ export const PROP_HEIGHT = {
     oak: 46, birch: 46, willow: 46, ancient_oak: 46, palm: 46,
     burnt_tree: 38, dead_tree: 34,
     hearth_ruin: 34, tent: 30, ruin_wall: 26,
-    rock: 14, ore_rock: 14, burnt_stump: 13, bush: 12, chest_old: 11,
+    rock: 14, ore_rock: 14, beach_pebbles: 2.5, burnt_stump: 13, bush: 12, chest_old: 11,
     burnt_beam: 7, campfire: 6, firewood: 6, driftwood: 5, diary: 3
 };
 /** These grow with the prop's own `size`; the rest are built, not grown. */
@@ -3145,6 +3145,20 @@ export function paintProp(ctx, obj, time = 0, season = "spring") {
             break;
         }
 
+        case "beach_pebbles": {
+            for (let i = 0; i < 5; i++) {
+                const x = (h(obj.tx + i, obj.ty, 731) - 0.5) * 17;
+                const y = (h(obj.tx, obj.ty + i, 733) - 0.5) * 5;
+                const r = 1.1 + h(obj.tx + i, obj.ty, 739) * 1.3;
+                ctx.fillStyle = "rgba(59,52,39,0.24)";
+                ctx.beginPath(); ctx.ellipse(x + 0.5, y + 0.6, r + 0.5, r * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = ["#92978c", "#b0a590", "#7e8985"][i % 3];
+                ctx.beginPath(); ctx.ellipse(x, y - 0.6, r, r * 0.65, -0.2, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = season === "winter" ? "#e2ebeb" : "#c7c7b3";
+                ctx.fillRect(x - r * 0.5, y - 1.2, r, 0.6);
+            }
+            break;
+        }
         case "driftwood": {
             shadowEllipse(ctx, 11, 2.6, 0.22, propHeight(kind, s));
             ctx.save(); ctx.rotate(-0.18);

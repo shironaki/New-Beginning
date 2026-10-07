@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Новое начало — стенд рельефа</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#18231f;color:#e2e5d2;font:16px/1.5 system-ui,sans-serif}main{max-width:1100px;margin:auto;padding:24px}a{color:#d8c18d}h1{font-size:26px;margin:8px 0}p{max-width:850px;color:#b7c2b5;margin:8px 0 18px}.tag{color:#dcc28c;font-size:12px;letter-spacing:.15em}canvas{width:100%;display:block;background:#283632;border:1px solid #52654f;image-rendering:pixelated;outline:none}canvas:focus{border-color:#d9c084}nav{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:16px 0}button{background:#334537;color:#f0e7ce;border:1px solid #697557;padding:10px 16px;cursor:pointer;border-radius:4px}button:hover{background:#465b42}output{display:block;min-height:32px;color:#e4c793}.small{font-size:13px}label{padding:8px}
+</style></head>
+<body><main><a href="../">← Вернуться в игру</a><div class="tag">ИССЛЕДОВАНИЕ РЕЛЬЕФА · НЕ ОСНОВНОЙ МИР</div>
+<h1>Холм, уступ и подъём</h1><p>WASD или стрелки — идти, E — подобрать хворост наверху. Пологий подъём справа связывает нижнюю площадку с террасой. Слева — проходимый холм. Через отвесный край пройти нельзя. Никакие сохранения игры здесь не меняются.</p>
+<nav><button id="bottom">К началу подъёма</button><button id="top">На террасу</button><button id="hill">К холму</button><label><input type="checkbox" id="guides" checked> Показывать высоту</label></nav>
+<canvas id="relief" width="1000" height="600" tabindex="0" aria-label="Интерактивный стенд рельефа, управление с клавиатуры"></canvas>
+<output id="status" aria-live="polite"></output><p class="small">Прототип: одна поверхность высоты, без прыжков, мостов и пещер под террасой. Кнопка «На террасу» — отладочное перемещение, не игровая способность.</p>
+</main><script type="module" src="../js/dev/relief-lab.js"></script></body></html>

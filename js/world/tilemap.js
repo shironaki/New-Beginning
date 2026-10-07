@@ -32,7 +32,11 @@ export class TileMap {
 
     set(x, y, id) {
         if (!this.inBounds(x, y)) return this;
+        const previous = this.data[this.index(x, y)];
         this.data[this.index(x, y)] = id;
+        this.revision = (this.revision || 0) + 1;
+        // Coast distances can propagate beyond a neighbouring chunk.
+        if (!!tileInfo(previous).liquid !== !!tileInfo(id).liquid) this.markAllDirty();
         this.markDirtyAt(x, y);
         return this;
     }
