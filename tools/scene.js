@@ -11,7 +11,7 @@
  *   node tools/scene.js --list
  *
  * Flags
- *   --relief           isolated daytime gameplay relief pilot
+ *   --relief           isolated relief pilot (supports --hour, --weather, --day, --wet)
  *   --zone <id>        zone to enter (default: the starting valley)
  *   --at x,y           world position for the hero (default: the zone spawn)
  *   --near <kind>      stand next to the closest prop of that kind (--gap px)

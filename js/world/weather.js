@@ -73,9 +73,10 @@ export class WeatherSystem {
         return this;
     }
 
-    toJSON() { return { current: this.current, tomorrow: this.tomorrow, groundWet: this.groundWet }; }
+    toJSON() { return { current: this.current, tomorrow: this.tomorrow, groundWet: this.groundWet, windAngle: this.windAngle }; }
     load(d) {
         if (d) {
+            this.windAngle = Number.isFinite(d.windAngle) ? d.windAngle : new RNG(mixSeeds(this.seed, this.clock?.day || 1, 99)).range(0, Math.PI * 2);
             this.current = d.current || "clear";
             this.tomorrow = d.tomorrow || "clear";
             // Old saves predate ground moisture and start dry.

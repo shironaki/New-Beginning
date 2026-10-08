@@ -112,11 +112,11 @@ export class Tracks {
     }
 
     /** Drawn right after the ground, before anything that stands on it. */
-    draw(ctx, cam) {
-        if (!this.count || cam.zoom < TRACK.minZoom) return this;
+    draw(ctx, cam, only = null) {
+        if (!this.count || (!only && cam.zoom < TRACK.minZoom)) return this;
         const z = cam.zoom;
         ctx.save();
-        for (const p of this.items) {
+        for (const p of only ? [only] : this.items) {
             if (!p.alive) continue;
             if (!cam.isVisible(p.x, p.y, 16)) continue;
             const age = p.t / p.life;

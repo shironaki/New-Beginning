@@ -725,10 +725,10 @@ export class Renderer {
     _collectLights(state) {
         const out = this._lights || (this._lights = []);
         let n = 0;
-        const push = (x, y, r, i, flicker = 1) => {
+        const push = (x, y, r, i, flicker = 1, glow = 1) => {
             let L = out[n];
             if (!L) { L = { x: 0, y: 0, r: 0, i: 1, phase: 0 }; out[n] = L; }
-            L.x = x; L.y = y; L.r = r; L.i = i; L.flicker = flicker;
+            L.x = x; L.y = y; L.r = r; L.i = i; L.flicker = flicker; L.glow = glow;
             // Flicker phase keyed to the world, so two fires are out of step
             // with each other and neither changes beat when the camera moves.
             L.phase = (x * 0.013 + y * 0.029) % 6.283;
@@ -746,7 +746,7 @@ export class Renderer {
             const p = state.player;
             const attachment = toolAttachment({ ...p, phase: p.anim, idleTime: this.time,
                 torchWind: state.underground ? 0 : Math.cos(state.windAngle || 0) * (state.windStrength || 0) });
-            push(p.x + attachment.x, p.y + attachment.y, state.playerLight, attachment.intensity, 0);
+            push(p.x + attachment.x, p.y + attachment.y, state.playerLight, attachment.intensity, 0, 0.45);
         }
         for (const L of state.extraLights || []) push(L.x, L.y, L.r, L.i || 0.7);
         out.length = n;
@@ -1072,7 +1072,7 @@ export class Renderer {
             if (!cam.isVisible(L.x, L.y, 200)) continue;
             const s = cam.worldToScreen(L.x, L.y);
             this.lightMap.add(s.x, s.y, L.r * cam.zoom,
-                { intensity: L.i, warmth: 0.88, flicker: L.flicker ?? 1, phase: L.phase || 0 });
+                { intensity: L.i, warmth: 0.88, flicker: L.flicker ?? 1, phase: L.phase || 0, glow: L.glow ?? 1 });
         }
         // Underground the eye adjusts: a weak glow so galleries are readable
         // even without a torch (a torch is still far brighter).

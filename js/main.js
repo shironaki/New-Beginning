@@ -10,6 +10,9 @@ import { EventBus } from "./core/events.js";
 import { GameClock } from "./core/time.js";
 import { GameLoop } from "./core/loop.js";
 import { RNG, hashSeed } from "./core/rng.js";
+import { snapshotWorld, restoreWorld } from "./world/persistence.js";
+import { installSession, sessionTick, openSessionMenu, bindSessionLifecycle } from "./ui/session.js";
+import { bindTouch } from "./ui/touch.js";
 import { SaveManager } from "./core/save.js";
 import { Input } from "./engine/input.js";
 import { Camera } from "./engine/camera.js";
@@ -17,7 +20,7 @@ import { WorldMap } from "./world/worldgen.js";
 import { WeatherSystem } from "./world/weather.js";
 import { surfaceTile, SURFACE, frozenPuddleAt } from "./world/surface.js";
 import { UI, pixelRatio } from "./ui/uispec.js";
-import { START_ZONE, biomeDef, oppositeEdge } from "./world/regions.js";
+import { START_ZONE, biomeDef, oppositeEdge, zoneDef } from "./world/regions.js";
 import { T, TILE_SIZE, tileInfo } from "./world/tiles.js";
 import { bodyBlocked } from "./world/tilemap.js";
 import { Player } from "./entities/player.js";
@@ -58,6 +61,7 @@ function dustColor(def) {
 }
 
 export class Game {
+    get isTrial() { return false; }
     constructor({ canvas, hudRoot, seed = Date.now() & 0xffff } = {}) {
         this.bus = new EventBus();
         this.seed = typeof seed === "string" ? hashSeed(seed) : seed;
@@ -106,6 +110,7 @@ export class Game {
             update: (dt) => this.update(dt),
             render: (_alpha, dt) => this.render(dt)
         });
+        installSession(this);
     }
 
     /* ===================== setup ===================== */
@@ -162,47 +167,32 @@ export class Game {
     }
 
     _bindTouch(canvas) {
-        // Analogue joystick on the left half, action tap on the right.
-        let id = null, ox = 0, oy = 0;
-        const start = (e) => {
-            for (const t of e.changedTouches) {
-                if (t.clientX < window.innerWidth * 0.5 && id === null) {
-                    id = t.identifier; ox = t.clientX; oy = t.clientY;
-                } else {
-                    this.input.tap("action");
-                }
-            }
-        };
-        const move = (e) => {
-            for (const t of e.changedTouches) {
-                if (t.identifier !== id) continue;
-                this.input.setStick((t.clientX - ox) / 55, (t.clientY - oy) / 55);
-            }
-            e.preventDefault();
-        };
-        const end = (e) => {
-            for (const t of e.changedTouches) {
-                if (t.identifier === id) { id = null; this.input.setStick(0, 0); }
-            }
-        };
-        // A native drag or a context menu steals the key release that ends a
-        // step; neither does anything useful over the game surface.
-        canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-        canvas.addEventListener("dragstart", (e) => e.preventDefault());
-        canvas.addEventListener("touchstart", start, { passive: true });
-        canvas.addEventListener("touchmove", move, { passive: false });
-        canvas.addEventListener("touchend", end, { passive: true });
-        canvas.addEventListener("touchcancel", end, { passive: true });
+        this.touch = bindTouch(this, canvas);
     }
 
     _setupSave() {
         this.save = new SaveManager({ bus: this.bus });
+        this.save.register("seed", () => this.seed, (seed) => {
+            if (!Number.isInteger(seed)) throw new Error("Некорректный сид");
+            this.seed = seed; this.rng = new RNG(seed); this.weather.seed = seed;
+            if (!this.isTrial) { this.world = new WorldMap(seed); this.fires.clear(); }
+        });
+        if (!this.isTrial) this.save.register("world", () => snapshotWorld(this.world), (data) => {
+            this.world = restoreWorld(this.seed, data);
+            for (const z of this.world.zones.values()) this._prepareZone(z);
+        });
+        this.save.register("rng", () => this.rng.state, (state) => {
+            if (!Number.isInteger(state)) throw new Error("Некорректное состояние генератора");
+            this.rng.state = state >>> 0;
+        });
         this.save.register("clock", () => this.clock.toJSON(), (d) => this.clock.load(d));
         this.save.register("needs", () => this.needs.toJSON(), (d) => this.needs.load(d));
         this.save.register("inv", () => this.inventory.toJSON(), (d) => this.inventory.load(d));
         this.save.register("weather", () => this.weather.toJSON(), (d) => this.weather.load(d));
         this.save.register("player", () => ({ zone: this.zone.id, p: this.player.toJSON() }),
             (d) => {
+                if ((!this.isTrial && !zoneDef(d.zone)) || !Number.isFinite(d.p?.x) || !Number.isFinite(d.p?.y))
+                    throw new Error("Некорректная позиция героя");
                 if (d.zone) this.enterZone(d.zone, null, true);
                 this.player.load(d.p);
                 syncWaterState(this.zone, this.clock, this.weather.current);
@@ -210,19 +200,41 @@ export class Game {
             });
         this.save.register("story", () => this.story.toJSON(), (d) => this.story.load(d));
         this.save.register("cook", () => this.cookJournal.toJSON(), (d) => this.cookJournal.load(d));
-        this.save.register("seed", () => this.seed, () => {});
         this.save.register("fires", () => {
             const out = {};
             for (const [k, f] of this.fires) out[k] = f.toJSON();
             return out;
         }, (d) => {
+            this.fires.clear();
             for (const [k, data] of Object.entries(d || {})) {
+                const id = k.split(":")[0];
+                if (!this.isTrial && !zoneDef(id)) throw new Error("Неизвестная локация костра");
                 const f = this.fires.get(k) || new Campfire({ bus: this.bus });
                 f.load(data);
                 this.fires.set(k, f);
             }
         });
-        this.bus.on("time:newday", () => { this.save.write({ day: this.clock.day }); this.hud.toast("Игра сохранена", "💾"); });
+        // Save after the whole minute has simulated, not midway through a
+        // clock event (before fuel/needs have advanced).
+        this.bus.on("time:newday", () => { this._saveDue = true; });
+        this.save.validate = ({ parts }) => {
+            if (!parts.player || !parts.clock || !parts.inv || !parts.needs || !Number.isInteger(parts.seed)) throw new Error("Неполное сохранение игры");
+            const c = parts.clock;
+            if (!Number.isInteger(c.day) || c.day < 1 || !Number.isFinite(c.minute) || c.minute < 0 || c.minute >= 1440)
+                throw new Error("Некорректные часы");
+            if (c.scale !== undefined && (!Number.isFinite(c.scale) || c.scale < 0 || c.scale > 100)) throw new Error("Некорректный масштаб времени");
+            const p = parts.player.p;
+            if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.stamina) || p.stamina < 0 || p.stamina > 100
+                || !["left", "right", "up", "down"].includes(p.dir)) throw new Error("Некорректный герой");
+            const inv = parts.inv;
+            if (!Array.isArray(inv.slots) || !Number.isInteger(inv.size) || inv.size < 1 || inv.size > 100 || inv.slots.length > inv.size
+                || !Number.isInteger(inv.activeSlot) || inv.activeSlot < 0 || inv.activeSlot >= inv.size)
+                throw new Error("Некорректный рюкзак");
+            for (const slot of inv.slots) if (slot && (!itemDef(slot.id) || !Number.isInteger(slot.n) || slot.n < 1 || slot.n > itemDef(slot.id).stack))
+                throw new Error("Некорректный предмет в рюкзаке");
+            for (const key of ["food", "warmth", "health", "fatigue", "spirit"]) if (parts.needs &&
+                (!Number.isFinite(parts.needs[key]) || parts.needs[key] < 0 || parts.needs[key] > 100)) throw new Error("Некорректные нужды");
+        };
     }
 
     /* ===================== world ===================== */
@@ -629,7 +641,7 @@ export class Game {
 
     update(dt) {
         this.elapsed += dt;
-        const uiBlocking = this.hud.isPanelOpen || this.paused;
+        const uiBlocking = this.hud.isPanelOpen || this.paused || this.backgrounded;
 
         // Clock & derived systems.
         const minutes = uiBlocking ? 0 : this.clock.update(dt);
@@ -639,11 +651,12 @@ export class Game {
         // never arrived (focus lost to a click outside the frame) is dropped
         // here instead of walking the hero away on its own.
         this.input.update(dt);
+        if (uiBlocking) { this.input.releaseAll(); if (!this.player.fallTimer) this.player.mvx = this.player.mvy = 0; }
         syncWaterState(this.zone, this.clock, this.weather.current);
         const axis = uiBlocking ? { x: 0, y: 0 } : this.input.axis();
-        this.player.update(dt, axis, this.zone, {
+        if (!uiBlocking) this.player.update(dt, axis, this.zone, {
             speedFactor: this.needs.speedFactor(),
-            wantRun: this.input.pressed("sprint"),
+            wantRun: !uiBlocking && (this.input.pressed("sprint") || (this.input.stick.active && Math.hypot(axis.x, axis.y) > 0.95)),
             surfaceAt: (x, y) => ({
                 ice: frozenPuddleAt(this.zone, x, y, this.clock.season.key, this.weather.groundWet, this.ambient)
                     || waterIce(this.zone.map, x, y).walkable
@@ -724,7 +737,8 @@ export class Game {
         }
         if (this.input.justPressed("cancel")) {
             if (this.hud.isStoryOpen) this.hud.hideStory();
-            else this.hud.closePanel();
+            else if (this.hud.isPanelOpen) this.hud.closePanel();
+            else openSessionMenu(this);
         }
 
         // Interaction.
@@ -785,6 +799,7 @@ export class Game {
         this.camera.follow(this.player.x, this.player.y - 8, dt, this.player.vx, this.player.vy);
         this.input.consume();
 
+        sessionTick(this, dt, uiBlocking);
         this.hud.update({
             needs: this.needs, player: this.player,
             clock: this.clock,
@@ -904,6 +919,12 @@ export class Game {
     }
 
     start() {
+        if (this.save.has()) {
+            this.sessionReady = false;
+            openSessionMenu(this);
+            this.loop.start();
+            return this;
+        }
         // Opening narration, then the loop.
         this.bus.emit("story:step", {
             title: "Новое начало",
@@ -970,7 +991,7 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
             const link = document.createElement("a"); link.href = "./"; link.textContent = "← Основная игра";
             game.trialStatus = document.createElement("span");
             const hint = document.createElement("small");
-            hint.textContent = "Дневной игровой пилот · WASD/стрелки, Shift, E · основное сохранение не меняется. Прогресс участка сбросится после перезагрузки.";
+            hint.textContent = "Пилот · меню: день/ночь/дождь/зима, факел · основное сохранение не меняется. Пробный прогресс сбросится после перезагрузки.";
             banner.append(link, game.trialStatus, hint); hudRoot.append(banner);
         }
         window.GAME = game;
@@ -981,6 +1002,8 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
             .then((m) => m.installDevTools(game, window))
             .catch(() => { /* dev tools are optional */ });
         window.addEventListener("resize", () => fit(game));
+        bindSessionLifecycle(game, window, document);
+        fit(game);
         game.start();
     });
 }

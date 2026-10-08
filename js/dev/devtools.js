@@ -1,3 +1,4 @@
+import { leaveFor } from "../ui/session.js";
 /**
  * dev tools — the owner's control room.
  *
@@ -253,11 +254,13 @@ export function installDevTools(game, win = window) {
 
         const relief = el("a", { textContent: "↗ Стенд рельефа: холм и уступ", href: "dev/relief.html", target: "_self" });
         relief.style.color = "#e2c58e";
+        relief.addEventListener("click", (e) => { e.preventDefault(); leaveFor(game, relief.href); });
         p.append(relief);
         const trial = el("a", { textContent: "↗ Игровой участок: хворост и костёр", href: "?relief=1", target: "_self" });
         trial.style.color = "#e2c58e";
+        trial.addEventListener("click", (e) => { e.preventDefault(); leaveFor(game, trial.href); });
         row(trial);
-        p.append(el("small", { textContent: "Откроется в этой вкладке: текущий запуск игры будет закрыт. Сохранения не удаляются." }));
+        p.append(el("small", { textContent: "Перед переходом основной прогресс сохраняется. Вернувшись, нажмите «Продолжить сохранение»." }));
 
         // ---- time
         add("Время");

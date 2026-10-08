@@ -6,7 +6,7 @@
  * tests use a plain in-memory object and the browser uses localStorage.
  */
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 export const SAVE_KEY = "minirpg_v3_save";
 
 /** Memory storage with the localStorage interface — used by tests and node. */
@@ -19,7 +19,10 @@ export class MemoryStorage {
 
 export class SaveManager {
     constructor({ storage = null, key = SAVE_KEY, bus = null } = {}) {
-        this.storage = storage || (typeof localStorage !== "undefined" ? localStorage : new MemoryStorage());
+        this.storageError = false;
+        try { this.storage = storage || (typeof localStorage !== "undefined" ? localStorage : new MemoryStorage()); }
+        catch { this.storage = new MemoryStorage(); this.storageError = true; }
+        this.lastError = null;
         this.key = key;
         this.bus = bus;
         this.providers = new Map();
@@ -35,20 +38,20 @@ export class SaveManager {
     snapshot(meta = {}) {
         const data = { version: SAVE_VERSION, savedAt: Date.now(), meta, parts: {} };
         for (const [name, p] of this.providers) {
-            try { data.parts[name] = p.save(); } catch (err) {
-                if (typeof console !== "undefined") console.error(`[save] ${name}`, err);
-            }
+            data.parts[name] = p.save();
         }
         return data;
     }
 
     write(meta = {}) {
-        const data = this.snapshot(meta);
         try {
+            if (this.storageError) throw new Error("Хранилище браузера недоступно");
+            const data = this.snapshot(meta);
             this.storage.setItem(this.key, JSON.stringify(data));
             if (this.bus) this.bus.emit("save:written", { data });
             return true;
         } catch (err) {
+            this.lastError = err;
             if (this.bus) this.bus.emit("save:error", { err });
             return false;
         }
@@ -66,23 +69,32 @@ export class SaveManager {
 
     /** Future-proofing: old saves get upgraded rather than discarded. */
     migrate(data) {
-        if (!data.version) data.version = 1;
-        if (!data.parts) data.parts = {};
-        data.version = SAVE_VERSION;
-        return data;
+        if (!data || typeof data !== "object" || Array.isArray(data) || !data.parts
+            || typeof data.parts !== "object" || Array.isArray(data.parts)) throw new Error("Некорректное сохранение");
+        if (data.version != null && (!Number.isInteger(data.version) || data.version < 1 || data.version > SAVE_VERSION))
+            throw new Error("Сохранение из неподдерживаемой версии");
+        return { ...data, version: SAVE_VERSION };
     }
 
-    /** Apply a save blob to every registered subsystem. Returns true on success. */
+    /** Transactional restore: failed providers roll back, storage is untouched. */
     restore(data) {
-        if (!data || !data.parts) return false;
-        for (const [name, p] of this.providers) {
-            if (data.parts[name] === undefined) continue;
-            try { p.load(data.parts[name]); } catch (err) {
-                if (typeof console !== "undefined") console.error(`[load] ${name}`, err);
+        let backup;
+        try {
+            data = this.migrate(data);
+            if (this.validate) this.validate(data);
+            backup = JSON.parse(JSON.stringify(this.snapshot()));
+            for (const [name, p] of this.providers) if (data.parts[name] !== undefined) p.load(data.parts[name]);
+            if (this.bus) this.bus.emit("save:restored", { data });
+            this.lastError = null;
+            return true;
+        } catch (err) {
+            this.lastError = err;
+            if (backup) for (const [name, p] of this.providers) {
+                try { if (backup.parts[name] !== undefined) p.load(backup.parts[name]); } catch { /* retain original error */ }
             }
+            if (this.bus) this.bus.emit("save:error", { err });
+            return false;
         }
-        if (this.bus) this.bus.emit("save:restored", { data });
-        return true;
     }
 
     /** Convenience: read from storage and apply. */
@@ -91,7 +103,7 @@ export class SaveManager {
         return data ? this.restore(data) : false;
     }
 
-    has() { return !!this.storage.getItem(this.key); }
+    has() { try { return !!this.storage.getItem(this.key); } catch { return false; } }
     erase() { this.storage.removeItem(this.key); return this; }
 
     /** Export / import as text, for sharing a world or backing it up. */

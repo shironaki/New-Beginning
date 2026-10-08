@@ -83,10 +83,16 @@ export function puddleContains(p, x, y) {
 /** Only small rain pools freeze here. The sea is NOT made walkable. */
 export function frozenPuddleAt(zone, x, y, season, wet, temperature = -1) {
     if (season !== "winter" || temperature > 0 || zone.def?.underground) return false;
+    return !!rainPoolAt(zone, x, y, wet);
+}
+
+export function rainPoolAt(zone, x, y, wet) {
     const tx = Math.floor(x / 32), ty = Math.floor(y / 32);
     if (!receivesRain(zone.map.at(x, y))) return false;
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++)
-        if (puddleContains(surfacePuddle(zone, tx + dx, ty + dy, wet), x, y)) return true;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const p = surfacePuddle(zone, tx + dx, ty + dy, wet);
+        if (puddleContains(p, x, y)) return p;
+    }
     return false;
 }
 
@@ -97,6 +103,7 @@ export function surfacePuddle(zone, tx, ty, wet) {
     // Keep the entire pool inside the natural bank, not only its centre.
     for (const dx of [-p.rx, 0, p.rx]) for (const dy of [-p.ry, 0, p.ry]) {
         if (!receivesRain(zone.map.at(p.x + dx, p.y + dy))) return null;
+        if (zone.relief && Math.abs(zone.relief.heightAt(p.x + dx, p.y + dy) - zone.relief.heightAt(p.x, p.y)) > 10) return null;
     }
     if (zone.objects?.some((o) => !o.removed && o.kind === "tent" && Math.abs(o.x - p.x) < 28 + p.rx && Math.abs(o.y - p.y) < 18 + p.ry)) return null;
     return p;

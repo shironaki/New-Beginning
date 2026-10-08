@@ -379,3 +379,18 @@ html, body {
     .needLabel { width: calc(88 * var(--ui)); }
     .need[data-need="stamina"] .needVal { width: calc(28 * var(--ui)); }
 }
+
+/* Session actions remain reachable on a phone; panels stay above them. */
+.sessionControls { position:absolute; bottom:calc(var(--slot) + 32px); right:12px; display:flex; flex-wrap:wrap; gap:6px; max-width:245px; pointer-events:auto; }
+.sessionControls button { min-height:44px; padding:8px 12px; background:#24251e; color:#f3e8d4; border:1px solid #82724b; border-radius:7px; font:inherit; touch-action:manipulation; }
+.touchStick { display:none; pointer-events:none; position:absolute; bottom:110px; left:22px; width:94px; height:94px; border:1px solid #ded1a66b; border-radius:50%; background:#20261a40; }
+.touchStick span { position:absolute; top:100%; width:110px; font-size:10px; text-align:center; color:#eee5c8; }
+.touchStick i { position:absolute; left:30px; top:30px; width:32px; height:32px; border-radius:50%; background:#e9d7a05c; }
+.panelWrap, .storyWrap { z-index:20; }
+@media (pointer:coarse) { .touchStick { display:block; } }
+@media (max-width:760px) {
+ .sessionControls { max-width:190px; bottom:calc(var(--slot) + 24px); }
+ .sessionControls button { font-size:12px; padding:7px 9px; }
+ .objectiveBar { bottom:calc(var(--slot) + 140px); max-width:90vw; }
+ .reliefTrialBanner { max-width:55vw; font-size:10px; padding:6px; }
+}

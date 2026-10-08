@@ -313,12 +313,16 @@ export class Player {
         return 0.75;
     }
 
-    toJSON() { return { x: this.x, y: this.y, dir: this.dir, stamina: this.stamina, name: this.name,
+    toJSON() { return { x: this.x, y: this.y, dir: this.dir, stamina: this.stamina, name: this.name, faceX: this.faceX, faceY: this.faceY, slant: this.slant,
         slipDistance: this.slipDistance, slipChecks: this.slipChecks, slipCooldown: this.slipCooldown, fallTimer: this.fallTimer,
         sprintLocked: this.sprintLocked, fallDirX: this.fallDirX, fallDirY: this.fallDirY,
         fallMotion: this.fallTimer > 0 ? [this.mvx, this.mvy, this.iceCarry] : null }; }
     load(d) {
         if (d) Object.assign(this, d);
+        const facing = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] }[this.dir] || [0, 1];
+        this.faceX = Number.isFinite(d?.faceX) ? Math.max(-1, Math.min(1, d.faceX)) : facing[0];
+        this.faceY = Number.isFinite(d?.faceY) ? Math.max(-1, Math.min(1, d.faceY)) : facing[1];
+        this.slant = Number.isFinite(d?.slant) ? Math.max(-1, Math.min(1, d.slant)) : 0;
         this.fallTimer = d?.fallTimer ?? 0;
         this.sprintLocked = !!d?.sprintLocked;
         this.mvx = this.mvy = this.iceCarry = 0; this.onIce = false;

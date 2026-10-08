@@ -128,7 +128,7 @@ export class HUD {
         }
 
         this.els.staminaHint.textContent = state.player?.fallTimer > 0 ? "Падение · поднимаюсь…"
-            : state.player?.sprintLocked ? "Бег: отпусти Shift, восстановись выше 18%"
+            : state.player?.sprintLocked ? "Бег: отпусти Shift / ослабь стик, запас >18%"
             : state.player?.onIce ? "Лёд · тормози заранее, не разворачивайся резко"
             : "Shift — бег · бодрость восстанавливается сном";
         const w = weather.info;
@@ -179,7 +179,7 @@ export class HUD {
      */
     _focusables() {
         const rows = (this._panelRows || []).filter((b) => !b.disabled);
-        return rows.concat(this.els.panelClose);
+        return rows.concat(this.els.panelClose.disabled ? [] : [this.els.panelClose]);
     }
 
     _move(step) {
@@ -224,7 +224,9 @@ export class HUD {
      * @param {string} title
      * @param {Array} rows [{ label, icon, hint, disabled, action }] or { html }
      */
-    openPanel(title, rows, name = "panel") {
+    openPanel(title, rows, name = "panel", { locked = false } = {}) {
+        this.panelLocked = locked;
+        this.els.panelClose.disabled = locked;
         this.panelOpen = name;
         this.els.panelTitle.textContent = title;
         this.els.panelBody.innerHTML = "";
@@ -256,7 +258,9 @@ export class HUD {
         return this;
     }
 
-    closePanel() {
+    closePanel(force = false) {
+        if (this.panelLocked && !force) return this;
+        this.panelLocked = false; this.els.panelClose.disabled = false;
         this.panelOpen = null;
         this.els.panelWrap.classList.add("hidden");
         // Back to the game: the canvas, or whatever opened the panel.
