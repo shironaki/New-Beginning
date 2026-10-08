@@ -1,9 +1,7 @@
 /* «Новое начало». Dark, warm, diegetic UI over a full-bleed canvas.
  *
- * This file holds NO numbers of its own: colours, type and spacing all come
- * from `js/ui/uispec.js`, which writes them onto the document root. The only
- * thing defined here is `--ui`, the viewport scale every other size is built
- * from, plus the fallbacks that keep the page sane before the script runs.
+ * Shared colours/type come from uispec.js. Desktop and touch compositions
+ * are explicitly scoped; small windows never enable touch controls.
  */
 
 :root {
@@ -50,26 +48,19 @@ html, body {
 }
 
 #stage {
-    position: relative;
-    width: 100vw;
-    height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    position: fixed;
+    inset: 0 auto auto 0;
+    width: 100%; height: 100vh; height: 100dvh;
+    overflow: hidden;
+    --edge-top: max(8px, env(safe-area-inset-top, 0px));
+    --edge-right: max(8px, env(safe-area-inset-right, 0px));
+    --edge-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+    --edge-left: max(8px, env(safe-area-inset-left, 0px));
 }
-
-#game {
-    display: block;
-    image-rendering: pixelated;
-    background: var(--screen);
-}
-
-#hud {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    font-size: var(--t-md);
-}
+#stage:fullscreen, #stage:-webkit-full-screen { background: var(--screen); }
+#game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; image-rendering: pixelated; touch-action: none; }
+#hud { position: absolute; inset: 0; pointer-events: none; font-size: var(--t-md); }
+[hidden] { display: none !important; }
 
 /* Keyboard users must see where they are. */
 #hud :focus-visible,
@@ -84,7 +75,7 @@ html, body {
 
 .hudTop {
     position: absolute;
-    top: var(--s-lg); left: var(--s-lg); right: var(--s-lg);
+    top: var(--edge-top); left: var(--edge-left); right: var(--edge-right);
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
@@ -100,9 +91,11 @@ html, body {
     box-shadow: 0 6px 20px rgba(0,0,0,0.45);
 }
 
-.needsCard { min-width: calc(210 * var(--ui)); display: grid; gap: var(--s-sm); }
-
-.need { display: flex; align-items: center; gap: var(--s-sm); }
+.needsCard { width: calc(258 * var(--ui)); display: grid; gap: var(--s-sm); }
+.needLabel { width: calc(86 * var(--ui)); flex-shrink: 0; font-size: var(--t-xs); color: var(--ink-dim); }
+.needShort { display: none; }
+.needBarOuter { min-width: 20px; }
+.need { min-width: 0; display: flex; align-items: center; gap: var(--s-sm); }
 .needIcon { width: calc(18 * var(--ui)); text-align: center; font-size: var(--t-sm); }
 .needVal {
     width: calc(34 * var(--ui));
@@ -132,7 +125,7 @@ html, body {
 .need.critical .needIcon { animation: pulse calc(var(--pulse-ms) / 2) infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
-.skyCard { text-align: right; min-width: calc(180 * var(--ui)); }
+.skyCard { text-align: right; max-width: 35%; }
 .skyTime { font-size: var(--t-xl); font-weight: 600; color: var(--gold); letter-spacing: .5px; font-variant-numeric: tabular-nums; }
 .skyMeta { font-size: var(--t-sm); color: var(--ink-dim); }
 .skyZone { margin-top: var(--s-xs); font-size: var(--t-sm); color: var(--ink); }
@@ -141,7 +134,7 @@ html, body {
 
 .objectiveBar {
     position: absolute;
-    top: var(--s-lg); left: 50%;
+    top: var(--edge-top); left: 50%;
     transform: translateX(-50%);
     background: var(--panel-bg);
     border: 1px solid var(--edge);
@@ -149,18 +142,21 @@ html, body {
     padding: var(--s-sm) var(--s-xl);
     font-size: var(--t-sm);
     color: var(--gold);
-    max-width: 44vw;
+    max-width: min(36%, calc(100% - 500px));
     text-align: center;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
+.objectiveBar:empty { display: none; }
+
 /* ---------- toasts ---------- */
 
 .toasts {
-    position: absolute;
-    left: 50%; bottom: calc(var(--slot) + var(--s-xxl) * 2.6);
+    position: absolute; z-index: 30;
+    left: 50%; bottom: calc(var(--edge-bottom) + var(--slot) + 22px);
+    max-width: min(420px, 90%); width: max-content;
     transform: translateX(-50%);
     display: flex;
     flex-direction: column;
@@ -185,7 +181,7 @@ html, body {
 
 .hotbar {
     position: absolute;
-    left: 50%; bottom: var(--s-xxl);
+    left: 50%; bottom: var(--edge-bottom);
     transform: translateX(-50%);
     display: flex;
     gap: var(--slot-gap);
@@ -194,7 +190,7 @@ html, body {
 .slot {
     position: relative;
     width: var(--slot); height: var(--slot);
-    min-width: var(--hit); min-height: var(--hit);
+    min-width: 44px; min-height: 44px;
     background: var(--panel-bg);
     border: 1px solid var(--edge);
     border-radius: var(--r-md);
@@ -205,7 +201,6 @@ html, body {
 }
 .slot:hover { transform: translateY(-2px); }
 .slot.active { border-color: var(--gold); box-shadow: 0 0 12px rgba(232,192,122,0.3); }
-.slotKey { position: absolute; top: 2px; left: 5px; font-size: var(--t-xs); color: var(--ink-dim); }
 .slotN { position: absolute; bottom: 2px; right: 5px; font-size: var(--t-xs); color: var(--ink); font-variant-numeric: tabular-nums; }
 
 /* ---------- panels ---------- */
@@ -222,9 +217,9 @@ html, body {
 .panelWrap.hidden, .storyWrap.hidden { display: none; }
 
 .panel {
-    width: min(calc(440 * var(--ui)), 92vw);
-    max-height: 80vh;
-    background: var(--panel-bg);
+    width: min(calc(440 * var(--ui)), 100%);
+    max-height: 100%;
+    background: var(--panel);
     border: 1px solid var(--edge);
     border-radius: var(--r-lg);
     display: flex;
@@ -241,11 +236,11 @@ html, body {
 .panelHead button {
     background: none; border: none; color: var(--ink-dim);
     font-size: var(--t-lg); cursor: pointer;
-    min-width: var(--hit); min-height: var(--hit);
+    min-width: 44px; min-height: 44px;
 }
 .panelHead button:hover { color: var(--ember); }
 
-.panelBody { overflow-y: auto; padding: var(--s-md); display: grid; gap: var(--s-xs); }
+.panelBody { min-height: 0; overscroll-behavior: contain; touch-action: pan-y; overflow-y: auto; padding: var(--s-md); display: grid; gap: var(--s-xs); }
 
 .panelInfo {
     padding: var(--s-md);
@@ -260,7 +255,7 @@ html, body {
     display: flex; align-items: center; gap: var(--s-md);
     width: 100%;
     padding: var(--s-md);
-    min-height: var(--hit);
+    min-height: 44px;
     background: rgba(255,255,255,0.03);
     border: 1px solid transparent;
     border-radius: var(--r-sm);
@@ -289,7 +284,8 @@ html, body {
 }
 
 .storyCard {
-    width: min(calc(560 * var(--ui)), 92vw);
+    width: min(calc(560 * var(--ui)), 100%);
+    max-height: 100%; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y;
     background: linear-gradient(180deg, #221c15, #171311);
     border: 1px solid var(--edge);
     border-radius: var(--r-lg);
@@ -314,7 +310,7 @@ html, body {
     border: none;
     border-radius: var(--r-sm);
     padding: var(--s-md) var(--s-xxl);
-    min-height: var(--hit);
+    min-height: 44px;
     font-size: var(--t-md);
     font-weight: 600;
     cursor: pointer;
@@ -322,75 +318,97 @@ html, body {
 }
 .storyCard button:hover { filter: brightness(1.1); }
 
-/* Key hints used to live here; they will come back as a settings panel. */
+/* Desktop: hotbar + two window controls. No touch gestures or tutorial text. */
+.sessionControls { position: absolute; right: var(--edge-right); bottom: var(--edge-bottom); display: flex; gap: 8px; pointer-events: auto; }
+.sessionControls button { width: 46px; height: 46px; padding: 4px; color: var(--ink); background: rgba(20,25,21,.88); border: 1px solid #746745; border-radius: 12px; font: inherit; cursor: pointer; touch-action: manipulation; }
+.sessionControls button:hover { background: #363c2d; border-color: var(--gold); }
+.sessionControls .control-menu, .sessionControls .control-fullscreen { font-size: 24px; }
+.control-bag, .control-journal, .control-action, .touchStick { display: none; }
+/* Four corners instead of a platform-dependent fullscreen font glyph. */
+.sessionControls .control-fullscreen { position: relative; color: transparent; }
+.control-fullscreen::after { content: ""; position: absolute; inset: 14px; background:
+    linear-gradient(var(--ink),var(--ink)) left top / 7px 2px,
+    linear-gradient(var(--ink),var(--ink)) left top / 2px 7px,
+    linear-gradient(var(--ink),var(--ink)) right top / 7px 2px,
+    linear-gradient(var(--ink),var(--ink)) right top / 2px 7px,
+    linear-gradient(var(--ink),var(--ink)) left bottom / 7px 2px,
+    linear-gradient(var(--ink),var(--ink)) left bottom / 2px 7px,
+    linear-gradient(var(--ink),var(--ink)) right bottom / 7px 2px,
+    linear-gradient(var(--ink),var(--ink)) right bottom / 2px 7px;
+    background-repeat: no-repeat; }
+.control-fullscreen[aria-pressed="true"]::after { inset: 17px; }
+.panelWrap, .storyWrap { z-index: 20; padding: calc(var(--edge-top) + 8px) calc(var(--edge-right) + 8px) calc(var(--edge-bottom) + 8px) calc(var(--edge-left) + 8px); }
+.panelHead { flex-shrink: 0; }
+.rowLabel { min-width: 0; overflow-wrap: anywhere; }
+.toast { max-width: 100%; overflow-wrap: anywhere; }
+.reliefTrialBanner { position: absolute; top: 150px; right: var(--edge-right); max-width: min(340px, 40%); padding: 8px 12px; border-radius: 10px; background: rgba(20,29,23,.9); color: var(--ink); pointer-events: auto; display: grid; gap: 5px; font-size: 11px; }
+.reliefTrialBanner a { color: var(--gold); }
+.reliefTrialBanner small { display: none; }
 
-@media (max-width: 760px) {
-    .objectiveBar { max-width: 62vw; top: auto; bottom: calc(var(--slot) + var(--s-xxl) * 2); }
-    .skyCard { min-width: calc(140 * var(--ui)); }
-    .needsCard { min-width: calc(150 * var(--ui)); }
-    .slot { width: var(--hit); height: var(--hit); font-size: var(--t-xl); }
-    .needVal { display: none; }          /* the bar alone, no room for digits */
+/* Narrow desktop windows reflow the desktop HUD, never summon a phone pad. */
+#stage[data-narrow="true"][data-controls="desktop"] .needsCard { width: 172px; padding: 8px; gap: 4px; }
+#stage[data-narrow="true"][data-controls="desktop"] .needIcon { display: none; }
+#stage[data-narrow="true"][data-controls="desktop"] .needLabel { width: 78px; font-size: 10px; }
+#stage[data-narrow="true"][data-controls="desktop"] .needVal { width: 25px; font-size: 10px; }
+#stage[data-narrow="true"][data-controls="desktop"] .need { gap: 4px; }
+#stage[data-narrow="true"][data-controls="desktop"] .skyCard { padding: 8px; font-size: 10px; }
+#stage[data-narrow="true"][data-controls="desktop"] .skyZone { display: none; }
+#stage[data-narrow="true"][data-controls="desktop"] .objectiveBar { top: 124px; max-width: 94%; }
+#stage[data-narrow="true"][data-controls="desktop"] .sessionControls { bottom: calc(var(--edge-bottom) + 58px); }
+#stage[data-narrow="true"] .hotbar { gap: 6px; }
+#stage[data-narrow="true"] .slot { width: 44px; height: 44px; font-size: 24px; }
+
+/* Touch: compact status strip, dedicated thumb controls, no keyboard HUD. */
+#stage[data-controls="touch"] {
+    --ui: 1px;
+    /* Rebind inherited type tokens: phone dialogs must not inherit the
+       desktop viewport's 0.86 multiplier and shrink to 10px body text. */
+    --t-xs: 12px; --t-sm: 14px; --t-md: 14px;
+    --t-lg: 18px; --t-xl: 22px; --t-xxl: 26px;
 }
+#stage[data-controls="touch"] .hudTop { flex-direction: column-reverse; gap: 5px; }
+#stage[data-controls="touch"] .needsCard { width: 100%; display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 9px; padding: 7px 10px; background: rgba(19,26,22,.82); box-shadow: none; }
+#stage[data-controls="touch"] .need { display: grid; gap: 4px; text-align: center; }
+#stage[data-controls="touch"] .needLabel { width: auto; font-size: 10px; line-height: 12px; }
+#stage[data-controls="touch"] .needFull, #stage[data-controls="touch"] .needIcon { display: none; }
+#stage[data-controls="touch"] .needShort { display: inline; }
+#stage[data-controls="touch"] .needVal { width: auto; text-align: center; font-size: 10px; line-height: 11px; }
+#stage[data-controls="touch"] .needBarOuter { height: 4px; min-width: 0; }
+#stage[data-controls="touch"] .skyCard { max-width: none; width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 4px; border: none; box-shadow: none; background: none; backdrop-filter: none; text-shadow: 0 1px 4px #000; }
+#stage[data-controls="touch"] .skyTime { font-size: 19px; line-height: 26px; }
+#stage[data-controls="touch"] .skyMeta { font-size: 10px; white-space: nowrap; }
+#stage[data-controls="touch"] .skyZone { display: none; }
+#stage[data-controls="touch"] .objectiveBar { top: calc(var(--edge-top) + 88px); max-width: calc(100% - 24px); padding: 5px 12px; font-size: 11px; background: rgba(19,26,22,.7); border: none; }
+#stage[data-controls="touch"] .hotbar { gap: 6px; }
+#stage[data-controls="touch"] .slot { width: 44px; height: 44px; font-size: 24px; background: rgba(19,26,22,.8); border-radius: 10px; }
+#stage[data-controls="touch"] .sessionControls { display: grid; grid-template-columns: repeat(3,48px); grid-template-areas: "bag journal fullscreen" "action action menu"; gap: 6px; bottom: calc(var(--edge-bottom) + 58px); }
+#stage[data-controls="touch"] .sessionControls button { display: block; width: 100%; height: 48px; font-size: 10px; padding: 2px; background: rgba(19,26,22,.84); }
+#stage[data-controls="touch"] .sessionControls .control-fullscreen { grid-area: fullscreen; font-size: 24px; }
+#stage[data-controls="touch"] .sessionControls .control-menu { grid-area: menu; font-size: 24px; }
+#stage[data-controls="touch"] .control-action { grid-area: action; border-color: #ac945d; color: var(--gold); font-size: 12px; }
+#stage[data-controls="touch"] .control-bag { grid-area: bag; }
+#stage[data-controls="touch"] .control-journal { grid-area: journal; }
+#stage[data-controls="touch"] .touchStick { display: block; position: absolute; left: calc(var(--edge-left) + 6px); bottom: calc(var(--edge-bottom) + 64px); width: 82px; height: 82px; border: 1px solid rgba(232,213,160,.4); border-radius: 50%; background: rgba(19,26,22,.26); pointer-events: none; }
+.touchStick i { position: absolute; left: 25px; top: 25px; width: 30px; height: 30px; border-radius: 50%; background: rgba(232,213,160,.4); box-shadow: 0 2px 8px #0003; }
+#stage[data-controls="touch"] .toasts { bottom: calc(var(--edge-bottom) + 174px); }
+#stage[data-controls="touch"] .reliefTrialBanner { top: calc(var(--edge-top) + 124px); font-size: 10px; max-width: 48%; padding: 6px; }
+#stage[data-controls="touch"] .panel, #stage[data-controls="touch"] .storyCard { width: min(440px, 100%); }
+#stage[data-controls="touch"] .panelRow { min-height: 48px; }
+#stage[data-controls="touch"] .rowHint { display: block; max-width: 40%; }
 
-/* A 320 px phone in portrait: the narrowest screen we promise to support.
-   Six hotbar slots at the 44 px touch target plus gaps already eat 290 px,
-   so everything around them has to give way instead of overflowing. */
-@media (max-width: 420px) {
-    .hudTop { padding: var(--s-sm) var(--s-md); gap: var(--s-sm); }
-    .needsCard { min-width: calc(120 * var(--ui)); gap: var(--s-xs); }
-    .needIcon { width: calc(14 * var(--ui)); }
-    .skyCard { min-width: calc(92 * var(--ui)); }
-    .skyZone { display: none; }          /* the zone name is in the journal */
-    .skyTime { font-size: var(--t-lg); }
-    .objectiveBar { max-width: 86vw; }
-    .hotbar { gap: calc(var(--slot-gap) / 2); }
-    .slot { width: calc(44 * var(--ui)); height: calc(44 * var(--ui)); }
-    .panel { width: 96vw; }
-    .panelRow { padding: var(--s-sm) var(--s-md); gap: var(--s-sm); }
-    .rowHint { display: none; }          /* the label carries the meaning */
-    .storyCard { width: 94vw; }
-}
-
-/* Someone who gets motion sick should still be able to play. */
+/* Landscape with browser chrome: reclaim the middle without shrinking buttons. */
+#stage[data-controls="touch"][data-short="true"] .hudTop { flex-direction: row; align-items: start; }
+#stage[data-controls="touch"][data-short="true"] .needsCard { width: min(310px, 50%); }
+#stage[data-controls="touch"][data-short="true"] .skyCard { width: auto; display: grid; grid-template-columns: auto auto; column-gap: 10px; }
+#stage[data-controls="touch"][data-short="true"] .skyTime { grid-row: 1 / 3; }
+#stage[data-controls="touch"][data-short="true"] .objectiveBar { top: auto; bottom: calc(var(--edge-bottom) + 58px); max-width: 48%; }
+#stage[data-controls="touch"][data-short="true"] .sessionControls { bottom: var(--edge-bottom); }
+#stage[data-controls="touch"][data-short="true"] .touchStick { bottom: calc(var(--edge-bottom) + 5px); }
+#stage[data-controls="touch"][data-short="true"] .reliefTrialBanner { display: none; }
+#stage[data-controls="touch"][data-short="true"] .toasts { bottom: calc(var(--edge-bottom) + 100px); max-width: 48%; }
+#stage[data-short="true"] .storyText { font-size: 14px; line-height: 1.45; }
+#stage[data-short="true"] .storyCard { padding: 14px; }
+#stage[data-short="true"][data-tight="true"][data-controls="touch"] .hotbar { bottom: calc(var(--edge-bottom) + 108px); }
 @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
-        animation-duration: 0.001ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.001ms !important;
-    }
-}
-
-/* Separate sleep fatigue from the short sprint reserve (note 023). */
-.needLabel { width: calc(89 * var(--ui)); font-size: var(--t-xs); color: var(--ink-dim); }
-.staminaHint { max-width: calc(275 * var(--ui)); font-size: var(--t-xs); color: var(--ink-dim); }
-.need[data-need="stamina"] .needVal { display: block; }
-@media(max-width:600px) { .needLabel { width: calc(76 * var(--ui)); } .staminaHint { max-width: 210px; font-size: 10px; } }
-
-/* Bounded opt-in relief gameplay pilot; keep normal HUD and touch controls. */
-.reliefTrialBanner { position: absolute; top: calc(170 * var(--ui)); right: 12px; max-width: min(360px, 55vw); padding: 10px; border-radius: 8px; background: rgba(22,30,24,.9); color: #e5e3d5; pointer-events: auto; display: grid; gap: 6px; font-size: 12px; }
-.reliefTrialBanner a { color: #e6cb8c; }
-.reliefTrialBanner small { opacity: .8; }
-
-.needsCard { min-width: calc(260 * var(--ui)); }
-.needBarOuter { min-width: calc(38 * var(--ui)); }
-@media (max-width: 700px) {
-    .needsCard { min-width: calc(200 * var(--ui)); }
-    .needIcon { display: none; }
-    .needLabel { width: calc(88 * var(--ui)); }
-    .need[data-need="stamina"] .needVal { width: calc(28 * var(--ui)); }
-}
-
-/* Session actions remain reachable on a phone; panels stay above them. */
-.sessionControls { position:absolute; bottom:calc(var(--slot) + 32px); right:12px; display:flex; flex-wrap:wrap; gap:6px; max-width:245px; pointer-events:auto; }
-.sessionControls button { min-height:44px; padding:8px 12px; background:#24251e; color:#f3e8d4; border:1px solid #82724b; border-radius:7px; font:inherit; touch-action:manipulation; }
-.touchStick { display:none; pointer-events:none; position:absolute; bottom:110px; left:22px; width:94px; height:94px; border:1px solid #ded1a66b; border-radius:50%; background:#20261a40; }
-.touchStick span { position:absolute; top:100%; width:110px; font-size:10px; text-align:center; color:#eee5c8; }
-.touchStick i { position:absolute; left:30px; top:30px; width:32px; height:32px; border-radius:50%; background:#e9d7a05c; }
-.panelWrap, .storyWrap { z-index:20; }
-@media (pointer:coarse) { .touchStick { display:block; } }
-@media (max-width:760px) {
- .sessionControls { max-width:190px; bottom:calc(var(--slot) + 24px); }
- .sessionControls button { font-size:12px; padding:7px 9px; }
- .objectiveBar { bottom:calc(var(--slot) + 140px); max-width:90vw; }
- .reliefTrialBanner { max-width:55vw; font-size:10px; padding:6px; }
+    *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }

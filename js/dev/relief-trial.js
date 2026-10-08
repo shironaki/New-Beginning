@@ -105,7 +105,7 @@ export class ReliefTrialGame extends Game {
     }
     start() {
         this.hud.hideStory();
-        this.hud.toast("Поднимитесь по склону, соберите хворост [E], разожгите костёр наверху.", "⛰️");
+        this.hud.toast("Поднимитесь по склону, соберите хворост, разожгите костёр наверху.", "⛰️");
         this.loop.start();
         return this;
     }
@@ -114,8 +114,8 @@ export class ReliefTrialGame extends Game {
         const lit = [...this.localFires.values()].some((f) => f.lit);
         this.hud.els.objective.textContent = lit
             ? "✓ Хворост и костёр проверены. Спуститесь и попробуйте пройти через отвесный край."
-            : this.trialCollected ? "🎯 Подойдите к костру наверху: E → хворост → разжечь."
-                : "🎯 Поднимитесь по светлому склону и подберите хворост наверху [E].";
+            : this.trialCollected ? "🎯 Подойдите к костру наверху: хворост → разжечь."
+                : "🎯 Поднимитесь по светлому склону и подберите хворост наверху.";
     }
     render(dt = 1 / 60) {
         const p = this.player, active = this.inventory.active, def = active && itemDef(active.id);
@@ -158,7 +158,7 @@ export class ReliefTrialGame extends Game {
         renderer.grade(clock, this.weather.current);
         if (this.trialStatus) {
             const lit = [...this.localFires.values()].some((f) => f.lit);
-            this.trialStatus.textContent = `${this.trialCollected ? "✓" : "○"} Хворост → ${lit ? "✓" : "○"} Костёр · высота ${this.relief.heightAt(p.x, p.y).toFixed(0)} · E: ${this.interact ? this.interactLabel(this.interact) : "подойти к предмету"}`;
+            this.trialStatus.textContent = `${this.trialCollected ? "✓" : "○"} Хворост → ${lit ? "✓" : "○"} Костёр · высота ${this.relief.heightAt(p.x, p.y).toFixed(0)} · ${this.interact ? this.interactLabel(this.interact) : "подойти к предмету"}`;
         }
     }
 }

@@ -1,7 +1,7 @@
 /**
  * UI — HUD and panels (DOM over the canvas).
  *
- * Diegetic and quiet: four need bars in the corner, a sky card with the clock,
+ * Diegetic and quiet: five need bars in the corner, a sky card with the clock,
  * a hotbar, one line of objective, and toasts for everything else. Panels
  * (fire, backpack, journal) are built on demand from plain objects, so game
  * systems never touch the DOM themselves.
@@ -79,7 +79,7 @@ export class HUD {
         this.els.needs.innerHTML = NEED_DEFS.map((n) => `
           <div class="need" data-need="${n.key}" role="meter" aria-label="${n.label}"
                aria-valuemin="0" aria-valuemax="100">
-            <span class="needIcon" aria-hidden="true">${n.icon}</span><span class="needLabel">${n.label}</span>
+            <span class="needIcon" aria-hidden="true">${n.icon}</span><span class="needLabel"><span class="needFull">${n.label}</span><span class="needShort">${n.key === "stamina" ? "Выносл." : n.label}</span></span>
             <div class="needBarOuter"><div class="needBar" style="background:${n.color}"></div></div>
             <span class="needVal"></span>
           </div>`).join("");
@@ -93,15 +93,9 @@ export class HUD {
             this.needVals[n.key] = row.querySelector(".needVal");
         });
 
-        this.els.staminaHint = document.createElement("div");
-        this.els.staminaHint.className = "staminaHint";
-        this.els.needs.appendChild(this.els.staminaHint);
-        this.needRows.fatigue.title = "Бодрость зависит от сна. Это не запас для спринта.";
-        this.needRows.stamina.title = "Выносливость расходуется при беге. После истощения отпусти Shift и восстанови запас выше 18%.";
-
         // Hotbar slots.
         this.els.hotbar.innerHTML = Array.from({ length: 6 }, (_, i) =>
-            `<div class="slot" data-slot="${i}"><span class="slotKey">${i + 1}</span><span class="slotIcon"></span><span class="slotN"></span></div>`
+            `<div class="slot" data-slot="${i}"><span class="slotIcon"></span><span class="slotN"></span></div>`
         ).join("");
         this.els.hotbar.querySelectorAll(".slot").forEach((el) => {
             el.addEventListener("click", () => this.onHotbar(Number(el.dataset.slot)));
@@ -127,10 +121,6 @@ export class HUD {
             row.classList.toggle("critical", v < UI.bar.critical);
         }
 
-        this.els.staminaHint.textContent = state.player?.fallTimer > 0 ? "Падение · поднимаюсь…"
-            : state.player?.sprintLocked ? "Бег: отпусти Shift / ослабь стик, запас >18%"
-            : state.player?.onIce ? "Лёд · тормози заранее, не разворачивайся резко"
-            : "Shift — бег · бодрость восстанавливается сном";
         const w = weather.info;
         this.els.sky.innerHTML = `
           <div class="skyTime">${clock.clockString()}</div>

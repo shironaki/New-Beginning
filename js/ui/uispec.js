@@ -1,19 +1,18 @@
 /**
  * UI — the contract.
  *
- * Every number the interface uses lives here, so the CSS has no magic values
- * and the HUD has no inline styling decisions. The palette is the source of
- * truth: `applyTheme()` writes it onto the document as custom properties, and
- * `css/style.css` only ever reads `var(--…)`.
+ * Shared palette and desktop scale tokens live here. `applyTheme()` writes
+ * them as custom properties. CSS owns viewport-specific composition and
+ * touch target/type floors; a phone does not inherit the desktop layout.
  *
  * Two rules drive the numbers:
  *   1. contrast — every text/background pair in `CONTRACTS` is checked by
  *      `tests/core.test.js` against WCAG AA (4.5:1 for body text, 3:1 for
  *      large text and UI edges). A survival HUD read at a glance in a dark
  *      room cannot be "almost readable";
- *   2. one scale — type and spacing step in a fixed ratio, and the whole UI
- *      scales with the viewport through `--ui`, so a 4K screen does not show
- *      a 14 px postage stamp and a phone does not show a wall of panels.
+ *   2. desktop scale — type and spacing step in a fixed ratio through
+ *      `--ui`. Touch uses a separate compact status strip and readable
+ *      dialog type; hit targets stay at least 44 CSS pixels.
  */
 
 /* ========================= palette ========================= */
@@ -102,8 +101,7 @@ export function contrast(a, b) {
 
 /**
  * Write the contract onto the document root as custom properties. The CSS
- * then reads `var(--ink)`, `var(--t-md)`, `var(--s-lg)` and never hard-codes
- * a colour or a size of its own.
+ * reads these tokens and supplies device-specific layout rules.
  */
 export function applyTheme(doc = typeof document !== "undefined" ? document : null) {
     if (!doc || !doc.documentElement || !doc.documentElement.style) return false;

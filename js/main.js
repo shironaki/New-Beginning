@@ -19,7 +19,8 @@ import { Camera } from "./engine/camera.js";
 import { WorldMap } from "./world/worldgen.js";
 import { WeatherSystem } from "./world/weather.js";
 import { surfaceTile, SURFACE, frozenPuddleAt } from "./world/surface.js";
-import { UI, pixelRatio } from "./ui/uispec.js";
+import { UI } from "./ui/uispec.js";
+import { installViewport } from "./ui/viewport.js";
 import { START_ZONE, biomeDef, oppositeEdge, zoneDef } from "./world/regions.js";
 import { T, TILE_SIZE, tileInfo } from "./world/tiles.js";
 import { bodyBlocked } from "./world/tilemap.js";
@@ -362,16 +363,16 @@ export class Game {
         if (!def) return null;
         if (def.interact === "fire") {
             const f = this.fires.get(this.fireKey(this.zone, obj));
-            return f && f.lit ? "Костёр · E" : "Разжечь костёр · E";
+            return f && f.lit ? "Костёр" : "Разжечь костёр";
         }
-        if (def.interact === "sleep") return "Спать · E";
-        if (def.interact === "read") return "Прочитать · E";
-        if (def.interact === "story") return "Осмотреть · E";
-        if (def.interact === "loot") return obj.looted ? "Пусто" : "Обыскать · E";
+        if (def.interact === "sleep") return "Спать";
+        if (def.interact === "read") return "Прочитать";
+        if (def.interact === "story") return "Осмотреть";
+        if (def.interact === "loot") return obj.looted ? "Пусто" : "Обыскать";
         const tool = requiredTool(obj.kind);
         const have = tool ? this.inventory.findTool(tool) : true;
         if (!have) return toolHint(obj.kind);
-        return `${def.name} · E`;
+        return def.name;
     }
 
     doInteract() {
@@ -947,25 +948,6 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
         const hudRoot = document.getElementById("hud");
         if (!canvas || !hudRoot) return;
 
-        // The canvas is sized in CSS pixels but drawn at the display's real
-        // pixel density: on a retina screen the old code rendered 1× and let
-        // the browser upscale, which is exactly the blur `image-rendering:
-        // pixelated` was supposed to prevent. Zoom is multiplied by the same
-        // ratio, so the world keeps its apparent size on every display.
-        const fit = (game) => {
-            const w = Math.min(window.innerWidth, 1600);
-            const h = Math.min(window.innerHeight, 1000);
-            const dpr = pixelRatio(window);
-            canvas.width = Math.round(w * dpr);
-            canvas.height = Math.round(h * dpr);
-            canvas.style.width = w + "px"; canvas.style.height = h + "px";
-            if (game) {
-                game.renderer.resize(canvas.width, canvas.height);
-                game.camera.zoom = UI.baseZoom * dpr;
-            }
-        };
-        fit(null);
-
         // A blank page tells nobody anything. If the boot throws — a bad
         // deploy, a file that did not upload, an old cached module — say so
         // on screen instead of leaving a black rectangle.
@@ -1001,9 +983,8 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
         if (!trial) import("./dev/devtools.js")
             .then((m) => m.installDevTools(game, window))
             .catch(() => { /* dev tools are optional */ });
-        window.addEventListener("resize", () => fit(game));
+        game.viewport = installViewport(game, document.getElementById("stage"), window, document);
         bindSessionLifecycle(game, window, document);
-        fit(game);
         game.start();
     });
 }

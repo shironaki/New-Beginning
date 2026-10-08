@@ -140,14 +140,15 @@ test("note 022 lake freezes; every raw marine DEEP cell stays blocked; resources
     }
     assert.gt(count, 1000); assert.eq(JSON.stringify(z.objects), props); assert.deep(Array.from(z.map.data), data);
 });
-test("HUD shows stamina separately from sleep fatigue, and explains exhaustion", () => {
+test("HUD shows stamina separately from sleep fatigue without control tutorials", () => {
     const g = boot(); g.player.stamina = 8; g.player.sprintLocked = true; g.needs.fatigue = 10;
     g.update(1 / 60);
     assert.lt(Number(g.hud.needRows.stamina.getAttribute("aria-valuenow")), 10);
     assert.gt(Number(g.hud.needRows.fatigue.getAttribute("aria-valuenow")), 80);
     g.player.sprintLocked = true;
     g.hud.update({ needs: g.needs, player: g.player, clock: g.clock, weather: g.weather, inventory: g.inventory });
-    assert.ok(g.hud.els.staminaHint.textContent.includes("отпусти Shift"));
+    assert.not(g.hud.els.staminaHint);
+    assert.not(g.hud.root.innerHTML.includes("staminaHint"));
 });
 test("real Player climbs relief ramp and cannot cross terrace face", () => {
     const g = boot(ReliefTrialGame); g.input.setStick(0, -1);

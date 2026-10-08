@@ -3,11 +3,11 @@
 export function bindTouch(game, canvas) {
     let id = null, ox = 0, oy = 0;
     const pad = document.createElement("div"); pad.className = "touchStick";
-    pad.innerHTML = "<span>Тяни для ходьбы<br>дальше — бег</span>";
+    pad.setAttribute("aria-hidden", "true");
     game.hud.root.appendChild(pad);
     const thumb = document.createElement("i"); pad.appendChild(thumb);
     const reset = () => { id = null; game.input.setStick(0, 0); thumb.style.transform = "translate(0px,0px)"; };
-    const blocked = () => game.hud.isPanelOpen || game.hud.isStoryOpen || game.paused || game.backgrounded;
+    const blocked = () => game.controlMode === "desktop" || game.hud.isPanelOpen || game.hud.isStoryOpen || game.paused || game.backgrounded;
     canvas.addEventListener("touchstart", (e) => {
         if (blocked()) return;
         const r = canvas.getBoundingClientRect?.() || { left: 0, width: canvas.width };

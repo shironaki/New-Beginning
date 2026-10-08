@@ -52,6 +52,12 @@ export function openSessionMenu(game) {
             { label: "Назад", action: () => openSessionMenu(g) }
         ], "session", { locked: initial });
     } });
+    if (g.viewport) rows.push({ label: "Полный экран", icon: "⛶", action: () => g.viewport.toggleFullscreen() });
+    if (g.viewport) rows.push({ label: "Интерфейс", action: () => {
+        g.hud.openPanel("Интерфейс", [["auto", "Автоматически"], ["desktop", "ПК · клавиатура и мышь"], ["touch", "Сенсорный экран"]].map(([value, label]) => ({ label,
+            action: () => { g.viewport.setControls(value); openSessionMenu(g); }
+        })), "session", { locked: initial });
+    } });
     rows.push({ html: "Сохранение хранится в этом браузере. На телефоне, ПК, Pages и превью — отдельные хранилища. Перед закрытием нажмите «Сохранить игру»." });
     if (g.isTrial) rows.push({ label: "День / ночь / дождь / зима", action: () => g.openTrialConditions() });
     if (!g.isTrial) rows.push({ label: "Игровой участок рельефа", action: () => leaveFor(g, "?relief=1") });
@@ -79,14 +85,16 @@ export function installSession(game) {
     bar.setAttribute("aria-label", "Управление игрой");
     game.sessionButtons = {};
     for (const [id, label, action] of [
-        ["menu", "☰ Меню", () => openSessionMenu(game)],
+        ["menu", "☰", () => openSessionMenu(game)],
         ["bag", "Рюкзак", () => { game.input.releaseAll(); game.hud.hideStory(); game.openBackpack(); }],
         ["journal", "Дневник", () => { game.input.releaseAll(); game.hud.hideStory(); game.openJournal(); }],
-        ["action", "Действие", () => game.input.tap("action")]
+        ["action", "Действие", () => game.input.tap("action")],
+        ["fullscreen", "⛶", () => game.viewport?.toggleFullscreen()]
     ]) {
         const b = document.createElement("button"); b.type = "button"; b.textContent = label;
-        b.className = id === "action" ? "touchAction" : "";
-        b.addEventListener("click", () => { if (id === "menu" || game.sessionReady !== false) action(); });
+        b.className = `control-${id}`;
+        b.setAttribute("aria-label", { menu: "Меню игры", bag: "Рюкзак", journal: "Дневник", action: "Действие", fullscreen: "На весь экран" }[id]);
+        b.addEventListener("click", () => { if (id === "menu" || id === "fullscreen" || game.sessionReady !== false) action(); });
         bar.appendChild(b); game.sessionButtons[id] = b;
     }
     game.hud.root.appendChild(bar);
