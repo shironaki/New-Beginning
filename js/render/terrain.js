@@ -39,8 +39,13 @@ export function terrainColour(field, wx, wy, season, palette) {
         if (field.biome === "shore") [r, g, b] = seaColour(s.coast);
         const ice = waterIce(field.map, wx, wy, s.id);
         if (ice.cover > 0) {
-            const c = ice.marine ? [166, 192, 204] : [183, 207, 217];
-            r += (c[0] - r) * ice.cover; g += (c[1] - g) * ice.cover; b += (c[2] - b) * ice.cover;
+            // Unsafe depth is OPEN dark water with separated plates, never the
+            // same continuous pale floor as walkable shallow/fresh ice.
+            const fractures = Math.abs(Math.sin(wx * .055 + Math.sin(wy * .035)) * Math.sin(wy * .061 + Math.cos(wx * .027)));
+            const coverage = ice.broken ? (fractures > .32 ? Math.min(.52, ice.cover) : .03) : ice.cover;
+            const c = ice.broken ? [108, 142, 157] : [194, 216, 225];
+            r += (c[0] - r) * coverage; g += (c[1] - g) * coverage; b += (c[2] - b) * coverage;
+            if (ice.broken) { r *= .72; g *= .78; b *= .88; }
         }
         tone *= 0.45;
         if (s.water < 0.58) {
@@ -105,7 +110,7 @@ export function bakeTerrain(ctx, zone, cx, cy, size, season, inset = 0) {
     for (let y = ((3 - oy) % 9 + 9) % 9 - 9; y < size + 9; y += 9) for (let x = ((3 - ox) % 11 + 11) % 11 - 11; x < size + 11; x += 11) {
         const wx = ox + x, wy = oy + y, v = field.noise(wx, wy, 3, 778);
         const s = field.sample(wx, wy);
-        if (tileInfo(s.id).liquid && waterIce(zone.map, wx, wy, s.id).cover >= 0.55) {
+        if (tileInfo(s.id).liquid && !waterIce(zone.map, wx, wy, s.id).broken && waterIce(zone.map, wx, wy, s.id).cover >= 0.55) {
             if (v > 0.75) {
                 ctx.strokeStyle = "rgba(238,248,251,0.65)"; ctx.lineWidth = 0.55;
                 ctx.beginPath(); ctx.moveTo(x - 4, y - 3); ctx.lineTo(x, y); ctx.lineTo(x + 6, y - 1);
@@ -147,7 +152,8 @@ export function drawTerrainWater(ctx, zone, camera, time, daylight) {
             const xx = x + Math.sin(y * 0.14 + time * 0.6) * 6;
             const yy = y + Math.sin(x * 0.027 + time * 0.7) * 2;
             if (!tileInfo(zone.terrain.sample(xx, yy).id).liquid || !tileInfo(zone.terrain.sample(xx + 9, yy).id).liquid) continue;
-            if (waterIce(zone.map, xx, yy).cover >= 0.55) continue;
+            const ice = waterIce(zone.map, xx, yy);
+            if (ice.cover >= 0.55 && !ice.broken) continue;
             const p = camera.worldToScreen(xx, yy);
             ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + (5 + Math.sin(time + x) * 3) * z, p.y - z * 0.4);
         }

@@ -655,7 +655,7 @@ export function installDevTools(game, win = window) {
             zoom: Number(game.camera.zoom.toFixed(2)),
             seed: game.seed,
             ui: { mode: game.controlMode, panel: game.hud.panelOpen, objective: game.hud.els.objective.textContent,
-                food: game.quickFoodId, origin: location.origin },
+                hands: game.inventory.hands, dominant: game.inventory.dominant, origin: location.origin },
             at: new Date().toISOString(),
             shot: markedShot(spot)
         };

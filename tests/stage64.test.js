@@ -135,9 +135,11 @@ test("chunk gutters overlap at one uniform scale over fractional camera position
         assert.near(calls[0][3] / cv.width, zoom); assert.near(calls[0][4] / cv.height, zoom);
     }
 });
-test("note 028: named food selector and no persistent objective/control tutorial", () => {
+test("note 028 expanded: two hands without permanent captions or objective/control tutorial", () => {
     const g = boot(); g.update(0); assert.eq(g.hud.els.objective.textContent, "");
-    assert.ok(g.hud.els.hotbar.innerHTML.includes('aria-label="Выбрать еду">Еда'));
+    assert.ok(g.hud.els.hotbar.innerHTML.includes('id="leftHand"'));
+    assert.ok(g.hud.els.hotbar.innerHTML.includes('id="rightHand"'));
+    assert.not(g.hud.els.hotbar.innerHTML.includes('>Еда<'));
     assert.not(g.hud.els.hotbar.innerHTML.includes('>⌄</button>'));
 });
 test("full backpack preserves a finished spit dish in the real fire menu", () => {

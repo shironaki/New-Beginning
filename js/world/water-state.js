@@ -1,7 +1,7 @@
 /** Seasonal water state, independent of resource generation and raw tile IDs.
  * Marine water is flood-filled from the shore map boundary. Inland lakes
  * freeze more readily; sea ice remains thin/non-load-bearing over DEEP. */
-import { TILE_SIZE, tileInfo } from "./tiles.js";
+import { TILE_SIZE, tileInfo, T } from "./tiles.js";
 import { ambientTemperature } from "../survival/temperature.js";
 import { biomeDef } from "./regions.js";
 const clamp = (n) => Math.max(0, Math.min(1, n));
@@ -43,7 +43,7 @@ export function syncWaterState(zone, clock, weather) {
 }
 export function waterIce(map, x, y, id = map.at(x, y)) {
     const state = map.waterState;
-    if (!state || !tileInfo(id).liquid) return { cover: 0, walkable: false, marine: false };
+    if (!state || !tileInfo(id).liquid) return { cover: 0, walkable: false, marine: false, broken: false, blocked: id === T.DEEP };
     const tx = Math.floor(x / TILE_SIZE), ty = Math.floor(y / TILE_SIZE);
     let marine = false;
     // Natural bank reconstruction can place water inside a raw land cell.
@@ -55,5 +55,7 @@ export function waterIce(map, x, y, id = map.at(x, y)) {
     const amount = marine ? state.sea : state.fresh;
     const wave = 0.5 + 0.25 * Math.sin(x * 0.037 + Math.cos(y * 0.026)) + 0.25 * Math.sin(y * 0.049);
     const cover = marine ? clamp((amount - wave * 0.42) * 1.6) : amount;
-    return { cover, marine, walkable: !marine && amount >= 0.75 };
+    const walkable = !marine && amount >= .75;
+    return { cover, marine, walkable, broken: id === T.DEEP && !walkable && cover > 0,
+        blocked: id === T.DEEP && !walkable };
 }

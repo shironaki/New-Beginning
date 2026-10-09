@@ -393,21 +393,12 @@ html, body {
 .conditionButton { width: 100%; min-height: 44px; color: var(--gold); font: inherit; font-size: 13px; border: 1px solid var(--edge); border-top: 0; border-radius: 0 0 12px 12px; background: #26281e; cursor: pointer; }
 #stage[data-narrow="true"][data-controls="desktop"] .needSummary { width: 176px; font-size: 11px; }
 #stage[data-controls="touch"] .needSummary { width: 176px; gap: 6px; font-size: 11px; padding: 0 9px 3px; }
-/* Intent bar, not an inventory mirror: held tool / food / food chooser / bag. */
-.hotbar { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.1fr) 44px 44px; gap: 6px; width: min(340px, calc(100% - var(--edge-left) - var(--edge-right))); pointer-events: auto; }
+/* Two physical hands and the backpack. No permanent role captions. */
+.hotbar { display: grid; grid-template-columns: 56px 56px 48px; gap: 8px; width: max-content; pointer-events: auto; }
 .hotbar button { min-width: 0; min-height: 48px; border: 1px solid #746745; border-radius: 12px; background: rgba(20,25,21,.94); color: var(--ink); cursor: pointer; font: inherit; }
 .hotbar button:hover { border-color: var(--gold); background: #30382b; }
 .hotbar button:disabled { opacity: .55; cursor: default; }
-.quickItem { display: flex; align-items: center; gap: 6px; padding: 5px 8px; text-align: left; }
-.quickGlyph { font-size: 22px; flex-shrink: 0; }
-.quickText { min-width: 0; display: grid; gap: 2px; }
-.quickText small { color: var(--ink-dim); font-size: 10px; }
-.quickText b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 500; }
 .quickIcon { font-size: 22px !important; padding: 4px; }
-#stage[data-controls="touch"] .quickGlyph { font-size: 19px; }
-#stage[data-controls="touch"] .quickItem { padding: 4px 6px; gap: 4px; }
-/* 640px landscape: narrow intent bar fits between both thumb zones. */
-#stage[data-controls="touch"][data-short="true"] .hotbar { width: min(294px, calc(100% - 32px)); }
-
-/* A named food selector, not a glyph that reads as a V key binding. */
-.foodChooser { font-size: 12px !important; }
+.handSlot { position: relative; font-size: 24px !important; height: 56px; }
+.handSlot.dominant { border-bottom: 3px solid var(--gold); }
+.handSlot.using { background: #4a5938; }

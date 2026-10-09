@@ -704,7 +704,7 @@ export class Renderer {
                     slant: o.slant, moving: o.moving, look: state.look,
                     ax: o.ax, ay: o.ay, leanAX: o.leanAX, leanAY: o.leanAY, faceX: o.faceX, faceY: o.faceY,
                     fallTimer: o.fallTimer, fallDirX: o.fallDirX, fallDirY: o.fallDirY,
-                    actionTimer: o.actionTimer, tool: state.tool, idleTime: this.time,
+                    actionTimer: o.actionTimer, actionHand: o.actionHand, tool: state.tool, ...state.hands, idleTime: this.time,
                     torchWind: state.underground ? 0 : Math.cos(state.windAngle || 0) * (state.windStrength || 0),
                     wading: this._inWater(state.zone, o.x, o.y)
                 });
@@ -754,10 +754,13 @@ export class Renderer {
         }
         if (state.playerLight > 0) {
             const p = state.player;
-            const attachment = toolAttachment({ ...p, phase: p.anim, idleTime: this.time,
-                torchWind: state.underground ? 0 : Math.cos(state.windAngle || 0) * (state.windStrength || 0) });
-            push(p.x + attachment.x, p.y + attachment.y, state.playerLight, attachment.intensity, 0, 0.45);
-            Object.assign(out[n - 1], { anchorX: p.x, anchorY: p.y, localX: attachment.x, localY: attachment.y });
+            const sides = state.hands ? ["left", "right"].filter((side) => state.hands[side + "Tool"]?.tool === "torch") : ["right"];
+            for (const side of sides) {
+                const attachment = toolAttachment({ ...p, ...state.hands, phase: p.anim, idleTime: this.time,
+                    torchWind: state.underground ? 0 : Math.cos(state.windAngle || 0) * (state.windStrength || 0) }, side);
+                push(p.x + attachment.x, p.y + attachment.y, state.playerLight, attachment.intensity, 0, .45);
+                Object.assign(out[n - 1], { anchorX: p.x, anchorY: p.y, localX: attachment.x, localY: attachment.y, hand: side });
+            }
         }
         for (const L of state.extraLights || []) push(L.x, L.y, L.r, L.i || 0.7);
         out.length = n;

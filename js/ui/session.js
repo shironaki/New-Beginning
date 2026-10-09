@@ -39,6 +39,11 @@ export function openSessionMenu(game) {
             { label: "Назад", action: () => openSessionMenu(g) }
         ], "session");
     } });
+    if (!initial) rows.push({ label: `Ведущая рука: ${g.inventory.dominant === "left" ? "левая" : "правая"}`, action: () => {
+        g.hud.openPanel("Ведущая рука", [["left", "Левша"], ["right", "Правша"]].map(([side, label]) => ({ label,
+            action: () => { g.inventory.setDominant(side); openSessionMenu(g); }
+        })), "handedness");
+    } });
     if (!initial) rows.push({ label: "Состояние и причины", action: () => g.openCondition() });
     if (!initial) rows.push({ label: "Сохранить игру", icon: "💾", action: () => checkpoint(g) });
     if (!g.isTrial) rows.push({ label: "Новая игра", action: () => {

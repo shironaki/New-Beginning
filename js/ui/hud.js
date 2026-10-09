@@ -7,7 +7,6 @@
  * systems never touch the DOM themselves.
  */
 import { itemDef, itemEmoji, itemName } from "../sandbox/items.js";
-import { quickFood, holdable } from "./quick-actions.js";
 import { UI, applyTheme } from "./uispec.js";
 
 const NEED_DEFS = [
@@ -19,10 +18,9 @@ const NEED_DEFS = [
 ];
 
 export class HUD {
-    constructor(root, { onHotbar = () => {}, onAction = () => {}, onEquipment = () => {}, onProvisions = () => {}, onEat = () => {}, onBag = () => {}, onCondition = () => {} } = {}) {
+    constructor(root, { onHand = () => {}, onAction = () => {}, onBag = () => {}, onCondition = () => {} } = {}) {
         this.root = root;
-        this.onHotbar = onHotbar;
-        this.actions = { onEquipment, onProvisions, onEat, onBag, onCondition };
+        this.actions = { onHand, onBag, onCondition };
         this.onAction = onAction;
         this.els = {};
         this.panelOpen = null;
@@ -115,14 +113,15 @@ export class HUD {
         });
         this.els.hotbar.setAttribute("role", "group");
         this.els.hotbar.setAttribute("aria-label", "Предметы под рукой");
-        this.els.hotbar.innerHTML = `<button type="button" id="heldItem" class="quickItem"></button>
-            <button type="button" id="eatItem" class="quickItem"></button>
-            <button type="button" id="chooseFood" class="quickIcon foodChooser" aria-label="Выбрать еду">Еда</button>
+        this.els.hotbar.innerHTML = `<button type="button" id="leftHand" class="handSlot"></button>
+            <button type="button" id="rightHand" class="handSlot"></button>
             <button type="button" id="quickBag" class="quickIcon" aria-label="Рюкзак">🎒</button>`;
-        for (const [id, action] of [["heldItem", "onEquipment"], ["eatItem", "onEat"], ["chooseFood", "onProvisions"], ["quickBag", "onBag"]]) {
-            this.els[id] = $(id);
-            this.els[id].addEventListener("click", () => this.actions[action]());
+        for (const side of ["left", "right"]) {
+            const button = $(side + "Hand"); this.els[side + "Hand"] = button;
+            button.addEventListener("click", () => this.actions.onHand(side));
         }
+        this.els.quickBag = $("quickBag");
+        this.els.quickBag.addEventListener("click", () => this.actions.onBag());
     }
 
     setNeedsExpanded(open) {
@@ -167,16 +166,15 @@ export class HUD {
         // Owner requested no persistent hints/objectives over the scene. Journal retains the goal.
         this.els.objective.textContent = "";
 
-        const held = inventory.active, tool = held && holdable(held.id) ? held.id : null;
-        const food = quickFood(inventory, state.quickFoodId);
-        const card = (icon, title, subtitle) => `<span class="quickGlyph" aria-hidden="true">${icon}</span><span class="quickText"><small>${subtitle}</small><b>${title}</b></span>`;
-        const equipText = card(tool ? itemEmoji(tool) : "✋", tool ? itemName(tool) : "Предмет", "В руке");
-        if (this.els.heldItem.innerHTML !== equipText) this.els.heldItem.innerHTML = equipText;
-        this.els.heldItem.setAttribute("aria-label", tool ? `В руке ${itemName(tool)}. Сменить предмет` : "Выбрать предмет в руку");
-        const eatText = card(food ? itemEmoji(food) : "—", food ? `${itemName(food)} ×${inventory.count(food)}` : "Нет еды", "Съесть");
-        if (this.els.eatItem.innerHTML !== eatText) this.els.eatItem.innerHTML = eatText;
-        this.els.eatItem.disabled = !food;
-        this.els.eatItem.setAttribute("aria-label", food ? `Съесть ${itemName(food)}. Осталось ${inventory.count(food)}` : "Нет еды");
+        for (const side of ["left", "right"]) {
+            const h = inventory.hands?.[side], button = this.els[side + "Hand"];
+            const html = `<span aria-hidden="true">${h ? itemEmoji(h.id) : "✋"}</span>`;
+            if (button.innerHTML !== html) button.innerHTML = html;
+            button.classList.toggle("dominant", inventory.dominant === side);
+            button.classList.toggle("using", inventory.handAction?.side === side);
+            button.disabled = !!inventory.handAction;
+            button.setAttribute("aria-label", `${side === "left" ? "Левая" : "Правая"} рука: ${h ? itemName(h.id) : "свободна"}`);
+        }
         return this;
     }
 
@@ -341,7 +339,7 @@ export function fireRows(fire, inventory, actions) {
         rows.push({ html: `<small>В костре:<br>${pile}</small>` });
     }
 
-    const fuels = inventory.list().filter((s) => (itemDef(s.id) || {}).burn > 0);
+    const fuels = [...new Map(inventory.list().map(s => [s.id, { id: s.id, n: inventory.count(s.id) }])).values()].filter((s) => (itemDef(s.id) || {}).burn > 0);
     for (const f of fuels.slice(0, 4)) {
         rows.push({
             icon: itemEmoji(f.id),
@@ -361,7 +359,7 @@ export function fireRows(fire, inventory, actions) {
     }
 
     // Raw food that the fire can actually do something with.
-    const cookables = inventory.list().filter((s) => actions.canCook(s.id));
+    const cookables = [...new Map(inventory.list().map(s => [s.id, { id: s.id, n: inventory.count(s.id) }])).values()].filter((s) => actions.canCook(s.id));
     for (const c of cookables.slice(0, 5)) {
         rows.push({
             icon: itemEmoji(c.id),
@@ -385,6 +383,8 @@ export function fireRows(fire, inventory, actions) {
         });
     });
 
+    if (!fire.hasPot) rows.push({ icon: "🫕", label: "Установить котелок",
+        hint: inventory.has("pot") ? "Из рюкзака" : "Нужна посуда", disabled: !inventory.has("pot"), action: () => actions.installPot?.() });
     if (fire.hasPot) {
         rows.push({ icon: "🫕", label: "Котелок", hint: fire.pot ? (fire.pot.done ? "готово" : "варится") : "пусто",
                     action: () => actions.openPot() });

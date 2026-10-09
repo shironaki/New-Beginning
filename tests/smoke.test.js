@@ -150,6 +150,7 @@ test("full Act I playthrough: ashes → fire → food → morning", () => {
     const before = g.needs.food;
     g.inventory.remove("fish_grill", 1);
     g.needs.consume(foodValue("fish_grill"));
+    g.bus.emit("player:ate", { id: "fish_grill" });
     assert.gt(g.needs.food, before);
     assert.eq(g.story.current.id, "survive_night");
 

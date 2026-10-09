@@ -1,3 +1,4 @@
+import { handRender } from "../ui/hands.js";
 /** Opt-in daytime gameplay pilot. Real Game/Player/inventory/fire systems;
  * separate in-memory save and one bounded height field, never a world rewrite. */
 import { Game } from "../main.js";
@@ -143,10 +144,11 @@ export class ReliefTrialGame extends Game {
             const f = this.fires.get(this.fireKey(this.zone, o));
             if (f?.lit) add(o, { x: 0, y: -9 }, f.lightRadius, f.intensity);
         }
-        const character = { ...p, phase: p.anim, tool, idleTime: this.elapsed, look: this.look,
+        const character = { ...p, ...handRender(this.inventory), phase: p.anim, tool, idleTime: this.elapsed, look: this.look,
             torchWind: Math.cos(this.weather.windAngle) * (this.windStrength || 0) };
-        if (def?.light) {
-            const flame = toolAttachment(character); add(p, flame, def.light, flame.intensity, 0);
+        for (const side of ["left", "right"]) {
+            const light = itemDef(this.inventory.hands?.[side]?.id)?.light;
+            if (light) { const flame = toolAttachment(character, side); add(p, flame, light, flame.intensity, 0); }
         }
         drawRelief(this.renderer.ctx, this.relief, { ...p, phase: p.anim, time: this.elapsed }, {
             mesh: this.mesh, guides: false, objects: this.zone.objects.filter((o) => !o.removed),

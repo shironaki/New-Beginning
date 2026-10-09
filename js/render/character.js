@@ -223,7 +223,7 @@ export function posture(p) {
         lean, squash, stance, swing };
 }
 
-/** Anatomical RIGHT hand: screen-left head-on, screen-right from behind;
+/** Anatomical hands. RIGHT is screen-left head-on, screen-right from behind;
  * near in right profile, far in left profile. Never swaps hands for visibility. */
 export function armRig(p, pose = posture(p)) {
     const { sideView, side, back, bob, counter, lean, swingN, swingF, swing, g, idle } = pose;
@@ -235,33 +235,42 @@ export function armRig(p, pose = posture(p)) {
     const ax = BODY.shoulderW / 2 + BODY.armW / 2 - 1;
     const behind = p.dir === "left" || back;
     const rest = Math.sin(idle * 1.3) * 0.45 * (1 - g);
+    const rs = p.actionHand === "left" ? 0 : swing, ls = p.actionHand === "left" ? swing : 0;
+    const lr = p.leftTool ? GAIT.armRatioTool : GAIT.armRatio;
     const right = sideView
         ? make(behind ? -BODY.farArmX * side : BODY.nearArmX * side,
-            -(behind ? swingF : swingN) * GAIT.armRatioTool + side * swing * 2.2 + rest,
-            Math.max(0, swing) * 1.5)
-        : make(back ? ax : -ax, rest, (back ? 1 : -1) * swingN * GAIT.armRatioTool - swing * 2.2);
+            -(behind ? swingF : swingN) * GAIT.armRatioTool + side * rs * 2.2 + rest, Math.max(0, rs) * 1.5)
+        : make(back ? ax : -ax, rest, (back ? 1 : -1) * swingN * GAIT.armRatioTool - rs * 2.2);
     const left = sideView
         ? make(behind ? BODY.nearArmX * side : -BODY.farArmX * side,
-            -(behind ? swingN : swingF) * GAIT.armRatio - rest, 0)
-        : make(back ? -ax : ax, -rest, (back ? -1 : 1) * swingN * GAIT.armRatio);
-    // The free hand braces the fall; the tool never leaves the right hand.
+            -(behind ? swingN : swingF) * lr + side * ls * 2.2 - rest, Math.max(0, ls) * 1.5)
+        : make(back ? -ax : ax, -rest, (back ? -1 : 1) * swingN * lr - ls * 2.2);
+    // Eating has a real occupied hand at the mouth; the other item stays held.
+    if (p.eatingHand) {
+        const a = p.eatingHand === "left" ? left : right;
+        a.ex = sideView ? side * 5 : (p.eatingHand === "right" ? -2 : 2);
+        a.ey = BODY.headY + 6 - bob;
+        a.mx = (a.sx + a.ex) / 2 + (p.eatingHand === "right" ? -3 : 3); a.my = (a.sy + a.ey) / 2 + 5;
+    }
+    // A free hand braces the fall; held items remain in their anatomical hand.
     const brace = fallPose(p).amount;
     left.ex += side * brace * 3; left.ey -= brace * 3;
     left.mx = (left.sx + left.ex) / 2; left.my = (left.sy + left.ey) / 2 - brace;
     return { right, left, behind };
 }
 
-function heldToolAngle(dir, side, swing) {
-    const lean = dir === "up" ? 0.35 : dir === "down" ? -0.4 : side * 0.45;
+function heldToolAngle(dir, side, swing, hand = "right") {
+    const anatomical = hand === "left" ? -1 : 1;
+    const lean = dir === "up" ? .35 * anatomical : dir === "down" ? -.4 * anatomical : side * .45;
     return lean - side * swing * 1.9;
 }
 
 /** Shared attachment for sprite and light map, relative to the foot line. */
-export function toolAttachment(p) {
+export function toolAttachment(p, hand = "right") {
     const pose = posture(p), rig = armRig(p, pose);
     const dir = p.dir || "down";
-    const angle = heldToolAngle(dir, pose.side, pose.swing);
-    const gx = rig.right.ex, gy = rig.right.ey + BODY.handH / 2 - 0.5;
+    const angle = heldToolAngle(dir, pose.side, p.actionHand && p.actionHand !== hand ? 0 : pose.swing, hand);
+    const gx = rig[hand].ex, gy = rig[hand].ey + BODY.handH / 2 - 0.5;
     const narrow = pose.sideView ? 1 - GAIT.slantNarrow * Math.abs(p.slant || 0) : 1;
     const flame = torchFlame(p.idleTime || 0, p.torchWind || 0, p.gait || 0);
     const localX = flame.x * (dir === "left" ? -1 : 1);
@@ -272,7 +281,7 @@ export function toolAttachment(p) {
         x = xx * Math.cos(a) - y * Math.sin(a);
         y = xx * Math.sin(a) + y * Math.cos(a) + f.y;
     }
-    return { x, y, intensity: flame.intensity, gripX: gx, gripY: gy, angle, behind: rig.behind };
+    return { x, y, intensity: flame.intensity, gripX: gx, gripY: gy, angle, behind: hand === "right" ? rig.behind : !rig.behind };
 }
 
 /**
@@ -408,11 +417,18 @@ function paintCharacter(ctx, p) {
     };
 
     const rig = armRig(p);
-    const toolArm = rig.right, farArm = rig.left;
-    if (rig.behind) {
-        paintArm(toolArm, true, !p.tool);
-        if (p.tool) { drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, true, p); paintHand(toolArm, true); }
-    } else paintArm(farArm, true);
+    const held = { right: p.rightTool === undefined ? p.tool : p.rightTool, left: p.leftTool || null };
+    const paintHeldArm = (hand, far) => {
+        const arm = rig[hand], tool = held[hand];
+        paintArm(arm, far, !tool);
+        if (tool) {
+            const handSwing = !p.actionHand || p.actionHand === hand ? swing : 0;
+            drawHeldTool(ctx, tool, dir, side, handSwing, arm, far, p, hand); paintHand(arm, far);
+        }
+    };
+    const farHand = rig.behind ? "right" : "left";
+    const farInFront = p.eatingHand === farHand || (!sideView && !back);
+    if (!farInFront) paintHeldArm(farHand, true);
 
     if (sideView) {
         drawLeg(-0.9 * side, swingF - stance, liftF, true, side);
@@ -537,15 +553,8 @@ function paintCharacter(ctx, p) {
 
     ctx.restore();
 
-    if (rig.behind) paintArm(farArm, false);
-    else paintArm(toolArm, false, !p.tool);
-
-    // Tool in the anatomical right hand, with direction-correct occlusion; the fist closes over the
-    // handle afterwards so the grip reads as a grip and not as a loose block.
-    if (p.tool && !rig.behind) {
-        drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, false, p);
-        paintHand(toolArm, false);
-    }
+    if (farInFront) paintHeldArm(farHand, false);
+    paintHeldArm(rig.behind ? "left" : "right", false);
     // --- the waterline -------------------------------------------------
     if (p.wading) {
         const t = idle * WADE.breatheHz;
@@ -578,11 +587,11 @@ function paintCharacter(ctx, p) {
  * Draw the held tool at the hand. `dir` decides which side of the body the
  * grip sits on; the tool is rotated around the grip when swinging.
  */
-function drawHeldTool(ctx, tool, dir, side, swing, arm, behind, pose = {}) {
+function drawHeldTool(ctx, tool, dir, side, swing, arm, behind, pose = {}, hand = "right") {
     // The grip IS the hand of the tool arm — passing a fixed GRIP_Y used to
     // leave the knife floating next to a second, phantom hand.
     const gx = arm.ex, gy = arm.ey + BODY.handH / 2 - 0.5;
-    const angle = heldToolAngle(dir, side, swing);
+    const angle = heldToolAngle(dir, side, swing, hand);
 
     ctx.save();
     ctx.translate(gx, gy);
@@ -600,6 +609,9 @@ function drawHeldTool(ctx, tool, dir, side, swing, arm, behind, pose = {}) {
         case "rod": drawRod(ctx); break;
         case "hoe": drawHoe(ctx); break;
         case "torch": drawTorch(ctx, pose); break;
+        case "food":
+            ctx.fillStyle = itemId === "berry" ? "#555984" : itemId.includes("tea") ? "#b3aa88" : "#b18b54";
+            ctx.beginPath(); ctx.ellipse(0, -2, itemId === "berry" ? 1.4 : 2.6, itemId === "berry" ? 1.2 : 2.2, 0, 0, Math.PI * 2); ctx.fill(); break;
         default: drawGeneric(ctx); break;
     }
 

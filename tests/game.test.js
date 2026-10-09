@@ -156,11 +156,12 @@ test("a key with no auto-repeat is never cut off", () => {
     assert.not(g.input.pressed("down"));
 });
 
-test("number keys switch the hotbar slot", () => {
+test("number keys open the corresponding anatomical hand", () => {
     const g = boot();
     key(dom.win, "Digit2", true);
     g.update(1 / 60);
-    assert.eq(g.inventory.activeSlot, 1);
+    assert.eq(g.hud.panelOpen, "hand");
+    assert.ok(g.hud.els.panelTitle.textContent.includes("Правая"));
 });
 
 test("the hero is never teleported while walking", () => {
@@ -261,6 +262,8 @@ test("eating restores hunger and removes the item", () => {
     g.needs.food = 40;
     g.inventory.add("meat_roast", 1);
     g.eat("meat_roast");
+    assert.eq(g.needs.food, 40);
+    g.update(1);
     assert.gt(g.needs.food, 60);
     assert.not(g.inventory.has("meat_roast"));
 });

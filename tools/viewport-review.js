@@ -99,10 +99,12 @@ try {
             assert.ok(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y, `${name}: controls overlap`);
         }
         summary.push({ name, ...metrics }); await screenshot(name);
-        // Real click consumes a berry and preserves the tool; empty slots are gone.
+        // Real hand click starts a timed meal; the other hand keeps its tool.
         if (name === "phone" || name === "desktop") {
             const before = await evaluate("({food:GAME.needs.food,n:GAME.inventory.count('berry'),active:GAME.inventory.activeSlot})");
-            await evaluate("document.querySelector('#eatItem').click(); GAME.update(0)");
+            await evaluate("GAME.inventory.equipHand('left', GAME.inventory.slots.findIndex(s => s?.id === 'berry')); GAME.update(0); document.querySelector('#leftHand').click()");
+            assert.equal(await evaluate("GAME.inventory.count('berry')"), before.n);
+            await evaluate("GAME.update(1)");
             const after = await evaluate("({food:GAME.needs.food,n:GAME.inventory.count('berry'),active:GAME.inventory.activeSlot})");
             assert.equal(after.n, before.n - 1); assert.equal(after.active, before.active); assert.ok(after.food > before.food);
             await evaluate("document.querySelector('#needSummary').click()"); await frames();

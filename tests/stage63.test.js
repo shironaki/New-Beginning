@@ -5,7 +5,7 @@ import { TerrainField } from "../js/world/terrain.js";
 import { generateZone } from "../js/world/worldgen.js";
 import { healthEffects, conditionRows } from "../js/survival/condition.js";
 import { Needs } from "../js/survival/needs.js";
-import { quickFood, eatQuick, openEquipment, equip, openProvisions } from "../js/ui/quick-actions.js";
+import { startMeal, tickHands, openHand, useHand, openBag } from "../js/ui/hands.js";
 import { resumeSaved } from "../js/ui/session.js";
 import { Camera } from "../js/engine/camera.js";
 import { toolAttachment } from "../js/render/character.js";
@@ -38,44 +38,47 @@ test("need disclosure supports mouse, keyboard focus, touch toggle and Escape", 
     h.els.disclosure.dispatch("focusin"); assert.not(h.els.details.hidden);
     h.openPanel("test", []); assert.ok(h.els.details.hidden);
 });
-test("quick berry click consumes exactly one, changes hunger and leaves right-hand tool alone", () => {
-    const g = boot(); g.update(0); const slot = g.inventory.activeSlot, food = g.needs.food;
-    click(g.hud.els.eatItem);
-    assert.eq(g.inventory.count("berry"), 2); assert.eq(g.needs.food, food + 5); assert.eq(g.inventory.activeSlot, slot);
+test("a held berry click consumes once after time passes and preserves the other hand", () => {
+    const g = boot(), food = g.needs.food;
+    g.inventory.equipHand("left", g.inventory.slots.findIndex(s => s?.id === "berry")); g.update(0);
+    click(g.hud.els.leftHand);
+    assert.eq(g.inventory.count("berry"), 3); assert.eq(g.needs.food, food);
+    tickHands(g, 1);
+    assert.eq(g.inventory.count("berry"), 2); assert.eq(g.needs.food, food + 5); assert.eq(g.inventory.hands.right.id, "knife");
 });
-test("exhausting food disables quick use, no phantom quantities or repeated consumption", () => {
-    const g = boot(); for (let i = 0; i < 3; i++) assert.ok(eatQuick(g));
-    const food = g.needs.food; assert.not(eatQuick(g)); g.update(0);
-    assert.eq(g.needs.food, food); assert.ok(g.hud.els.eatItem.disabled); assert.eq(quickFood(g.inventory), null);
+test("exhausting provisions never grants a phantom meal", () => {
+    const g = boot(); for (let i = 0; i < 3; i++) { assert.ok(startMeal(g, "berry")); tickHands(g, 1); }
+    const food = g.needs.food; assert.not(startMeal(g, "berry")); g.update(0);
+    assert.eq(g.needs.food, food); assert.eq(g.inventory.count("berry"), 0);
 });
-test("food from any of 24 slots appears in quick access, selecting does not eat", () => {
+test("food from any of 24 slots is reachable through the categorized bag", () => {
     const g = boot(); g.inventory.slots[20] = { id: "herb_tea", n: 2 };
-    assert.eq(quickFood(g.inventory, "herb_tea"), "herb_tea");
-    openProvisions(g); click(g.hud._panelRows.find((r) => r.innerHTML.includes("Травяной отвар")));
-    assert.eq(g.quickFoodId, "herb_tea"); assert.eq(g.inventory.count("herb_tea"), 2);
-    assert.ok(eatQuick(g)); assert.eq(g.inventory.count("herb_tea"), 1);
+    openBag(g, "food"); click(g.hud._panelRows.find(r => r.innerHTML.includes("Травяной отвар")));
+    assert.eq(g.inventory.count("herb_tea"), 2);
+    click(g.hud._panelRows.find(r => r.innerHTML.includes("Использовать")));
+    assert.eq(g.inventory.count("herb_tea"), 2); tickHands(g, 1); assert.eq(g.inventory.count("herb_tea"), 1);
 });
-test("quick use blocked by save gate, modal, pause, background, story and falling", () => {
-    const g = boot();
+test("hand use blocked by save gate, modal, pause, background, story and falling", () => {
+    const g = boot(); g.inventory.equipHand("left", g.inventory.slots.findIndex(s => s?.id === "berry"));
     for (const [obj, key] of [[g, "paused"], [g, "backgrounded"], [g.player, "fallTimer"]]) {
-        obj[key] = 1; assert.not(eatQuick(g)); obj[key] = 0;
+        obj[key] = 1; useHand(g, "left"); assert.not(g.inventory.handAction); obj[key] = 0;
     }
-    g.sessionReady = false; assert.not(eatQuick(g)); g.sessionReady = true;
-    g.hud.openPanel("pause", []); assert.not(eatQuick(g)); g.hud.closePanel();
-    g.hud.showStory({ title: "story", text: "text" }); assert.not(eatQuick(g));
+    g.sessionReady = false; useHand(g, "left"); assert.not(g.inventory.handAction); g.sessionReady = true;
+    g.hud.openPanel("pause", []); useHand(g, "left"); assert.not(g.inventory.handAction); g.hud.closePanel();
+    g.hud.showStory({ title: "story", text: "text" }); useHand(g, "left"); assert.not(g.inventory.handAction);
     assert.eq(g.inventory.count("berry"), 3);
 });
-test("equipment chooser reaches slot 20 without rearranging inventory or changing quantities", () => {
+test("hand chooser reaches slot 20 with conserved quantities and explicit left assignment", () => {
     const g = boot(); g.inventory.slots[20] = { id: "torch", n: 2 };
-    openEquipment(g); click(g.hud._panelRows.find((r) => r.innerHTML.includes("Факел")));
-    assert.eq(g.inventory.activeSlot, 20); assert.eq(g.inventory.active.id, "torch"); assert.eq(g.inventory.count("torch"), 2);
-    assert.not(equip(g, 1)); assert.not(equip(g, 60));
+    openHand(g, "left"); click(g.hud._panelRows.find(r => r.innerHTML.includes("Факел")));
+    assert.eq(g.inventory.hands.left.id, "torch"); assert.eq(g.inventory.hands.right.id, "knife"); assert.eq(g.inventory.count("torch"), 2);
+    assert.not(g.inventory.equipHand("right", 60));
 });
-test("selected tool beyond first six and preferred food survive real save/restore", () => {
-    const a = boot(); a.inventory.slots[20] = { id: "torch", n: 1 }; a.inventory.add("herb_tea", 2);
-    equip(a, 20); a.quickFoodId = "herb_tea"; assert.ok(a.save.write());
+test("both hands and dominant preference survive a real save/restore", () => {
+    const a = boot(); a.inventory.slots[20] = { id: "torch", n: 1 };
+    a.inventory.equipHand("left", 20); a.inventory.setDominant("left"); assert.ok(a.save.write());
     const b = boot(); b.save.storage = a.save.storage; assert.ok(resumeSaved(b));
-    assert.eq(b.inventory.activeSlot, 20); assert.eq(b.quickFoodId, "herb_tea");
+    assert.eq(b.inventory.hands.left.id, "torch"); assert.eq(b.inventory.hands.right.id, "knife"); assert.eq(b.inventory.dominant, "left");
     assert.eq(b.camera.surface, b.zone.playableRelief);
 });
 test("health diagnosis matches additive hunger/cold/exhaustion damage and difficulty", () => {
@@ -151,7 +154,7 @@ test("camera switches terrain on zone travel and raised chunk cache is reused", 
     g.enterZone("ashfall", null, true); assert.eq(g.camera.surface, g.zone.playableRelief);
 });
 test("torch light is attached to the actor foot, not terrain under its airborne flame", () => {
-    const g = boot(); g.inventory.slots[20] = { id: "torch", n: 1 }; equip(g, 20); g.placeSafely(1072, 1150); g.render();
+    const g = boot(); g.inventory.slots[20] = { id: "torch", n: 1 }; g.inventory.equipHand("right", 20); g.placeSafely(1072, 1150); g.render();
     const light = g.renderer._lights.find((l) => l.glow === .45);
     assert.eq(light.anchorX, g.player.x); assert.eq(light.anchorY, g.player.y);
     const a = toolAttachment({ ...g.player, phase: g.player.anim, idleTime: g.renderer.time, torchWind: Math.cos(g.weather.windAngle) * (g.windStrength || 0) });

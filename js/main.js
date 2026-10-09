@@ -1,3 +1,4 @@
+import { startMeal, tickHands, handRender, useHand, openBag } from "./ui/hands.js";
 import { canReceive, startPotFromInventory } from "./survival/cooking-actions.js";
 /**
  * «Новое начало». Bootstrap and orchestration.
@@ -14,7 +15,6 @@ import { RNG, hashSeed } from "./core/rng.js";
 import { snapshotWorld, restoreWorld } from "./world/persistence.js";
 import { installSession, sessionTick, openSessionMenu, bindSessionLifecycle } from "./ui/session.js";
 import { conditionRows } from "./survival/condition.js";
-import { holdable, equip, openEquipment, openProvisions, eatQuick } from "./ui/quick-actions.js";
 import { bindTouch } from "./ui/touch.js";
 import { SaveManager } from "./core/save.js";
 import { Input } from "./engine/input.js";
@@ -95,9 +95,8 @@ export class Game {
         this.renderer = new Renderer(canvas, this.camera);
         this.input = new Input({ target: window });
         this.hud = new HUD(hudRoot, {
-            onHotbar: (i) => this.inventory.setActive(i),
-            onEquipment: () => openEquipment(this), onProvisions: () => openProvisions(this),
-            onEat: () => eatQuick(this), onBag: () => { if (this.sessionReady !== false) this.openBackpack(); },
+            onHand: (side) => useHand(this, side),
+            onBag: () => { if (this.sessionReady !== false) this.openBackpack(); },
             onCondition: () => this.openCondition(),
             onAction: () => {}
         });
@@ -129,6 +128,7 @@ export class Game {
         this.inventory.add("flint", 1);
         this.inventory.add("berry", 3);
         this.inventory.setActive(0);
+        this.inventory.enableHands();
     }
 
     /** Instantiate live objects (campfires) for a freshly entered zone. */
@@ -159,7 +159,13 @@ export class Game {
 
     _bindEvents() {
         const bus = this.bus;
-        bus.on("story:step", (s) => { this.hud.showStory(s); this.paused = true; });
+        this.storyNotices = [];
+        this.nextStory = () => {
+            if (this.inventory.handAction || this.hud.isStoryOpen || this.hud.isPanelOpen || !this.storyNotices.length) return;
+            this.hud.showStory(this.storyNotices.shift()); this.paused = true;
+        };
+        bus.on("story:step", (s) => { this.storyNotices.push(s); this.nextStory(); });
+        bus.on("save:restored", () => { this.storyNotices.length = 0; this.story.recover(); });
         bus.on("needs:warn", ({ text, icon }) => this.hud.toast(text, icon));
         bus.on("cook:discovered", ({ name, emoji }) => this.hud.toast(`Новое блюдо: ${name}`, emoji));
         bus.on("fire:lit", () => {
@@ -171,7 +177,7 @@ export class Game {
         bus.on("weather:change", ({ info }) => this.hud.toast(`${info.emoji} ${info.name}`));
         bus.on("player:collapse", () => this.onCollapse());
         bus.on("player:slipped", () => this.hud.toast("Поскользнулся! По льду лучше идти шагом", "🧊"));
-        this.hud.onAction = () => { this.paused = false; };
+        this.hud.onAction = () => { this.paused = false; this.nextStory(); };
     }
 
     _bindTouch(canvas) {
@@ -196,10 +202,6 @@ export class Game {
         this.save.register("clock", () => this.clock.toJSON(), (d) => this.clock.load(d));
         this.save.register("needs", () => this.needs.toJSON(), (d) => this.needs.load(d));
         this.save.register("inv", () => this.inventory.toJSON(), (d) => this.inventory.load(d));
-        this.save.register("quick", () => ({ food: this.quickFoodId || null }), (d) => {
-            if (d?.food && !foodValue(d.food)) throw new Error("Некорректная быстрая еда");
-            this.quickFoodId = d?.food || null;
-        });
         this.save.register("weather", () => this.weather.toJSON(), (d) => this.weather.load(d));
         this.save.register("player", () => ({ zone: this.zone.id, p: this.player.toJSON() }),
             (d) => {
@@ -244,6 +246,17 @@ export class Game {
                 throw new Error("Некорректный рюкзак");
             for (const slot of inv.slots) if (slot && (!itemDef(slot.id) || !Number.isInteger(slot.n) || slot.n < 1 || slot.n > itemDef(slot.id).stack))
                 throw new Error("Некорректный предмет в рюкзаке");
+            if (inv.hands) {
+                if (!["left", "right"].includes(inv.dominant)) throw Error("Некорректная ведущая рука");
+                for (const side of ["left", "right"]) {
+                    const h = inv.hands[side];
+                    if (h && (!itemDef(h.id) || h.n !== 1)) throw Error("Некорректный предмет в руке");
+                }
+                const a = inv.handAction;
+                if (a && (a.type !== "eat" || !["left", "right"].includes(a.side) || !foodValue(a.id)
+                    || inv.hands[a.side]?.id !== a.id || !Number.isFinite(a.remaining) || a.remaining < 0 || a.remaining > .9
+                    || (a.previous && !itemDef(a.previous)))) throw Error("Некорректное действие рук");
+            }
             for (const key of ["food", "warmth", "health", "fatigue", "spirit"]) if (parts.needs &&
                 (!Number.isFinite(parts.needs[key]) || parts.needs[key] < 0 || parts.needs[key] > 100)) throw new Error("Некорректные нужды");
         };
@@ -389,18 +402,19 @@ export class Game {
 
     doInteract() {
         const obj = this.interact;
-        if (!obj) return;
+        if (!obj || obj.removed || this.inventory.handAction) return;
         const def = propDef(obj.kind);
         if (!def) return;
 
         if (def.interact === "fire") return this.openFire(obj);
         if (def.interact === "sleep") return this.sleep(obj);
+        if (obj.kind === "hearth_ruin") return this.inspectHearth(obj);
         if (def.interact === "read" || def.interact === "story") {
-            if (obj.story) this.story.setFlag(obj.story);
             if (def.interact === "read") {
-                this.inventory.add("diary_burnt", 1);
-                obj.removed = true;
+                if (!canReceive(this.inventory, "diary_burnt")) { this.hud.toast("В рюкзаке нет места", "🎒"); return; }
+                this.readDiary(); this.inventory.add("diary_burnt", 1); obj.removed = true;
             }
+            if (obj.story) this.story.setFlag(obj.story);
             this.particles.emote(obj.x, obj.y - 20, "❓");
             return;
         }
@@ -415,6 +429,15 @@ export class Game {
             this.hud.toast(toolHint(obj.kind), "✋");
             return;
         }
+        if (this.inventory.handAction) return;
+        if (tool) {
+            const found = this.inventory.findTool(tool);
+            if (!found.hand && !this.inventory.equipHand(this.inventory.dominant, found.index)) {
+                this.hud.toast("Нужно освободить руку для инструмента", "✋"); return;
+            }
+            this.player.actionHand = found.hand || this.inventory.dominant;
+        }
+        if (!tool) this.player.actionHand = this.inventory.dominant;
         this.player.swing("tool");
         if (obj.hits === undefined) obj.hits = def.hits || 1;
         obj.hits -= 1 + (tool ? (this.inventory.findTool(tool).tier - 1) * 0.5 : 0);
@@ -477,6 +500,10 @@ export class Game {
         const refresh = () => this.openFire(obj);
         this.hud.openPanel("Костёр", fireRows(fire, this.inventory, {
             canCook: (id) => isCookable(id),
+            installPot: () => {
+                if (!fire.hasPot && !this.inventory.handAction && this.inventory.remove("pot", 1)) fire.installPot();
+                refresh();
+            },
             addFuel: (id) => {
                 if (this.inventory.has(id) && fire.addFuel(id) && this.inventory.remove(id, 1)) {
                     this.particles.sparks(obj.x, obj.y - 6, 5);
@@ -569,37 +596,27 @@ export class Game {
         this.hud.openPanel("Состояние · что влияет сейчас", conditionRows(this), "condition");
     }
 
-    openBackpack() {
-        this.input.releaseAll(); this.touch?.reset();
-        const rows = [{ html: `<b>Рюкзак</b> · ${this.inventory.used}/${this.inventory.size} · ${this.inventory.weight} кг` }];
-        for (const s of this.inventory.list()) {
-            const d = itemDef(s.id);
-            const edible = foodValue(s.id);
-            rows.push({
-                icon: itemEmoji(s.id),
-                label: `${itemName(s.id)} ×${s.n}`,
-                hint: edible ? `съесть · +${edible.food}🍖` : holdable(s.id) ? "Взять в руку" : "О предмете",
-                action: edible ? () => { this.eat(s.id); this.openBackpack(); } : () => {
-                    if (holdable(s.id)) { equip(this, this.inventory.slots.findIndex((v) => v?.id === s.id)); this.openBackpack(); }
-                    else this.hud.toast(d.insulation ? `Одежда согревает, пока она в рюкзаке: +${d.insulation}°C` : d.burn ? "Топливо добавляется через меню костра." : d.tags.includes("readable") ? "Записи доступны в дневнике." : "Этот предмет хранится в рюкзаке; прямого использования пока нет.", itemEmoji(s.id));
-                }
-            });
-        }
-        this.hud.openPanel("Рюкзак", rows, "bag");
+    openBackpack() { openBag(this); }
+
+    eat(id) { return startMeal(this, id); }
+
+    readDiary() {
+        this.hud.openPanel("Обгоревший дневник", [{ html: "<b>Свой почерк</b><br>Последняя запись сделана за день до пожара и обрывается на половине слова: «на гряде снова видели…»" }], "diary");
     }
 
-    eat(id) {
-        const val = foodValue(id);
-        if (!val || this.sessionReady === false) return false;
-        if (!this.inventory.remove(id, 1)) return false;
-        this.needs.consume(val);
-        this.particles.text(this.player.x, this.player.y - 26, `+${val.food} 🍖`, { color: "#b7e37a" });
-        this.hud.toast(`Съедено: ${itemName(id)}`, itemEmoji(id));
-        return true;
+    inspectHearth(obj) {
+        const rows = [{ html: this.story.hasFlag("home_pot_taken") ? "Сажа, зола и остывший кирпич. Посуду ты уже забрал." : "В остывшей печи сохранилась закопчённая посуда." }];
+        if (!this.story.hasFlag("home_pot_taken")) rows.push({ icon: "🫕", label: "Забрать котелок", action: () => {
+            if (!canReceive(this.inventory, "pot")) { this.hud.toast("В рюкзаке нет места", "🎒"); return; }
+            this.inventory.add("pot", 1); this.story.setFlag("home_pot_taken"); this.inspectHearth(obj);
+        } });
+        this.hud.openPanel("Обгоревшая печь", rows, "hearth");
+        this.story.setFlag("home_hearth");
     }
 
     openJournal() {
         const rows = [{ html: `<b>Акт ${this.story.act}</b> · ${this.story.objective}` }];
+        if (this.story.hasFlag("own_diary")) rows.push({ icon: "📔", label: "Обгоревший дневник · прочитать", action: () => this.readDiary() });
         for (const e of this.story.entries.slice().reverse()) {
             rows.push({ html: `<b>${e.title}</b><br><small>${e.text}</small>` });
         }
@@ -612,6 +629,7 @@ export class Game {
     /* ---- sleeping ---- */
 
     sleep(tentObj) {
+        if (this.inventory.handAction) return;
         if (this.clock.hour > 4 && this.clock.hour < 18) {
             this.hud.toast("Спать посреди дня — роскошь", "😐");
             return;
@@ -683,7 +701,10 @@ export class Game {
 
     update(dt) {
         this.elapsed += dt;
-        const uiBlocking = this.hud.isPanelOpen || this.paused || this.backgrounded;
+        this.nextStory?.();
+        let uiBlocking = this.hud.isPanelOpen || this.hud.isStoryOpen || this.paused || this.backgrounded;
+        if (!uiBlocking) tickHands(this, dt);
+        uiBlocking ||= this.hud.isStoryOpen || this.paused;
 
         // Clock & derived systems.
         const minutes = uiBlocking ? 0 : this.clock.update(dt);
@@ -695,7 +716,7 @@ export class Game {
         this.input.update(dt);
         if (uiBlocking) { this.input.releaseAll(); if (!this.player.fallTimer) this.player.mvx = this.player.mvy = 0; }
         syncWaterState(this.zone, this.clock, this.weather.current);
-        const axis = uiBlocking ? { x: 0, y: 0 } : this.input.axis();
+        const axis = uiBlocking || this.inventory.handAction ? { x: 0, y: 0 } : this.input.axis();
         if (!uiBlocking) this.player.update(dt, axis, this.zone, {
             speedFactor: this.needs.speedFactor(),
             wantRun: !uiBlocking && (this.input.pressed("sprint") || (this.input.stick.active && Math.hypot(axis.x, axis.y) > 0.95)),
@@ -767,9 +788,11 @@ export class Game {
             }
         }
 
-        // Hotbar keys.
-        for (let i = 1; i <= 6; i++) {
-            if (this.input.justPressed("slot" + i)) this.inventory.setActive(i - 1);
+        // The same three controls as the visible hand bar, not hidden bag slots.
+        if (!uiBlocking) {
+            if (this.input.justPressed("slot1")) useHand(this, "left");
+            if (this.input.justPressed("slot2")) useHand(this, "right");
+            if (this.input.justPressed("slot3")) this.openBackpack();
         }
         if (this.input.justPressed("inventory")) {
             this.hud.isPanelOpen ? this.hud.closePanel() : this.openBackpack();
@@ -846,7 +869,7 @@ export class Game {
             needs: this.needs, player: this.player,
             clock: this.clock,
             weather: this.weather,
-            inventory: this.inventory, quickFoodId: this.quickFoodId,
+            inventory: this.inventory,
             objective: this.story.objective,
             zoneName: this.zone.def.name,
             ambient: this.ambient
@@ -941,6 +964,7 @@ export class Game {
         this.renderer.render({
             zone: this.zone,
             player: this.player,
+            hands: handRender(this.inventory),
             clock: this.clock,
             weather: this.weather.current,
             groundWet: this.weather.groundWet,
@@ -954,7 +978,7 @@ export class Game {
                 ? { id: active.id, tool: activeDef.tool || (activeDef.tags.includes("light") ? "torch" : "") }
                 : null,
             interact: this.interact ? { target: this.interact, label: this.interactLabel(this.interact) } : null,
-            playerLight: activeDef && activeDef.light ? activeDef.light : 0,
+            playerLight: Math.max(0, ...Object.values(this.inventory.hands || {}).map((h) => itemDef(h?.id)?.light || 0)),
             underground: !!this.zone.def.underground,
             entities: []
         }, dt);
