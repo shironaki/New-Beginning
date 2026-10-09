@@ -1,7 +1,6 @@
 import { handCapacity, canStow, pickupSide } from "../sandbox/carry.js";
 /** Two anatomical hands; carried items are real inventory entries, not shortcuts. */
 import { itemDef, itemName, itemEmoji, foodValue } from "../sandbox/items.js";
-import { canReceive } from "../survival/cooking-actions.js";
 export const sideName = (s) => s === "left" ? "Левая рука" : "Правая рука";
 export function ready(game) {
     return game.sessionReady !== false && !game.backgrounded && !game.paused && !game.player.fallTimer && !game.inventory.handAction && !game.hud.isStoryOpen;
@@ -37,7 +36,8 @@ export function tickHands(game, dt) {
     inv.bus?.emit("inv:remove", { owner: inv.owner, id: a.id, n: 1 });
     if (a.previous && !inv.hands[a.side]) {
         const i = inv.slots.findIndex((s) => s?.id === a.previous);
-        if (i >= 0) inv.equipHand(a.side, i, Math.min(a.previousN || 1, inv.slots[i].n));
+        const stored = inv.slots.reduce((n, s) => n + (s?.id === a.previous ? s.n : 0), 0);
+        if (i >= 0) inv.equipHand(a.side, i, Math.min(a.previousN || 1, stored));
     }
     game.needs.consume(foodValue(a.id));
     game.bus.emit("player:ate", { id: a.id });
@@ -88,16 +88,20 @@ const GROUPS = [
     ["materials", "Материалы", (d) => d.tags.some((t) => ["fuel", "build", "craft", "feed"].includes(t))]
 ];
 export function openBag(game, category = "all") {
-    game.bagCategory = category;
     game.input.releaseAll(); game.touch?.reset();
     const inv = game.inventory, available = GROUPS.filter(([id,,match]) => id === "all" || inv.list().some((s) => match(itemDef(s.id))));
     if (!available.some(([id]) => id === category)) category = "all";
+    game.bagCategory = category;
     const match = available.find(([id]) => id === category)[2];
     const rows = [{ html: `<b>Рюкзак</b> · ${inv.used}/${inv.size} · ${inv.weight} кг` }];
     for (const [id, label] of available) rows.push({ tab: true, selected: id === category, label, action: () => openBag(game, id) });
     for (const id of [...new Set(inv.list().map((s) => s.id))]) {
         if (!match(itemDef(id))) continue;
-        rows.push({ item: true, icon: itemEmoji(id), label: `${itemName(id)} ×${inv.count(id)}`, action: () => {
+        const stored = inv.slots.reduce((n, s) => n + (s?.id === id ? s.n : 0), 0);
+        const locations = [`В рюкзаке: ${stored}`];
+        for (const side of ["right", "left"]) if (inv.hands[side]?.id === id)
+            locations.push(`${sideName(side)}: ${inv.hands[side].n}`);
+        rows.push({ item: true, icon: itemEmoji(id), label: `${itemName(id)} ×${inv.count(id)}`, hint: locations.join(" · "), action: () => {
             const d = itemDef(id), value = foodValue(id);
             const choices = [{ html: `<small>${value ? `Сытость +${value.food || 0}` : d.insulation
                 ? `Пока одежда согревает при переноске: +${d.insulation}°C. Отдельные слои экипировки ещё не реализованы.`
@@ -106,11 +110,16 @@ export function openBag(game, category = "all") {
             if (foodValue(id)) choices.push({ label: "Использовать", action: () => startMeal(game, id) });
             if (id === "diary_burnt") choices.push({ label: "Прочитать", action: () => game.readDiary() });
             for (const side of ["left", "right"]) choices.push({ label: sideName(side), action: () => {
+                if (!ready(game)) { game.hud.toast("Руки заняты действием", "✋"); return; }
+                // This panel is live: the last unit may have been eaten meanwhile.
+                if (!inv.has(id)) {
+                    openBag(game, category); game.hud.toast("Предмета уже нет при себе", "🎒"); return;
+                }
                 const i = inv.slots.findIndex((s) => s?.id === id);
                 if (inv.hands[side]?.id === id) return openHand(game, side);
-                if (ready(game) && i >= 0 && inv.equipHand(side, i)) game.hud.closePanel();
-                else if (i < 0 && ready(game)) { inv.swapHands(); game.hud.closePanel(); }
-                else game.hud.toast("Руки заняты действием или в рюкзаке нет места", "🎒");
+                if (i >= 0 && inv.equipHand(side, i)) game.hud.closePanel();
+                else if (i < 0 && inv.hands[side === "left" ? "right" : "left"]?.id === id && inv.swapHands()) game.hud.closePanel();
+                else game.hud.toast("В рюкзаке нет места для прежнего предмета", "🎒");
             } });
             choices.push({ label: "Назад", action: () => openBag(game, category) });
             game.hud.openPanel(itemName(id), choices, "item");
@@ -135,7 +144,8 @@ function finishPickup(game, a) {
     const inv = game.inventory, obj = game.world.get(a.zone)?.objects[a.index];
     const entry = obj?.loot?.find(s => s.id === a.id && s.n >= a.n);
     const held = inv.hands[a.side];
-    if (!entry || game.zone.id !== a.zone || Math.hypot(game.player.x-obj.x,game.player.y-obj.y)>80
+    const surface = game.zone.playableRelief || game.zone.relief;
+    if (!entry || obj.removed || game.zone.id !== a.zone || (surface && !surface.canReach(game.player, obj, 80)) || Math.hypot(game.player.x-obj.x,game.player.y-obj.y)>80
         || (held && held.id !== a.id) || (held?.n || 0) + a.n > handCapacity(a.id)) return;
     inv.hands[a.side] = { id: a.id, n: (held?.n || 0) + a.n }; entry.n -= a.n;
     obj.loot = obj.loot.filter(s => s.n > 0);

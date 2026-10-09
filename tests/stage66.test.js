@@ -55,4 +55,33 @@ test('far profile knife grip and blade extend forward in either anatomical hand'
  assert.gt(rig[side].ex*sign,0);assert.gt((a.x-a.gripX)*sign,0);
  }
 });
+test('meal restores a bundle split across bag slots, including after reload',()=>{
+ const g=boot(),inv=g.inventory;inv.clear();inv.hands={left:{id:'firewood',n:5},right:{id:'torch',n:1}};
+ inv.slots[0]={id:'berry',n:1};inv.slots[1]={id:'firewood',n:49};
+ assert.ok(startMeal(g,'berry'));assert.eq(inv.slots[0].n,4);assert.eq(inv.slots[1].n,50);
+ g.save.write();const b=boot();b.save.storage=g.save.storage;assert.ok(b.save.loadFromStorage());tickHands(b,1);
+ assert.deep(b.inventory.hands.left,{id:'firewood',n:5});assert.eq(b.inventory.count('firewood'),54);assert.eq(b.inventory.hands.right.id,'torch');
+});
+test('bundle retrieval across slots is atomic and never takes from the other hand',()=>{
+ const g=boot(),inv=g.inventory;inv.clear();inv.hands={left:null,right:{id:'firewood',n:5}};
+ inv.slots[0]={id:'firewood',n:2};inv.slots[1]={id:'firewood',n:1};const before=JSON.stringify(inv.toJSON());
+ assert.not(inv.equipHand('left',0,5));assert.eq(JSON.stringify(inv.toJSON()),before);
+ inv.slots[2]={id:'firewood',n:2};assert.ok(inv.equipHand('left',0,5));assert.eq(inv.hands.left.n,5);assert.eq(inv.hands.right.n,5);assert.eq(inv.used,0);
+});
+test('bag cards distinguish stored counts from the two physical hands',()=>{
+ const g=boot();g.inventory.clear();g.inventory.hands.left={id:'firewood',n:3};g.inventory.slots[0]={id:'firewood',n:2};openBag(g);
+ const card=g.hud._panelRows.find(b=>b.className.includes('bagItem'));
+ assert.ok(card.innerHTML.includes('В рюкзаке: 2'));assert.ok(card.innerHTML.includes('Левая рука: 3'));
+});
+test('stale item buttons cannot swap unrelated hands after that item is consumed',()=>{
+ const g=boot();g.inventory.clear();g.inventory.hands={left:{id:'firewood',n:3},right:{id:'torch',n:1}};g.inventory.slots[0]={id:'berry',n:1};
+ assert.ok(startMeal(g,'berry'));openBag(g);g.hud._panelRows.find(b=>b.innerHTML.includes('Ягоды')).dispatch('click');
+ const button=g.hud._panelRows.find(b=>b.innerHTML.includes('Правая рука'));assert.ok(button);tickHands(g,1);
+ const before=JSON.stringify(g.inventory.hands);button.dispatch('click');assert.eq(JSON.stringify(g.inventory.hands),before);assert.eq(g.hud.panelOpen,'bag');
+});
+test('pickup completion rechecks height instead of taking loot through a cliff',()=>{
+ const g=boot(),o=wood(g);reach(g,o);g.harvest(o);const entry=JSON.stringify(o.loot);
+ const field=g.zone.playableRelief,check=field.canReach;field.canReach=()=>false;
+ tickHands(g,1);assert.eq(g.inventory.count('firewood'),0);assert.eq(JSON.stringify(o.loot),entry);assert.not(o.removed);field.canReach=check;
+});
 await run('stage66');

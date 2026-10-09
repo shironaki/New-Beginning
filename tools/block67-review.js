@@ -57,8 +57,9 @@ async function screenshot(name) {
 try {
     await send("Page.enable");await send("Runtime.enable");
     await send("Emulation.setDeviceMetricsOverride",{width:1280,height:800,deviceScaleFactor:1,mobile:false});
+    await send("Emulation.setTouchEmulationEnabled",{enabled:false});
     const loaded=nextEvent("Page.loadEventFired");await send("Page.navigate",{url:base});await loaded;
-    await evaluate(`new Promise(r=>{function ready(){if(!window.GAME?.viewport)return requestAnimationFrame(ready);GAME.loop.stop();GAME.hud.closePanel(true);GAME.hud.hideStory();GAME.storyNotices.length=0;GAME.sessionReady=true;r();}ready();})`);
+    await evaluate(`new Promise(r=>{function ready(){if(!window.GAME?.viewport)return requestAnimationFrame(ready);GAME.loop.stop();GAME.hud.closePanel(true);GAME.hud.hideStory();GAME.storyNotices.length=0;GAME.sessionReady=true;GAME.viewport.setControls("auto");r();}ready();})`);
     await evaluate(`(()=>{const g=GAME;g.clock.minute=12*60;g.camera.zoom=4;g.camera.snapTo(g.player.x,g.player.y);g.inventory.swapHands();g.update(0);g.render();})()`);
     for(const dir of ['down','left','up','right']) {await evaluate(`GAME.player.dir='${dir}';GAME.render()`);await screenshot('hero-left-knife-'+dir);}
     await evaluate(`(async()=>{const{openAppearance}=await import('./js/ui/appearance.js');openAppearance(GAME);})()`);await screenshot('appearance');
@@ -68,5 +69,12 @@ try {
     await evaluate(`(()=>{const g=GAME;const o=g.zone.objects.find(o=>o.kind==='campfire'),f=g.fires.get(g.fireKey(g.zone,o));f.addFuel('log');f.light({hasFlint:true});f.startPot(['berry','berry']);g.render();})()`);await screenshot('pot-hot');
     await evaluate(`(()=>{const g=GAME;g.openBackpack();})()`);await screenshot('inventory-grid');
     await evaluate(`(async()=>{const{tickHands}=await import('./js/ui/hands.js');const g=GAME;g.hud.closePanel();g.storyNotices.length=0;g.hud.hideStory();const o=g.zone.objects.find(o=>o.kind==='firewood'&&!o.removed);g.player.x=o.x;g.player.y=o.y+18;g.harvest(o);tickHands(g,1);g.camera.snapTo(g.player.x,g.player.y);g.update(0);g.render();})()`);await screenshot('carried-wood');
+    await send("Emulation.setDeviceMetricsOverride",{width:320,height:568,deviceScaleFactor:1,mobile:true});
+    await send("Emulation.setTouchEmulationEnabled",{enabled:true,maxTouchPoints:5});
+    await evaluate(`GAME.viewport.setControls('touch');GAME.openBackpack()`);await frames();
+    await evaluate(`GAME.render()`); // The review stopped the loop; repaint after canvas resize.
+    assert.ok(await evaluate(`(()=>{const body=document.querySelector('.panelBody'),hint=document.querySelector('.bagItem .rowHint');return body.scrollWidth<=body.clientWidth+1 && getComputedStyle(hint).display!=='none' && body.innerText.includes('рука: 3');})()`),'phone bag shows hand locations without horizontal overflow');
+    await screenshot('inventory-phone');
+    await evaluate(`GAME.viewport.setControls('auto')`);
     assert.equal(errors.length,0);fs.writeFileSync(`${out}/review.json`,JSON.stringify({errors},null,2));console.log('PASS: hero, creator, real terrace, cold/hot pot, inventory and physical bundle.');
 } finally {for(const p of pending.values())clearTimeout(p.timer);for(const e of events.values())clearTimeout(e.timer);ws.close();}

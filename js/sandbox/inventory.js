@@ -114,7 +114,7 @@ export class Inventory {
         return this;
     }
 
-    /** Hands contain real single items OUTSIDE the backpack, never aliases. */
+    /** Hands contain real items/bounded bundles OUTSIDE the backpack, never aliases. */
     enableHands() {
         if (!this.hands) { this.hands = { left: null, right: null }; this.dominant = "right"; this.equipHand("right", this.activeSlot); }
         return this;
@@ -122,10 +122,14 @@ export class Inventory {
     equipHand(side, index = -1, amount = 1) {
         if (!this.hands || !["left", "right"].includes(side) || this.handAction) return false;
         const selected = index >= 0 ? this.slots[index] : null;
-        if (index >= 0 && (!selected || !Number.isInteger(amount) || amount < 1 || amount > handCapacity(selected.id) || selected.n < amount)) return false;
+        if (index >= 0 && (!selected || !Number.isInteger(amount) || amount < 1 || amount > handCapacity(selected.id))) return false;
         // Dry-run both movements; failed stowing must neither drop nor duplicate.
         const bag = new Inventory({ slots: this.size }); bag.slots = this.slots.map((s) => s && { ...s });
+        // A carried bundle can have been split when stowed into near-full stacks.
+        // Reassemble from the bag only; never borrow from the other hand.
+        if (selected && !bag.has(selected.id, amount)) return false;
         const next = selected ? bag.takeFromSlot(index, amount) : null;
+        if (next && next.n < amount) next.n += bag.remove(selected.id, amount - next.n);
         const old = this.hands[side];
         if (old && bag.add(old.id, old.n)) return false;
         this.slots = bag.slots; this.hands[side] = next;

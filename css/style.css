@@ -422,6 +422,6 @@ html, body {
 .bagTab[aria-pressed="true"] { color:#191f19; background:var(--gold); }
 .bagGrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:8px; }
 .bagGrid .bagItem { display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:10px; min-height:110px; padding:12px; border:1px solid var(--edge); border-radius:12px; }
-.bagItem .rowIcon { font-size:30px; } .bagItem .rowLabel { font-size:12px; } .bagItem .rowHint { display:none; }
+.bagItem .rowIcon { font-size:30px; } .bagItem .rowLabel { font-size:12px; } .bagItem .rowHint, #stage[data-controls="touch"] .bagItem .rowHint { display:block; max-width:100%; font-size:11px; line-height:1.4; }
 .panelWrap[data-panel="appearance"] .panel { width:min(540px,calc(100% - 16px)); }
 #appearancePreview { display:block; width:100%; height:180px; object-fit:contain; border-radius:12px; background:radial-gradient(ellipse at 50% 80%, #52615a, #27342f 70%); }
