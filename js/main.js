@@ -1,3 +1,4 @@
+import { canReceive, startPotFromInventory } from "./survival/cooking-actions.js";
 /**
  * «Новое начало». Bootstrap and orchestration.
  *
@@ -487,12 +488,19 @@ export class Game {
                 if (!ok) this.hud.toast(fire.lastFailure || "Нужен кремень и топливо", "🪨");
                 refresh();
             },
+            resume: () => this.hud.closePanel(),
             putOnSpit: (id) => {
+                if (!this.inventory.has(id) || !isCookable(id) || !fire.lit) return;
                 if (fire.putOnSpit(id) >= 0) this.inventory.remove(id, 1);
                 else this.hud.toast("Вертел занят", "🍢");
                 refresh();
             },
             takeFromSpit: (i) => {
+                const slot = fire.spit[i];
+                if (!slot) return;
+                if (!canReceive(this.inventory, slot.ready ? slot.result : slot.itemId)) {
+                    this.hud.toast("Рюкзак полон — еда остаётся на вертеле", "🎒"); return;
+                }
                 const got = fire.takeFromSpit(i);
                 if (got) {
                     this.inventory.add(got.id, 1);
@@ -509,35 +517,46 @@ export class Game {
         }), "fire");
     }
 
-    openPot(fire, back) {
-        if (fire.pot && fire.pot.done) {
+    openPot(fire, back, chosen = [], water = true) {
+        if (fire.pot?.done) {
+            if (!canReceive(this.inventory, fire.pot.result)) {
+                this.hud.toast("Рюкзак полон — блюдо остаётся в котелке", "🎒"); return back();
+            }
             const id = fire.takePot();
             this.inventory.add(id, 1);
             this.cookJournal.discover(id);
             this.hud.toast(`Готово: ${itemName(id)}`, itemEmoji(id));
             return back();
         }
-        const edible = this.inventory.list().filter((s) => {
-            const d = itemDef(s.id);
+        if (fire.pot) {
+            this.hud.openPanel("Котелок", [
+                { html: `Варится · ${Math.min(100, Math.round(fire.pot.progress / fire.pot.time * 100))}%` },
+                { label: "Оставить готовиться", action: () => this.hud.closePanel() },
+                { label: "К костру", action: back }
+            ], "pot");
+            return;
+        }
+        const refresh = () => this.openPot(fire, back, chosen, water);
+        const ids = [...new Set(this.inventory.list().map((s) => s.id))].filter((id) => {
+            const d = itemDef(id);
             return d && (d.tags.includes("food") || d.tags.includes("herb"));
         });
-        const chosen = [];
-        const rows = [{ html: "<b>Котелок</b><br><small>Выбери 2–3 ингредиента — что получится, узнаешь сам.</small>" }];
-        for (const e of edible.slice(0, 8)) {
-            rows.push({
-                icon: itemEmoji(e.id), label: itemName(e.id), hint: `×${e.n}`,
-                action: () => {
-                    chosen.push(e.id);
-                    this.hud.toast(`В котелок: ${itemName(e.id)}`, itemEmoji(e.id));
-                    if (chosen.length >= 2) {
-                        const res = fire.startPot(chosen);
-                        chosen.forEach((id) => this.inventory.remove(id, 1));
-                        if (!res) this.hud.toast("Из этого ничего не выйдет", "🤔");
-                        back();
-                    }
-                }
-            });
+        const rows = [{ html: `<b>В котелке: ${chosen.length}/3</b><br>${chosen.map(itemName).join(", ") || "Пусто"}` }];
+        for (const id of ids) {
+            const left = this.inventory.count(id) - chosen.filter((x) => x === id).length;
+            rows.push({ icon: itemEmoji(id), label: itemName(id), hint: `осталось ×${left}`,
+                disabled: chosen.length >= 3 || left <= 0,
+                action: () => { if (chosen.length < 3 && left > 0) chosen.push(id); refresh(); } });
         }
+        rows.push({ label: water ? "Вода: добавлена" : "Без воды", action: () => { water = !water; refresh(); } },
+            { label: "Очистить выбор", disabled: !chosen.length, action: () => { chosen.length = 0; refresh(); } },
+            { label: "Готовить", disabled: !chosen.length || !fire.lit, action: () => {
+                if (!fire.lit || !startPotFromInventory(fire, this.inventory, chosen, { water })) {
+                    this.hud.toast("Не получилось — продукты не потрачены", "🫕"); refresh(); return;
+                }
+                this.hud.closePanel();
+            } },
+            { label: "К костру", action: back });
         this.hud.openPanel("Котелок", rows, "pot");
     }
 

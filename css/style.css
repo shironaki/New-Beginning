@@ -408,3 +408,6 @@ html, body {
 #stage[data-controls="touch"] .quickItem { padding: 4px 6px; gap: 4px; }
 /* 640px landscape: narrow intent bar fits between both thumb zones. */
 #stage[data-controls="touch"][data-short="true"] .hotbar { width: min(294px, calc(100% - 32px)); }
+
+/* A named food selector, not a glyph that reads as a V key binding. */
+.foodChooser { font-size: 12px !important; }

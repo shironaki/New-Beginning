@@ -185,7 +185,7 @@ export class Campfire {
         const slot = arr[idx];
         if (!slot) return null;
         arr[idx] = null;
-        const id = slot.state === COOK_STATE.RAW ? slot.itemId : slot.result;
+        const id = slot.ready ? slot.result : slot.itemId;
         if (slot.state === COOK_STATE.BURNT) this.ashes += 1;
         if (this.bus) this.bus.emit("cook:take", { id, state: slot.state, where });
         return { id, state: slot.state };
@@ -212,7 +212,8 @@ export class Campfire {
     /** Start a pot: 1–3 ingredients plus optional water. Returns the match or null. */
     startPot(itemIds, { water = true } = {}) {
         if (!this.hasPot) return null;
-        if (this.pot && !this.pot.done) return null;
+        if (this.pot) return null; // an uncollected dish must not be overwritten
+        if (!Array.isArray(itemIds) || itemIds.length < 1 || itemIds.length > 3) return null;
         const match = resolvePot(itemIds, water);
         if (!match) {
             if (this.bus) this.bus.emit("cook:fail", { itemIds, reason: "no_match" });

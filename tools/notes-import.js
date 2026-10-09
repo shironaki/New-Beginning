@@ -15,7 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { noteStem, noteMarkdown, DEVAPI } from "../serve.js";
+import { storeNote, DEVAPI } from "../serve.js";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const file = process.argv[2];
@@ -46,26 +46,19 @@ if (!notes || !notes.length) {
 
 const dir = path.join(ROOT, DEVAPI.dir);
 fs.mkdirSync(dir, { recursive: true });
-let n = fs.readdirSync(dir).filter((f) => f.endsWith(".md") && f !== "README.md").length;
 let made = 0;
 
 for (const note of notes) {
-    n++;
-    const stem = noteStem(note, n);
     const area = note.kind === "area" && note.w
         ? `область ${note.w}×${note.h}` : `точка ${note.x},${note.y}`;
     console.log(`  • ${note.zone}: ${note.text}  (${area})`);
     if (dry) continue;
-    let shotName = "";
-    const prefix = "data:image/png;base64,";
-    if (typeof note.shot === "string" && note.shot.startsWith(prefix)) {
-        shotName = stem + ".png";
-        fs.writeFileSync(path.join(dir, shotName), Buffer.from(note.shot.slice(prefix.length), "base64"));
-    }
-    const copy = { ...note };
-    delete copy.shot;
-    fs.writeFileSync(path.join(dir, stem + ".md"), noteMarkdown(copy, shotName));
-    made++;
+    try {
+        const saved = storeNote(note, ROOT);
+        if (!saved.duplicate) made++;
+        else console.log("    уже есть: " + saved.file);
+    } catch (e) { console.error("    не импортировано: " + e.message); process.exitCode = 1; }
+
 }
 
 console.log(dry

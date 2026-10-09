@@ -220,13 +220,16 @@ export class Renderer {
     bakeChunk(zone, cx, cy) {
         const size = CHUNK * TILE_SIZE;
         const cv = document.createElement("canvas");
-        cv.width = size; cv.height = size;
+        const inset = zone.terrain ? 8 : 0;
+        cv.width = cv.height = size + inset * 2;
         const c = cv.getContext("2d");
         c.imageSmoothingEnabled = false;
         if (zone.terrain) {
-            bakeTerrain(c, zone, cx, cy, size, this.season);
+            bakeTerrain(c, zone, cx, cy, cv.width, this.season, inset);
             this.stats.baked++;
-            return zone.playableRelief ? projectGround(cv, zone.playableRelief, cx * size, cy * size) : cv;
+            const result = zone.playableRelief ? projectGround(cv, zone.playableRelief, cx * size - inset, cy * size - inset) : cv;
+            result.groundInset = inset;
+            return result;
         }
         for (let ty = 0; ty < CHUNK; ty++) {
             for (let tx = 0; tx < CHUNK; tx++) {
@@ -335,8 +338,10 @@ export class Renderer {
             const wx = ch.cx * CHUNK * TILE_SIZE;
             const wy = ch.cy * CHUNK * TILE_SIZE;
             // Texture already contains elevation; don't project its origin twice.
-            const sx = (wx - cam.x + cam.offsetX) * cam.zoom;
-            const sy = (wy - (cv.groundLift || 0) - cam.y + cam.offsetY) * cam.zoom;
+            const sx = (wx - (cv.groundInset || 0) - cam.x + cam.offsetX) * cam.zoom;
+            const sy = (wy - (cv.groundInset || 0) - (cv.groundLift || 0) - cam.y + cam.offsetY) * cam.zoom;
+            // World-sampled gutters overlap, including curved projected row edges.
+            // Keep ONE uniform scale; independent rectangle rounding cracks rows.
             ctx.drawImage(cv, sx, sy, cv.width * cam.zoom, cv.height * cam.zoom);
             this.stats.chunksDrawn++;
         }

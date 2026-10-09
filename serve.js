@@ -12,6 +12,7 @@
  * snippet is added by the dev server as it serves the page.
  */
 import http from "node:http";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -86,7 +87,12 @@ const RELOAD_SNIPPET = `
         }
         return;
       }
-      location.reload();
+      // Do not erase an owner report halfway through writing it.
+      const reloadWhenReady = () => {
+        if (document.getElementById("devNoteForm")) { setTimeout(reloadWhenReady, 500); return; }
+        location.reload();
+      };
+      reloadWhenReady();
     });
     es.onerror = () => { es.close(); setTimeout(open, 800); };
   };
@@ -114,26 +120,19 @@ export function commitNotes(files, message, root = ROOT) {
     });
     try {
         const branch = git("rev-parse", "--abbrev-ref", "HEAD").trim();
-        git("add", "--", ...files);
-        // Nothing staged (a re-post of the same note) is not an error.
-        const staged = git("diff", "--cached", "--name-only", "--", DEVAPI.dir).trim();
-        if (!staged) return { ok: true, pushed: false, reason: "nothing to commit" };
-        git("-c", "user.name=shironaki", "-c", "user.email=63105852+shironaki@users.noreply.github.com",
-            "commit", "-m", message, "--only", "--", ...files);
-        try {
-            git("push", "origin", branch);
-            return { ok: true, pushed: true, branch };
-        } catch (e) {
-            // Someone else pushed first: catch up and try once more.
-            try {
-                git("fetch", "origin", branch);
-                git("rebase", `origin/${branch}`);
-                git("push", "origin", branch);
-                return { ok: true, pushed: true, branch, rebased: true };
-            } catch (e2) {
-                return { ok: true, pushed: false, reason: String(e2.message || e2).slice(0, 200) };
-            }
+        if (branch === "main" || branch === "master" || branch === "HEAD") {
+            return { ok: false, pushed: false, reason: "notes require the working task branch" };
         }
+        git("add", "--", ...files);
+        const staged = git("diff", "--cached", "--name-only", "--", ...files).trim();
+        if (staged) git("commit", "-m", message, "--only", "--", ...files);
+        // Retry the SAME commit when the previous response/push was lost.
+        // Never rebase/reset a live checkout underneath the coding agent.
+        git("push", "origin", branch);
+        const published = files.every((file) =>
+            git("rev-parse", `HEAD:${file}`).trim() === git("rev-parse", `origin/${branch}:${file}`).trim());
+        return { ok: true, pushed: published, branch };
+
     } catch (e) {
         return { ok: false, pushed: false, reason: String(e.message || e).slice(0, 200) };
     }
@@ -149,10 +148,11 @@ export function devHash(root = ROOT) {
 
 /** `2026-10-06-143` → a stable, sortable, filesystem-safe stem. */
 export function noteStem(note, n) {
-    const day = new Date(note.at || Date.now()).toISOString().slice(0, 10);
+    const date = new Date(note.at || Date.now());
+    const day = (Number.isFinite(date.getTime()) ? date : new Date()).toISOString().slice(0, 10);
     const slug = String(note.text || "note").toLowerCase()
         .replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 40) || "note";
-    return `${day}-${String(n).padStart(3, "0")}-${note.zone || "zone"}-${slug}`;
+    return `${day}-${String(n).padStart(3, "0")}-${String(note.zone || "zone").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40)}-${slug}`;
 }
 
 /** Markdown for one note — written so it reads fine straight in a diff. */
@@ -181,11 +181,44 @@ export function noteMarkdown(note, shotName) {
         + `- **повторить:** \`node tools/scene.js --zone ${note.zone} --at ${cx},${cy} `
         + `--day ${day} --hour ${hour} --weather ${note.weather} --wet ${wet} --zoom ${note.zoom}${seed}\`\n`
         + (shotName ? `\n![кадр](${shotName})\n` : "")
+        + (note.ui ? `\n- **Интерфейс:** ${JSON.stringify(note.ui)}\n` : "")
         + `\n<!-- ${note.at} -->\n`;
+}
+
+/** Stable receipt identity for retries and old exported bundles (not filename counters). */
+export function noteIdentity(note) {
+    return createHash("sha256").update(JSON.stringify([note.at, note.zone, note.x, note.y, note.text])).digest("hex");
+}
+export function storeNote(note, root = ROOT) {
+    if (!note || typeof note.text !== "string" || !note.text.trim() || note.text.length > 20000
+        || !Number.isFinite(note.x) || !Number.isFinite(note.y)
+        || !Number.isFinite(Date.parse(note.at))) throw Error("invalid note");
+    const dir = path.join(root, DEVAPI.dir);
+    fs.mkdirSync(dir, { recursive: true });
+    const id = noteIdentity(note), marker = `<!-- receipt: ${id} -->`;
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith(".md") && f !== "README.md");
+    // Legacy notes carry the same timestamp and title. Do not duplicate old exports.
+    const old = files.find((f) => {
+        const text = fs.readFileSync(path.join(dir, f), "utf8");
+        return text.includes(marker) || (text.startsWith(`# ${note.text}\n`) && text.includes(`<!-- ${note.at} -->`));
+    });
+    if (old) return { id, file: old, duplicate: true };
+    const number = Math.max(0, ...files.map((f) => Number(f.match(/^\d{4}-\d{2}-\d{2}-(\d+)-/)?.[1]) || 0)) + 1;
+    const stem = noteStem(note, number);
+    let shotName = "";
+    if (typeof note.shot === "string" && note.shot.startsWith("data:image/png;base64,")) {
+        // Binaries stay out of Git. The browser archive retains its copy too.
+        fs.mkdirSync(path.join(root, ".artifacts/notes"), { recursive: true });
+        fs.writeFileSync(path.join(root, `.artifacts/notes/${id}.png`), Buffer.from(note.shot.split(",")[1], "base64"));
+        shotName = `../../.artifacts/notes/${id}.png`;
+    }
+    fs.writeFileSync(path.join(dir, stem + ".md"), noteMarkdown(note, shotName) + `\n${marker}\n`, { flag: "wx" });
+    return { id, file: stem + ".md", duplicate: false };
 }
 
 export function createServer(opts = {}) {
     const cfg = { ...SERVE, ...opts };
+    const root = opts.root || ROOT;
     /** @type {Set<import("node:http").ServerResponse>} */
     const clients = new Set();
 
@@ -195,15 +228,15 @@ export function createServer(opts = {}) {
     };
 
     function handleDev(urlPath, req, res) {
-        const want = devHash();
+        const want = devHash(root);
         const got = String(req.headers["x-dev-token"] || "");
         if (!want || got !== want) { json(res, 403, { ok: false, error: "forbidden" }); return; }
-        const dir = path.join(ROOT, DEVAPI.dir);
+        const dir = path.join(root, DEVAPI.dir);
 
         if (urlPath === "/__dev/notes" && req.method === "GET") {
             let files = [];
             try { files = fs.readdirSync(dir).filter((f) => f.endsWith(".md") && f !== "README.md"); } catch { /* none yet */ }
-            json(res, 200, { ok: true, count: files.length, files: files.slice(-20) });
+            json(res, 200, { ok: true, count: files.length, files: files.sort() });
             return;
         }
         if (urlPath === "/__dev/note" && req.method === "POST") {
@@ -218,28 +251,19 @@ export function createServer(opts = {}) {
                 let note;
                 try { note = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
                 catch { json(res, 400, { ok: false, error: "bad json" }); return; }
-                fs.mkdirSync(dir, { recursive: true });
-                const n = fs.readdirSync(dir).filter((f) => f.endsWith(".md") && f !== "README.md").length + 1;
-                const stem = noteStem(note, n);
-                let shotName = "";
-                if (typeof note.shot === "string" && note.shot.startsWith("data:image/png;base64,")) {
-                    shotName = stem + ".png";
-                    fs.writeFileSync(path.join(dir, shotName),
-                                     Buffer.from(note.shot.slice("data:image/png;base64,".length), "base64"));
+                try {
+                    const saved = storeNote(note, root);
+                    const files = [`${DEVAPI.dir}/${saved.file}`];
+                    const git = cfg.commitNotes === false
+                        ? { ok: true, pushed: false, reason: "commit disabled" }
+                        : commitNotes(files, `notes: ${note.text.slice(0, 60)}`, root);
+                    console.log(`📝 ${saved.file} · ${git.pushed ? "Git confirmed" : "waiting for Git"}`);
+                    json(res, 200, { ok: true, ...saved, pushed: !!git.pushed,
+                        reason: git.pushed ? "" : "Сохранено на сервере; Git не подтвердил доставку. Копия должна остаться в браузере." });
+                } catch {
+                    json(res, 400, { ok: false, pushed: false, error: "note could not be stored" });
                 }
-                delete note.shot;
-                fs.writeFileSync(path.join(dir, stem + ".md"), noteMarkdown(note, shotName));
-                console.log(`📝 заметка: ${DEVAPI.dir}/${stem}.md`);
-                // Straight into git: a note that only exists in a sandbox is
-                // one restart away from being lost.
-                const files = [`${DEVAPI.dir}/${stem}.md`];
-                if (shotName) files.push(`${DEVAPI.dir}/${shotName}`);
-                const git = cfg.commitNotes === false
-                    ? { ok: true, pushed: false, reason: "commit disabled" }
-                    : commitNotes(files, `notes: ${String(note.text || "").slice(0, 60)}`);
-                console.log(git.pushed ? `   ↳ запушено в ${git.branch}`
-                                       : `   ↳ не запушено: ${git.reason}`);
-                json(res, 200, { ok: true, file: stem + ".md", pushed: !!git.pushed });
+
             });
             return;
         }
@@ -278,8 +302,8 @@ export function createServer(opts = {}) {
         }
 
         const rel = urlPath === "/" ? "index.html" : urlPath.replace(/^\/+/, "");
-        const filePath = path.join(ROOT, rel);
-        if (!filePath.startsWith(ROOT)) {
+        const filePath = path.join(root, rel);
+        if (!filePath.startsWith(root + path.sep)) {
             res.writeHead(403).end("Forbidden");
             return;
         }
@@ -323,7 +347,7 @@ export function createServer(opts = {}) {
     };
     if (cfg.reload) {
         for (const dir of cfg.watchDirs) {
-            const target = path.join(ROOT, dir);
+            const target = path.join(root, dir);
             if (!fs.existsSync(target)) continue;
             try {
                 watchers.push(fs.watch(target, { recursive: true }, (_e, name) => {

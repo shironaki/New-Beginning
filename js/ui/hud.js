@@ -117,7 +117,7 @@ export class HUD {
         this.els.hotbar.setAttribute("aria-label", "Предметы под рукой");
         this.els.hotbar.innerHTML = `<button type="button" id="heldItem" class="quickItem"></button>
             <button type="button" id="eatItem" class="quickItem"></button>
-            <button type="button" id="chooseFood" class="quickIcon" aria-label="Выбрать еду">⌄</button>
+            <button type="button" id="chooseFood" class="quickIcon foodChooser" aria-label="Выбрать еду">Еда</button>
             <button type="button" id="quickBag" class="quickIcon" aria-label="Рюкзак">🎒</button>`;
         for (const [id, action] of [["heldItem", "onEquipment"], ["eatItem", "onEat"], ["chooseFood", "onProvisions"], ["quickBag", "onBag"]]) {
             this.els[id] = $(id);
@@ -164,7 +164,8 @@ export class HUD {
           <div class="skyMeta">${w.emoji} ${w.name} · ${Math.round(state.ambient)}°C</div>
           <div class="skyZone">${zoneName || ""}</div>`;
 
-        this.els.objective.textContent = objective ? "🎯 " + objective : "";
+        // Owner requested no persistent hints/objectives over the scene. Journal retains the goal.
+        this.els.objective.textContent = "";
 
         const held = inventory.active, tool = held && holdable(held.id) ? held.id : null;
         const food = quickFood(inventory, state.quickFoodId);
@@ -378,7 +379,7 @@ export function fireRows(fire, inventory, actions) {
             : slot.state === "burnt" ? "Сгорело — выбросить"
             : `Жарится… ${pct}%`;
         rows.push({
-            icon: itemEmoji(slot.state === "raw" ? slot.itemId : slot.result),
+            icon: itemEmoji(!slot.ready ? slot.itemId : slot.result),
             label, hint: `вертел ${i + 1}`,
             action: () => actions.takeFromSpit(i)
         });
@@ -388,5 +389,7 @@ export function fireRows(fire, inventory, actions) {
         rows.push({ icon: "🫕", label: "Котелок", hint: fire.pot ? (fire.pot.done ? "готово" : "варится") : "пусто",
                     action: () => actions.openPot() });
     }
+    if (fire.spit.some(Boolean) || fire.pot) rows.push({ icon: "🔥", label: "Оставить готовиться",
+        action: () => actions.resume?.() });
     return rows;
 }

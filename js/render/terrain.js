@@ -87,8 +87,9 @@ export function terrainColour(field, wx, wy, season, palette) {
     return [clamp(r + tone), clamp(g + tone), clamp(b + tone)];
 }
 
-export function bakeTerrain(ctx, zone, cx, cy, size, season) {
-    const field = zone.terrain, ox = cx * size, oy = cy * size;
+export function bakeTerrain(ctx, zone, cx, cy, size, season, inset = 0) {
+    const stride = size - inset * 2;
+    const field = zone.terrain, ox = cx * stride - inset, oy = cy * stride - inset;
     const palette = Object.keys(T).reduce((p, k) => { p[T[k]] = parse(groundPalette(T[k], season)[0]); return p; }, {});
     const pixels = ctx.createImageData(size, size), data = pixels.data;
     const step = 2;
@@ -101,7 +102,7 @@ export function bakeTerrain(ctx, zone, cx, cy, size, season) {
     }
     ctx.putImageData(pixels, 0, 0);
     // Ground details distributed in world space, never clipped to a tile rim.
-    for (let y = ((3 - oy) % 9 + 9) % 9; y < size; y += 9) for (let x = ((3 - ox) % 11 + 11) % 11; x < size; x += 11) {
+    for (let y = ((3 - oy) % 9 + 9) % 9 - 9; y < size + 9; y += 9) for (let x = ((3 - ox) % 11 + 11) % 11 - 11; x < size + 11; x += 11) {
         const wx = ox + x, wy = oy + y, v = field.noise(wx, wy, 3, 778);
         const s = field.sample(wx, wy);
         if (tileInfo(s.id).liquid && waterIce(zone.map, wx, wy, s.id).cover >= 0.55) {
@@ -128,7 +129,7 @@ export function bakeTerrain(ctx, zone, cx, cy, size, season) {
         ctx.fillStyle = season === "winter" ? "rgba(242,248,251,0.32)" : living ? "rgba(49,65,28,0.22)" : "rgba(22,21,18,0.14)";
         ctx.fillRect(x + v * 4, y - v * 3, living ? 1 : 2, living ? 2 + v * 2 : 1);
     }
-    for (let y = 0; y < size; y += 32) for (let x = 0; x < size; x += 32) {
+    for (let y = Math.floor(oy / 32) * 32 - oy; y < size; y += 32) for (let x = Math.floor(ox / 32) * 32 - ox; x < size; x += 32) {
         const tx = (ox + x) / 32, ty = (oy + y) / 32, id = zone.map.get(tx, ty);
         if (!built.has(id)) continue;
         paintTile(ctx, id, x, y, 32, tx, ty, season, zone.map);

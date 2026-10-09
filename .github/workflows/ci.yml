@@ -56,4 +56,5 @@ jobs:
         with:
           name: frames
           path: .artifacts/*.png
+          include-hidden-files: true
           retention-days: 14

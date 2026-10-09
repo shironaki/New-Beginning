@@ -13,7 +13,7 @@
   "scripts": {
     "start": "node serve.js 3000",
     "serve": "node serve.js 3000",
-    "test": "node tests/core.test.js && node tests/world.test.js && node tests/survival.test.js && node tests/story.test.js && node tests/smoke.test.js && node tests/game.test.js && node tests/surface.test.js && node tests/environment.test.js && node tests/visual-world.test.js && node tests/locomotion-guide.test.js && node tests/winter-trial.test.js && node tests/session-relief.test.js && node tests/viewport.test.js && node tests/stage63.test.js",
+    "test": "node tests/core.test.js && node tests/world.test.js && node tests/survival.test.js && node tests/story.test.js && node tests/smoke.test.js && node tests/game.test.js && node tests/surface.test.js && node tests/environment.test.js && node tests/visual-world.test.js && node tests/locomotion-guide.test.js && node tests/winter-trial.test.js && node tests/session-relief.test.js && node tests/viewport.test.js && node tests/stage63.test.js && node tests/stage64.test.js",
     "shot": "node tools/screenshot.js",
     "play": "node tools/playtest.js",
     "check": "for f in serve.js js/main.js js/*/*.js tests/*.js tools/*.js; do node --check \"$f\" || exit 1; done && echo 'syntax OK'",

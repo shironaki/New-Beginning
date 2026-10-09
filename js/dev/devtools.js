@@ -1,3 +1,4 @@
+import { NoteOutbox } from "./note-outbox.js";
 import { leaveFor } from "../ui/session.js";
 /**
  * dev tools — the owner's control room.
@@ -23,8 +24,8 @@ import { leaveFor } from "../ui/session.js";
  *   with the zone, the world coordinates, the in-game time, the weather and a
  *   PNG of exactly what you were looking at. They land in docs/notes/ — in the
  *   repository — so I can read them and fix precisely that.
- *   If the game is not being served by serve.js, the note is downloaded as a
- *   file instead and nothing is lost.
+ *   All reports are first saved locally, then sent. Only a Git receipt marks
+ *   delivery; the local archive remains exportable afterwards.
  */
 
 /** The panel, in numbers. */
@@ -398,10 +399,10 @@ export function installDevTools(game, win = window) {
         const queueLabel = el("span", { className: "val" });
         const sendBtn = btn("Отправить очередь", () => flushQueue(true),
                             "попробовать ещё раз, когда dev-сервер доступен");
-        const saveBtn = btn("Выгрузить файлом", () => downloadQueue(),
+        const saveBtn = btn("Выгрузить все файлом", () => downloadQueue(),
                             "один файл со всеми заметками сразу");
-        const dropBtn = btn("Очистить", () => {
-            if (confirm("Удалить все заметки из очереди?")) { queue.clear(); state.refresh(); }
+        const dropBtn = btn("Очистить доставленные", () => {
+            if (confirm("Удалить локальные копии доставленных заметок? Недоставленные останутся.")) { queue.clearDelivered(); state.refresh(); }
         });
         row(queueLabel);
         row(sendBtn, saveBtn, dropBtn);
@@ -459,13 +460,15 @@ export function installDevTools(game, win = window) {
             hitBtn.classList.toggle("on", state.hitboxes);
             statBtn.classList.toggle("on", state.stats);
             const n = queue.read().length;
-            queueLabel.textContent = n ? `в очереди: ${n}` : "очередь пуста";
+            queueLabel.textContent = `Ожидают Git: ${n} · в архиве: ${queue.all().length}`
+                + (queue.lastError ? ` · ${queue.lastError}` : "")
+                + (queue.picturesDropped ? " · часть кадров снята ради сохранения текста" : "");
             sendBtn.classList.toggle("on", n > 0);
             serverLabel.textContent = state.serverUp === undefined
                 ? "проверяю сервер…"
                 : state.serverUp
-                    ? "✔ dev-сервер на связи — заметки идут прямо в репозиторий"
-                    : "✖ сервера нет (Pages или файл с диска) — заметки копятся в очереди";
+                    ? "Сервер доступен. Доставка — только после подтверждения Git."
+                    : "Нет подтверждённого соединения. Заметки остаются на этом адресе браузера.";
             serverLabel.style.color = state.serverUp ? "#9fd08c" : "#e0a06a";
         }
         state.refresh = refresh;
@@ -565,8 +568,9 @@ export function installDevTools(game, win = window) {
         const send = btn("Отправить", async () => {
             const text = ta.value.trim();
             if (!text) { toast("пустая заметка"); return; }
-            box.remove();
-            await sendNote(spot, text);
+            send.disabled = true;
+            if (await sendNote(spot, text)) box.remove();
+            else send.disabled = false;
         });
         const cancel = btn("Отмена", () => box.remove());
         box.append(el("div", { className: "row", style: "justify-content:flex-end;margin-top:6px" }, [cancel, send]));
@@ -581,23 +585,7 @@ export function installDevTools(game, win = window) {
 
     /* ---- the queue ---------------------------------------------------- */
 
-    const queue = {
-        read() {
-            try { return JSON.parse(localStorage.getItem(DEV.queueKey) || "[]"); }
-            catch { return []; }
-        },
-        write(list) {
-            try { localStorage.setItem(DEV.queueKey, JSON.stringify(list.slice(-DEV.queueMax))); }
-            catch { toast("очередь переполнена — выгрузи её файлом"); }
-        },
-        push(note) {
-            const list = this.read();
-            list.push(note);
-            this.write(list);
-            return list.length;
-        },
-        clear() { localStorage.removeItem(DEV.queueKey); }
-    };
+    const queue = new NoteOutbox(localStorage, DEV.queueKey);
 
     /**
      * Is there anything on the other end that can save a note? Pages cannot,
@@ -607,54 +595,46 @@ export function installDevTools(game, win = window) {
     async function pingServer() {
         try {
             const r = await fetch("/__dev/notes", { headers: { "x-dev-token": state.token } });
-            return r.ok;
+            const data = r.ok ? await r.json() : null;
+            return data?.ok === true && Array.isArray(data.files);
         } catch { return false; }
     }
 
-    /** Try the dev server once. Returns the saved file name, or null. */
+    /** HTTP 200 is not enough: keep the report until Git confirms delivery. */
     async function postNote(note) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
         try {
             const r = await fetch("/__dev/note", {
-                method: "POST",
+                method: "POST", signal: controller.signal,
                 headers: { "content-type": "application/json", "x-dev-token": state.token },
                 body: JSON.stringify(note)
             });
-            if (!r.ok) return null;
-            const j = await r.json();
-            // The server tells us whether the note made it into git; if it
-            // only reached the disk, say so — a sandbox can be wiped.
-            if (j.file && j.pushed === false) toast("заметка сохранена, но НЕ запушена", 4000);
-            return j.file || "ok";
-        } catch { return null; }
+            const receipt = r.ok ? await r.json() : null;
+            state.serverUp = receipt?.ok === true;
+            return receipt;
+        } catch { state.serverUp = false; return null; }
+        finally { clearTimeout(timeout); }
     }
 
-    /** Send everything that is waiting. Quiet when there is nothing to do. */
     async function flushQueue(loud = false) {
-        const list = queue.read();
-        if (!list.length) { if (loud) toast("очередь пуста"); return 0; }
-        const left = [];
-        let sent = 0;
-        for (const note of list) {
-            // eslint-disable-next-line no-await-in-loop — order matters, these are notes
-            const file = await postNote(note);
-            if (file) sent++; else left.push(note);
-        }
-        queue.write(left);
-        if (sent) toast(`отправлено заметок: ${sent}` + (left.length ? `, осталось ${left.length}` : ""));
-        else if (loud) toast("сервер недоступен — заметки ждут в очереди");
+        const sent = await queue.flush(postNote);
+        const left = queue.read().length;
+        if (sent || loud) toast(`Подтверждено в Git: ${sent}. Ожидают отправки: ${left}. Копии — в архиве.`, 5000);
         if (state.refresh) state.refresh();
         return sent;
     }
 
     /** One file with everything in it, instead of a file per note. */
     function downloadQueue() {
-        const list = queue.read();
-        if (!list.length) { toast("очередь пуста"); return; }
-        const bundle = { kind: "minirpg-notes", version: 1, at: new Date().toISOString(), notes: list };
+        const list = queue.all();
+        if (!list.length) { toast("архив пуст"); return; }
+        const bundle = { kind: "minirpg-notes", version: 2, origin: location.origin, at: new Date().toISOString(), notes: list };
         const blob = new Blob([JSON.stringify(bundle)], { type: "application/json" });
         const a = el("a", { href: URL.createObjectURL(blob),
                             download: `notes-${new Date().toISOString().slice(0, 10)}-${list.length}.json` });
         document.body.append(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
         toast(`выгружено заметок: ${list.length} (одним файлом)`);
     }
 
@@ -674,17 +654,21 @@ export function installDevTools(game, win = window) {
             groundWet: game.weather.groundWet,
             zoom: Number(game.camera.zoom.toFixed(2)),
             seed: game.seed,
+            ui: { mode: game.controlMode, panel: game.hud.panelOpen, objective: game.hud.els.objective.textContent,
+                food: game.quickFoodId, origin: location.origin },
             at: new Date().toISOString(),
             shot: markedShot(spot)
         };
-        const file = await postNote(note);
-        if (file) { toast("заметка сохранена: " + file); return; }
-        // No server (GitHub Pages, a file:// page): the note waits in the
-        // browser instead of landing in Downloads as yet another file.
-        const n = queue.push(note);
-        toast(`сервера нет — заметка ${n} в очереди, выгрузишь одним файлом`);
-        if (state.refresh) state.refresh();
+        if (!queue.push(note)) {
+            toast(queue.lastError, 7000);
+            if (state.refresh) state.refresh();
+            return false; // retain the editor text; never report a failed write as saved
+        }
+        toast("Сохранено в архиве браузера. Ожидает подтверждения Git.", 4000);
+        await flushQueue(true);
+        return true;
     }
+
 
     /* ------------------------------------------------------------ wiring */
 
@@ -692,8 +676,7 @@ export function installDevTools(game, win = window) {
         state.open = on === undefined ? !state.open : on;
         if (state.panel) state.panel.style.display = state.open ? "block" : "none";
         if (state.open && state.refresh) state.refresh();
-        // Opening the panel is a good moment to try the server again: notes
-        // written on Pages get saved the next time you play through serve.js.
+        // Retry this origin only. Notes on Pages/another preview require export/import.
         if (state.open && state.unlocked) {
             pingServer().then((up) => {
                 state.serverUp = up;
@@ -830,16 +813,20 @@ export function installDevTools(game, win = window) {
             : Array.isArray(data.notes) ? data.notes
             : data.text ? [data] : null;
         if (!notes || !notes.length) { toast("в файле нет заметок"); return; }
-        let sent = 0;
         for (const note of notes) {
-            // eslint-disable-next-line no-await-in-loop — a handful of notes, in order
-            if (await postNote(note)) sent++; else queue.push(note);
+            if (!note || typeof note.text !== "string") continue;
+            // Another host's receipt does not prove delivery to this server.
+            const { delivery, ...report } = note;
+            queue.push(report);
         }
-        toast(sent === notes.length
-            ? `принято заметок: ${sent}`
-            : `принято ${sent} из ${notes.length}, остальные в очереди`, 4000);
+        await flushQueue(true);
+        if (queue.lastError) toast(queue.lastError, 7000);
         if (state.refresh) state.refresh();
     });
 
+    const retry = setInterval(() => {
+        if (state.unlocked && queue.read().length) flushQueue(false);
+    }, 30000);
+    retry.unref?.();
     return state;
 }
