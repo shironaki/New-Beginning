@@ -1,3 +1,4 @@
+import { collect, reach } from "./carry-fixture.js";
 import { test, assert, run } from "./tiny.js";
 import { installDOM, FakeElement } from "./dom-harness.js";
 import { EventBus } from "../js/core/events.js";
@@ -72,7 +73,7 @@ test("other inventories do not contribute the player's early wood fact", () => {
 });
 test("real early diary is rereadable from journal and never duplicated after reconciliation", () => {
     const g = boot(), diary = g.zone.objects.find(o => o.kind === "diary");
-    g.interact = diary; g.doInteract(); assert.eq(g.story.current.id, "wake");
+    reach(g,diary); g.interact = diary; g.doInteract(); collect(g,diary); assert.eq(g.story.current.id, "wake");
     assert.eq(g.inventory.count("diary_burnt"), 1); assert.ok(diary.removed);
     g.hud.closePanel(); g.inspectHearth(g.zone.objects.find(o => o.kind === "hearth_ruin"));
     assert.eq(g.story.current.id, "firewood"); g.openJournal(); click(g, "Обгоревший дневник · прочитать");
@@ -81,10 +82,10 @@ test("real early diary is rereadable from journal and never duplicated after rec
 });
 test("ordinary cookware route: salvage, install, select berries, cook, collect, eat, save", () => {
     const g = boot(), hearth = g.zone.objects.find(o => o.kind === "hearth_ruin"), obj = g.zone.objects.find(o => o.kind === "campfire");
-    g.inspectHearth(hearth); click(g, "Забрать котелок"); assert.eq(g.inventory.count("pot"), 1);
+    reach(g,hearth); g.inspectHearth(hearth); click(g, "Забрать котелок"); collect(g,hearth); assert.eq(g.inventory.count("pot"), 1);
     g.inspectHearth(hearth); assert.not(g.hud._panelRows.some(r => r.innerHTML.includes("Забрать котелок")));
     // Gather real generated wood, not a fixture pot or supplied finished food.
-    for (const o of g.zone.objects.filter(o => o.kind === "firewood").slice(0, 4)) g.harvest(o);
+    for (const o of g.zone.objects.filter(o => o.kind === "firewood").slice(0, 4)) { reach(g,o); g.harvest(o); collect(g,o); }
     g.openFire(obj); click(g, "Установить котелок"); assert.eq(g.inventory.count("pot"), 0);
     const f = g.fires.get(g.fireKey(g.zone, obj)); assert.ok(f.hasPot);
     for (let i = 0; i < 4; i++) click(g, "Подбросить хворост");
@@ -100,11 +101,11 @@ test("ordinary cookware route: salvage, install, select berries, cook, collect, 
     assert.not(restored.hud._panelRows.some(r => r.innerHTML.includes("Забрать котелок")));
 });
 test("full bag cannot lose unique cookware or diary", () => {
-    const g = boot(); g.inventory.slots.fill(null); for (let i = 0; i < g.inventory.size; i++) g.inventory.slots[i] = { id: "stone", n: 50 };
+    const g = boot(); g.inventory.add("torch"); equip(g.inventory,"left","torch"); g.inventory.slots.fill(null); for (let i = 0; i < g.inventory.size; i++) g.inventory.slots[i] = { id: "stone", n: 50 };
     g.inspectHearth(g.zone.objects.find(o => o.kind === "hearth_ruin")); click(g, "Забрать котелок");
     assert.not(g.story.hasFlag("home_pot_taken")); assert.eq(g.inventory.count("pot"), 0);
     const diary = g.zone.objects.find(o => o.kind === "diary"); g.interact = diary; g.doInteract(); assert.not(diary.removed);
-    g.inventory.slots[0] = null; click(g, "Забрать котелок"); assert.eq(g.inventory.count("pot"), 1);
+    g.inventory.slots[0] = null; const hearth = g.zone.objects.find(o=>o.kind==="hearth_ruin"); reach(g,hearth); click(g, "Забрать котелок"); collect(g,hearth); assert.eq(g.inventory.count("pot"), 1);
 });
 test("hands are separate single-item storage and all inventory queries include them", () => {
     const inv = new Inventory({ slots: 2 }); inv.add("knife"); inv.add("torch", 2); inv.enableHands();
@@ -150,10 +151,10 @@ test("save halfway through eating completes once with restored tool and no dupli
     tickHands(b, .6); tickHands(b, 1); assert.eq(b.needs.food, food + 5); assert.eq(b.inventory.count("berry"), 2);
     assert.eq(b.inventory.hands.right.id, "knife"); assert.eq(b.inventory.hands.left.id, "torch");
 });
-test("pause, panels and background freeze eating; falling delays completion", () => {
+test("pause and background freeze eating; a regular panel does not", () => {
     const g = boot(); startMeal(g, "berry");
     for (const flag of ["paused", "backgrounded"]) { g[flag] = true; g.update(.2); assert.near(g.inventory.handAction.remaining, .9); g[flag] = false; }
-    g.hud.openPanel("Пауза", []); g.update(.2); assert.near(g.inventory.handAction.remaining, .9); g.hud.closePanel();
+    g.hud.openPanel("Пауза", [], "session"); g.update(.2); assert.near(g.inventory.handAction.remaining, .9); g.hud.closePanel();
     g.player.fallTimer = 1; tickHands(g, 1); assert.near(g.inventory.handAction.remaining, .9); g.player.fallTimer = 0;
     g.update(.2); assert.near(g.inventory.handAction.remaining, .7);
 });

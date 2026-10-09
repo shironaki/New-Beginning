@@ -1,4 +1,5 @@
-import { startMeal, tickHands, handRender, useHand, openBag } from "./ui/hands.js";
+import { handCapacity } from "./sandbox/carry.js";
+import { startMeal, tickHands, handRender, useHand, openBag, startPickup } from "./ui/hands.js";
 import { canReceive, startPotFromInventory } from "./survival/cooking-actions.js";
 /**
  * «Новое начало». Bootstrap and orchestration.
@@ -162,7 +163,7 @@ export class Game {
         this.storyNotices = [];
         this.nextStory = () => {
             if (this.inventory.handAction || this.hud.isStoryOpen || this.hud.isPanelOpen || !this.storyNotices.length) return;
-            this.hud.showStory(this.storyNotices.shift()); this.paused = true;
+            this.hud.showStory(this.storyNotices.shift());
         };
         bus.on("story:step", (s) => { this.storyNotices.push(s); this.nextStory(); });
         bus.on("save:restored", () => { this.storyNotices.length = 0; this.story.recover(); });
@@ -250,13 +251,19 @@ export class Game {
                 if (!["left", "right"].includes(inv.dominant)) throw Error("Некорректная ведущая рука");
                 for (const side of ["left", "right"]) {
                     const h = inv.hands[side];
-                    if (h && (!itemDef(h.id) || h.n !== 1)) throw Error("Некорректный предмет в руке");
+                    if (h && (!itemDef(h.id) || !Number.isInteger(h.n) || h.n < 1 || h.n > handCapacity(h.id))) throw Error("Некорректный предмет в руке");
                 }
                 const a = inv.handAction;
-                if (a && (a.type !== "eat" || !["left", "right"].includes(a.side) || !foodValue(a.id)
+                if (a && a.type === "eat" && (a.type !== "eat" || !["left", "right"].includes(a.side) || !foodValue(a.id)
                     || inv.hands[a.side]?.id !== a.id || !Number.isFinite(a.remaining) || a.remaining < 0 || a.remaining > .9
                     || (a.previous && !itemDef(a.previous)))) throw Error("Некорректное действие рук");
             }
+            const action = inv.handAction;
+            if (action && !["eat", "pickup"].includes(action.type)) throw Error("Неизвестное действие рук");
+            if (action?.type === "pickup" && (!inv.hands || !["left","right"].includes(action.side)
+                || !itemDef(action.id) || !Number.isInteger(action.n) || action.n < 1 || action.n > handCapacity(action.id)
+                || !Number.isInteger(action.index) || action.index < 0 || (!this.isTrial && !zoneDef(action.zone))
+                || !Number.isFinite(action.remaining) || action.remaining < 0 || action.remaining > .6)) throw Error("Некорректный подбор");
             for (const key of ["food", "warmth", "health", "fatigue", "spirit"]) if (parts.needs &&
                 (!Number.isFinite(parts.needs[key]) || parts.needs[key] < 0 || parts.needs[key] > 100)) throw new Error("Некорректные нужды");
         };
@@ -386,6 +393,7 @@ export class Game {
         if (!obj) return null;
         const def = propDef(obj.kind);
         if (!def) return null;
+        if (obj.loot?.length) return "Подобрать добычу";
         if (def.interact === "fire") {
             const f = this.fires.get(this.fireKey(this.zone, obj));
             return f && f.lit ? "Костёр" : "Разжечь костёр";
@@ -406,13 +414,14 @@ export class Game {
         const def = propDef(obj.kind);
         if (!def) return;
 
+        if (obj.loot?.length) return startPickup(this, obj);
         if (def.interact === "fire") return this.openFire(obj);
         if (def.interact === "sleep") return this.sleep(obj);
         if (obj.kind === "hearth_ruin") return this.inspectHearth(obj);
         if (def.interact === "read" || def.interact === "story") {
             if (def.interact === "read") {
-                if (!canReceive(this.inventory, "diary_burnt")) { this.hud.toast("В рюкзаке нет места", "🎒"); return; }
-                this.readDiary(); this.inventory.add("diary_burnt", 1); obj.removed = true;
+                obj.loot = [{ id: "diary_burnt", n: 1 }];
+                startPickup(this, obj); return;
             }
             if (obj.story) this.story.setFlag(obj.story);
             this.particles.emote(obj.x, obj.y - 20, "❓");
@@ -423,6 +432,8 @@ export class Game {
     }
 
     harvest(obj) {
+        if (obj.loot?.length) return startPickup(this, obj);
+        if (obj.removed) return;
         const def = propDef(obj.kind);
         const tool = requiredTool(obj.kind);
         if (tool && !this.inventory.findTool(tool)) {
@@ -453,16 +464,7 @@ export class Game {
         if (obj.hits > 0) return;
 
         const drops = rollDrops(obj, this.rng);
-        let dy = 0;
-        for (const d of drops) {
-            const left = this.inventory.add(d.id, d.n);
-            const got = d.n - left;
-            if (got > 0) {
-                this.particles.text(obj.x, obj.y - 18 - dy, `+${got} ${itemEmoji(d.id)}`, { color: "#ffe6a8" });
-                dy += 12;
-            }
-            if (left > 0) this.hud.toast("Рюкзак полон", "🎒");
-        }
+        obj.loot = drops.map(d => ({ ...d }));
         // Felling something tall: a ring of dust, a drift of leaves and a
         // thud in the camera, scaled by how big the thing was.
         const tall = propHeight(obj.kind, obj.size || 1);
@@ -473,9 +475,10 @@ export class Game {
                                                             mat.leaf || "#7fa24f", Math.round(6 + heft * 8));
             this.camera.shake(FX.shake.fell * heft, FX.shake.fellTime);
         }
-        obj.removed = true;
+        obj.depleted = true;
         this.zone.removeSolid(obj);              // its footprint goes with it
         this.bus.emit("world:harvest", { kind: obj.kind, drops });
+        startPickup(this, obj);
     }
 
     lootChest(obj) {
@@ -484,9 +487,7 @@ export class Game {
         const table = [["coin", 3], ["flint", 2], ["fiber", 3], ["charcoal", 2], ["old_key", 1]];
         const id = this.rng.weighted(table) || "fiber";
         const n = id === "coin" ? this.rng.int(3, 12) : this.rng.int(1, 3);
-        this.inventory.add(id, n);
-        this.particles.text(obj.x, obj.y - 20, `+${n} ${itemEmoji(id)}`, { color: "#ffe6a8" });
-        this.hud.toast(`Найдено: ${itemName(id)} ×${n}`, itemEmoji(id));
+        obj.loot = [{ id, n }]; startPickup(this, obj);
     }
 
     /* ---- the campfire panel ---- */
@@ -607,8 +608,9 @@ export class Game {
     inspectHearth(obj) {
         const rows = [{ html: this.story.hasFlag("home_pot_taken") ? "Сажа, зола и остывший кирпич. Посуду ты уже забрал." : "В остывшей печи сохранилась закопчённая посуда." }];
         if (!this.story.hasFlag("home_pot_taken")) rows.push({ icon: "🫕", label: "Забрать котелок", action: () => {
-            if (!canReceive(this.inventory, "pot")) { this.hud.toast("В рюкзаке нет места", "🎒"); return; }
-            this.inventory.add("pot", 1); this.story.setFlag("home_pot_taken"); this.inspectHearth(obj);
+            if (this.story.hasFlag("home_pot_taken")) return;
+            obj.loot ||= [{ id: "pot", n: 1 }];
+            if (startPickup(this, obj)) this.hud.closePanel();
         } });
         this.hud.openPanel("Обгоревшая печь", rows, "hearth");
         this.story.setFlag("home_hearth");
@@ -702,12 +704,12 @@ export class Game {
     update(dt) {
         this.elapsed += dt;
         this.nextStory?.();
-        let uiBlocking = this.hud.isPanelOpen || this.hud.isStoryOpen || this.paused || this.backgrounded;
-        if (!uiBlocking) tickHands(this, dt);
-        uiBlocking ||= this.hud.isStoryOpen || this.paused;
+        const worldPaused = this.paused || this.backgrounded || this.sessionReady === false || this.hud.panelPauses;
+        if (!worldPaused) tickHands(this, dt);
+        const uiBlocking = worldPaused || this.hud.isPanelOpen || this.hud.isStoryOpen;
 
         // Clock & derived systems.
-        const minutes = uiBlocking ? 0 : this.clock.update(dt);
+        const minutes = worldPaused ? 0 : this.clock.update(dt);
         if (minutes > 0) this.simulateMinutes(minutes);
 
         // Input → movement. The sanity pass runs first: a key whose `keyup`
@@ -717,7 +719,7 @@ export class Game {
         if (uiBlocking) { this.input.releaseAll(); if (!this.player.fallTimer) this.player.mvx = this.player.mvy = 0; }
         syncWaterState(this.zone, this.clock, this.weather.current);
         const axis = uiBlocking || this.inventory.handAction ? { x: 0, y: 0 } : this.input.axis();
-        if (!uiBlocking) this.player.update(dt, axis, this.zone, {
+        if (!worldPaused) this.player.update(dt, axis, this.zone, {
             speedFactor: this.needs.speedFactor(),
             wantRun: !uiBlocking && (this.input.pressed("sprint") || (this.input.stick.active && Math.hypot(axis.x, axis.y) > 0.95)),
             surfaceAt: (x, y) => ({
@@ -818,7 +820,7 @@ export class Game {
         }
 
         // Ambience: smoke from lit fires, sparks now and then.
-        if (!uiBlocking && Math.random() < dt * 6) {
+        if (!worldPaused && Math.random() < dt * 6) {
             for (const obj of this.zone.objects) {
                 if (obj.kind !== "campfire" || obj.removed) continue;
                 const f = this.fires.get(this.fireKey(this.zone, obj));
@@ -864,13 +866,20 @@ export class Game {
         this.camera.follow(this.player.x, this.player.y - 8, dt, this.player.vx, this.player.vy);
         this.input.consume();
 
-        sessionTick(this, dt, uiBlocking);
+        this._panelTick = (this._panelTick || 0) + dt;
+        if (this.hud.panelOpen === "fire" && this.lastFireObj && this._panelTick > .5) {
+            this._panelTick = 0; const y = this.hud.els.panelBody.scrollTop;
+            const focus = this.hud._panelRows.indexOf(document.activeElement);
+            this.openFire(this.lastFireObj); this.hud.els.panelBody.scrollTop = y;
+            this.hud._panelRows[focus]?.focus?.();
+        }
+        sessionTick(this, dt, worldPaused);
         this.hud.update({
             needs: this.needs, player: this.player,
             clock: this.clock,
             weather: this.weather,
             inventory: this.inventory,
-            objective: this.story.objective,
+            objective: this.story.done ? "" : this.story.objective,
             zoneName: this.zone.def.name,
             ambient: this.ambient
         });

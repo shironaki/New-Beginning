@@ -232,7 +232,7 @@ export function armRig(p, pose = posture(p)) {
         const ex = sx + reach, ey = sy + BODY.armLen - Math.abs(reach) * 0.25 - lift;
         return { sx, sy, ex, ey, mx: (sx + ex) / 2 + reach * 0.1, my: (sy + ey) / 2 };
     };
-    const ax = BODY.shoulderW / 2 + BODY.armW / 2 - 1;
+    const ax = BODY.shoulderW / 2 + BODY.armW / 2;
     const behind = p.dir === "left" || back;
     const rest = Math.sin(idle * 1.3) * 0.45 * (1 - g);
     const rs = p.actionHand === "left" ? 0 : swing, ls = p.actionHand === "left" ? swing : 0;
@@ -245,6 +245,15 @@ export function armRig(p, pose = posture(p)) {
         ? make(behind ? BODY.nearArmX * side : -BODY.farArmX * side,
             -(behind ? swingN : swingF) * lr + side * ls * 2.2 - rest, Math.max(0, ls) * 1.5)
         : make(back ? -ax : ax, -rest, (back ? -1 : 1) * swingN * lr - ls * 2.2);
+    // A held far-hand item is carried ahead of the torso in profile, not
+    // buried inside it. This changes reach, NEVER anatomical assignment.
+    if (sideView) for (const hand of ["left", "right"]) {
+        const held = p[hand + "Tool"] || (hand === "right" ? p.tool : null);
+        if (held) { const a = hand === "left" ? left : right;
+            a.ex += side * (hand === (behind ? "right" : "left") ? 6 : 4);
+            a.ey -= 1.8; a.mx = (a.sx + a.ex) / 2; a.my = (a.sy + a.ey) / 2;
+        }
+    }
     // Eating has a real occupied hand at the mouth; the other item stays held.
     if (p.eatingHand) {
         const a = p.eatingHand === "left" ? left : right;
@@ -261,7 +270,7 @@ export function armRig(p, pose = posture(p)) {
 
 function heldToolAngle(dir, side, swing, hand = "right") {
     const anatomical = hand === "left" ? -1 : 1;
-    const lean = dir === "up" ? .35 * anatomical : dir === "down" ? -.4 * anatomical : side * .45;
+    const lean = dir === "up" ? .65 * anatomical : dir === "down" ? -.65 * anatomical : side * .8;
     return lean - side * swing * 1.9;
 }
 
@@ -596,7 +605,7 @@ function drawHeldTool(ctx, tool, dir, side, swing, arm, behind, pose = {}, hand 
     ctx.save();
     ctx.translate(gx, gy);
     ctx.rotate(angle);
-    if (dir === "left") ctx.scale(-1, 1);          // mirror so tools face forward
+    if (dir === "left" || (hand === "left" && (dir === "up" || dir === "down"))) ctx.scale(-1, 1);          // mirror so tools face forward
     if (behind) ctx.globalAlpha = 0.9;
 
     const id = typeof tool === "string" ? tool : (tool.tool || tool.id || "");
@@ -609,6 +618,14 @@ function drawHeldTool(ctx, tool, dir, side, swing, arm, behind, pose = {}, hand 
         case "rod": drawRod(ctx); break;
         case "hoe": drawHoe(ctx); break;
         case "torch": drawTorch(ctx, pose); break;
+        case "bundle":
+            ctx.rotate(-angle); // horizontal bundle balanced across the forearm
+            for (let i = 0; i < Math.min(5, tool.n || 1); i++) {
+                ctx.fillStyle = i % 2 ? "#80603c" : "#a68652";
+                ctx.fillRect(-9 + i % 2, -4 - i * 1.5, 18, 2);
+                ctx.fillStyle = "#dac090"; ctx.fillRect(7 + i % 2, -4 - i * 1.5, 2, 2);
+            }
+            ctx.fillStyle = "#574b34"; ctx.fillRect(-1, -4 - Math.min(5,tool.n || 1)*1.5, 2, 10); break;
         case "food":
             ctx.fillStyle = itemId === "berry" ? "#555984" : itemId.includes("tea") ? "#b3aa88" : "#b18b54";
             ctx.beginPath(); ctx.ellipse(0, -2, itemId === "berry" ? 1.4 : 2.6, itemId === "berry" ? 1.2 : 2.2, 0, 0, Math.PI * 2); ctx.fill(); break;

@@ -1,3 +1,4 @@
+import { handRender } from "../js/ui/hands.js";
 import { test, assert, run } from "./tiny.js";
 import { installDOM, FakeElement } from "./dom-harness.js";
 import { MemoryStorage } from "../js/core/save.js";
@@ -98,11 +99,11 @@ test("health recovery conditions and diagnosis share the actual simulation funct
     assert.near(n.health - before, .045);
     n.food = 30; assert.eq(healthEffects(n).length, 0);
 });
-test("condition menu uses current weather/fire/clothing/wetness without consuming game time", () => {
+test("condition menu uses current weather/fire/clothing/wetness while survival time continues", () => {
     const g = boot(); g.needs.wet = .9; g.inventory.add("cloak"); const minute = g.clock.minute;
     const text = conditionRows(g).map((r) => r.html).join(" ");
     assert.ok(text.includes("одежда +6")); assert.ok(text.includes("−6°C")); assert.ok(text.includes("реальную секунду"));
-    g.openCondition(); g.update(1); assert.eq(g.clock.minute, minute); assert.eq(g.hud.panelOpen, "condition");
+    g.openCondition(); g.update(1); assert.gt(g.clock.minute, minute); assert.eq(g.hud.panelOpen, "condition");
 });
 test("production relief is on the real home zone only, deterministic and independent of save deltas", () => {
     const a = generateZone("ashfall", 1066618561), b = generateZone("ashfall", 1066618561);
@@ -157,7 +158,7 @@ test("torch light is attached to the actor foot, not terrain under its airborne 
     const g = boot(); g.inventory.slots[20] = { id: "torch", n: 1 }; g.inventory.equipHand("right", 20); g.placeSafely(1072, 1150); g.render();
     const light = g.renderer._lights.find((l) => l.glow === .45);
     assert.eq(light.anchorX, g.player.x); assert.eq(light.anchorY, g.player.y);
-    const a = toolAttachment({ ...g.player, phase: g.player.anim, idleTime: g.renderer.time, torchWind: Math.cos(g.weather.windAngle) * (g.windStrength || 0) });
+    const a = toolAttachment({ ...g.player, ...handRender(g.inventory), phase: g.player.anim, idleTime: g.renderer.time, torchWind: Math.cos(g.weather.windAngle) * (g.windStrength || 0) });
     assert.near(light.localX, a.x, .1); assert.near(light.localY, a.y, .1);
 });
 test("height-aware reach rejects remote levels but allows nearby items on the shelf", () => {

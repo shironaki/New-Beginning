@@ -136,7 +136,7 @@ test("chunk gutters overlap at one uniform scale over fractional camera position
     }
 });
 test("note 028 expanded: two hands without permanent captions or objective/control tutorial", () => {
-    const g = boot(); g.update(0); assert.eq(g.hud.els.objective.textContent, "");
+    const g = boot(); g.update(0); assert.eq(g.hud.els.objective.textContent, g.story.objective);
     assert.ok(g.hud.els.hotbar.innerHTML.includes('id="leftHand"'));
     assert.ok(g.hud.els.hotbar.innerHTML.includes('id="rightHand"'));
     assert.not(g.hud.els.hotbar.innerHTML.includes('>Еда<'));

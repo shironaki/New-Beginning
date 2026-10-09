@@ -1,3 +1,5 @@
+import { collect, reach } from "./carry-fixture.js";
+import { handRender } from "../js/ui/hands.js";
 /** Stage 61: persistent world, honest menus, touch interruptions, relief light. */
 import { test, assert, run } from "./tiny.js";
 import { installDOM, FakeElement } from "./dom-harness.js";
@@ -41,7 +43,7 @@ test("fire fuel, cooked slots, wind and inventory survive loading", () => {
 test("loading earlier checkpoint restores a resource harvested later", () => {
     const g = boot(); const data = clone(g.save.snapshot());
     const wood = g.zone.objects.find((o) => o.kind === "firewood"), index = g.zone.objects.indexOf(wood);
-    g.harvest(wood); g.hud.hideStory(); assert.ok(wood.removed);
+    reach(g,wood); g.harvest(wood); collect(g,wood); g.hud.hideStory(); assert.ok(wood.removed);
     assert.ok(g.save.restore(data)); assert.not(g.zone.objects[index].removed);
 });
 test("legacy v3 save still loads using its seed without inventing resource history", () => {
@@ -134,7 +136,7 @@ test("backgrounding saves, pauses and resets the touch identifier", () => {
 test("trial save uses only its isolated storage and restores picked-up wood", () => {
     const main = boot(); main.save.write(); const old = main.save.storage.getItem(main.save.key);
     const g = boot(5, ReliefTrialGame), wood = g.zone.objects.find((o) => o.kind === "firewood");
-    g.harvest(wood); g.hud.hideStory(); checkpoint(g);
+    reach(g,wood); g.harvest(wood); collect(g,wood); g.hud.hideStory(); checkpoint(g);
     wood.removed = false; assert.ok(resumeSaved(g)); assert.ok(g.zone.objects.find((o) => o.kind === "firewood").removed);
     assert.eq(main.save.storage.getItem(main.save.key), old);
 });
@@ -154,7 +156,7 @@ test("torch screen light follows anatomical hand, including falls over a terrace
     const i = g.inventory.slots.findIndex((s) => s?.id === "torch"); g.inventory.setActive(i);
     for (const dir of ["up", "down", "left", "right"]) for (const fall of [0, 0.8]) {
         g.player.dir = dir; g.player.fallTimer = fall; g.render();
-        const flame = toolAttachment({ ...g.player, phase: g.player.anim, idleTime: g.elapsed,
+        const flame = toolAttachment({ ...g.player, ...handRender(g.inventory), phase: g.player.anim, idleTime: g.elapsed,
             torchWind: Math.cos(g.weather.windAngle) * (g.windStrength || 0) });
         const point = reliefAttachment(g.relief, g.player, flame), view = reliefView(960, 560);
         const light = g.renderer.lightMap.lights[0];

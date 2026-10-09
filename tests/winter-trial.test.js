@@ -1,3 +1,4 @@
+import { collect } from "./carry-fixture.js";
 /** Notes 021–024: exhaustion, ice bodies, falls and opt-in gameplay relief. */
 import { test, assert, run } from "./tiny.js";
 import { installDOM } from "./dom-harness.js";
@@ -169,7 +170,7 @@ test("pilot blocks reaching across a height difference", () => {
 test("pilot wood uses real inventory and real campfire", () => {
     const g = boot(ReliefTrialGame), wood = g.zone.objects.find((o) => o.kind === "firewood");
     g.player.x = wood.x; g.player.y = wood.y + 16; g.player.faceX = 0; g.player.faceY = -1;
-    g.interact = g.findInteractable(); assert.eq(g.interact, wood); g.doInteract();
+    g.interact = g.findInteractable(); assert.eq(g.interact, wood); g.doInteract(); collect(g,wood);
     assert.ok(g.inventory.has("firewood")); assert.ok(wood.removed); assert.ok(g.trialCollected);
     const fire = [...g.localFires.values()][0];
     fire.addFuel("firewood"); g.inventory.remove("firewood", 1); assert.ok(fire.light({ hasFlint: g.inventory.has("flint") }));

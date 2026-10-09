@@ -40,12 +40,12 @@ export class ReliefTrialGame extends Game {
         this.clock.day = 10; this.clock.minute = 11 * 60;
         this.weather.current = "clear"; this.weather.groundWet = 0;
         this.inventory.add("torch", 1);
-        this.save.register("trial", () => this.zone.objects.map((o) => ({ removed: !!o.removed, hits: o.hits })), (data) => {
+        this.save.register("trial", () => this.zone.objects.map((o) => ({ removed: !!o.removed, hits: o.hits, depleted: !!o.depleted, loot: o.loot })), (data) => {
             if (!Array.isArray(data) || data.length !== this.zone.objects.length) throw new Error("Некорректный пилот");
             data.forEach((state, i) => {
-                const o = this.zone.objects[i]; o.removed = !!state.removed;
+                const o = this.zone.objects[i]; o.removed = !!state.removed; o.depleted = !!state.depleted; o.loot = state.loot?.map(s=>({...s}));
                 if (state.hits === undefined) delete o.hits; else o.hits = state.hits;
-                this.zone.removeSolid(o); if (!o.removed && o.block) this.zone.addSolid(o, o.block);
+                this.zone.removeSolid(o); if (!o.removed && !o.depleted && o.block) this.zone.addSolid(o, o.block);
             });
             this.trialCollected = this.zone.objects.some((o) => o.kind === "firewood" && o.removed);
         });

@@ -402,3 +402,24 @@ html, body {
 .handSlot { position: relative; font-size: 24px !important; height: 56px; }
 .handSlot.dominant { border-bottom: 3px solid var(--gold); }
 .handSlot.using { background: #4a5938; }
+
+/* Hands are a vertical anatomical control, not a mirror of the facing sprite. */
+.hotbar { left: auto; right: var(--edge-right); transform: none; grid-template-columns: 56px; grid-template-areas: "right" "left" "bag"; }
+#rightHand { grid-area: right; } #leftHand { grid-area: left; } #quickBag { grid-area: bag; }
+.handSide { position:absolute; left:5px; top:3px; font-size:10px; color:var(--gold); }
+.handCount { position:absolute; right:5px; bottom:3px; font-size:10px; }
+.sessionControls { right: calc(var(--edge-right) + 68px); }
+#stage[data-controls="touch"] .hotbar { grid-template-columns:48px; gap:6px; bottom:var(--edge-bottom); }
+#stage[data-controls="touch"] .handSlot { height:48px; }
+#stage[data-controls="touch"] .sessionControls { right:calc(var(--edge-right) + 60px); bottom:var(--edge-bottom); }
+#stage[data-short="true"][data-tight="true"][data-controls="touch"] .hotbar { bottom:var(--edge-bottom); }
+#stage[data-controls="touch"] .touchStick { bottom:calc(var(--edge-bottom) + 8px); }
+#stage[data-controls="touch"][data-short="true"] .objectiveBar { top:calc(var(--edge-top) + 66px); bottom:auto; }
+.panelWrap[data-panel="bag"] .panel { width:min(660px, calc(100% - 16px)); }
+.bagTabs { display:flex; flex-wrap:wrap; gap:6px; position:sticky; top:0; z-index:1; background:var(--panel); padding:4px 0 10px; border-bottom:1px solid var(--edge); }
+.bagTabs .bagTab { display:block; width:auto; padding:10px 12px; min-height:44px; border-radius:20px; font-size:12px; }
+.bagTab .rowIcon, .bagTab .rowHint { display:none; }
+.bagTab[aria-pressed="true"] { color:#191f19; background:var(--gold); }
+.bagGrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:8px; }
+.bagGrid .bagItem { display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:10px; min-height:110px; padding:12px; border:1px solid var(--edge); border-radius:12px; }
+.bagItem .rowIcon { font-size:30px; } .bagItem .rowLabel { font-size:12px; } .bagItem .rowHint { display:none; }

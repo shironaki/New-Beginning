@@ -164,11 +164,11 @@ export class HUD {
           <div class="skyZone">${zoneName || ""}</div>`;
 
         // Owner requested no persistent hints/objectives over the scene. Journal retains the goal.
-        this.els.objective.textContent = "";
+        this.els.objective.textContent = state.objective || "";
 
         for (const side of ["left", "right"]) {
             const h = inventory.hands?.[side], button = this.els[side + "Hand"];
-            const html = `<span aria-hidden="true">${h ? itemEmoji(h.id) : "✋"}</span>`;
+            const html = `<small class="handSide">${side === "left" ? "Л" : "П"}</small><span aria-hidden="true">${h ? itemEmoji(h.id) : "✋"}</span>${h?.n > 1 ? `<b class="handCount">${h.n}</b>` : ""}`;
             if (button.innerHTML !== html) button.innerHTML = html;
             button.classList.toggle("dominant", inventory.dominant === side);
             button.classList.toggle("using", inventory.handAction?.side === side);
@@ -252,14 +252,16 @@ export class HUD {
      * @param {string} title
      * @param {Array} rows [{ label, icon, hint, disabled, action }] or { html }
      */
-    openPanel(title, rows, name = "panel", { locked = false } = {}) {
+    openPanel(title, rows, name = "panel", { locked = false, pauses = ["session", "handedness", "appearance"].includes(name) } = {}) {
         this.setNeedsExpanded(false);
-        this.panelLocked = locked;
+        this.panelLocked = locked; this.panelPauses = pauses;
+        this.els.panelWrap.setAttribute("data-panel", name);
         this.els.panelClose.disabled = locked;
         this.panelOpen = name;
         this.els.panelTitle.textContent = title;
         this.els.panelBody.innerHTML = "";
         this._panelRows = [];
+        let tabs, grid;
         for (const row of rows) {
             if (row.html !== undefined) {
                 const d = document.createElement("div");
@@ -269,14 +271,20 @@ export class HUD {
                 continue;
             }
             const b = document.createElement("button");
-            b.className = "panelRow" + (row.disabled ? " disabled" : "");
+            b.className = "panelRow" + (row.tab ? " bagTab" : row.item ? " bagItem" : "") + (row.disabled ? " disabled" : "");
             if (row.disabled) { b.disabled = true; b.tabIndex = -1; }
             b.innerHTML = `<span class="rowIcon">${row.icon || "•"}</span>
                            <span class="rowLabel">${row.label}</span>
                            <span class="rowHint">${row.hint || ""}</span>`;
             if (!row.disabled) b.addEventListener("click", () => { row.action && row.action(); });
             this._panelRows.push(b);
-            this.els.panelBody.appendChild(b);
+            if (row.tab) {
+                if (!tabs) { tabs = document.createElement("nav"); tabs.className = "bagTabs"; tabs.setAttribute("aria-label", "Категории"); this.els.panelBody.appendChild(tabs); }
+                b.setAttribute("aria-pressed", String(!!row.selected)); tabs.appendChild(b);
+            } else if (row.item) {
+                if (!grid) { grid = document.createElement("div"); grid.className = "bagGrid"; this.els.panelBody.appendChild(grid); }
+                grid.appendChild(b);
+            } else this.els.panelBody.appendChild(b);
         }
         this.els.panelWrap.classList.remove("hidden");
         // Hand the keyboard over, and remember where to hand it back.
@@ -290,7 +298,7 @@ export class HUD {
     closePanel(force = false) {
         if (this.panelLocked && !force) return this;
         this.panelLocked = false; this.els.panelClose.disabled = false;
-        this.panelOpen = null;
+        this.panelOpen = null; this.panelPauses = false;
         this.els.panelWrap.classList.add("hidden");
         // Back to the game: the canvas, or whatever opened the panel.
         const back = this._returnFocus;

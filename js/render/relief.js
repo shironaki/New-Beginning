@@ -1,3 +1,4 @@
+import { paintCookware, paintLoot } from "./cookware.js";
 /** CPU mesh prototype, isolated from the production chunk renderer.
  * Mesh rows and objects are sorted by ground depth so an elevated terrace
  * can hide a walker behind it; objects are NOT pasted over the finished map. */
@@ -59,10 +60,11 @@ export function drawRelief(ctx, patch, walker, { mesh = reliefMesh(patch), colle
             ctx.save(); ctx.translate(p.x, p.y);
             if (d.player) drawCharacter(ctx, { dir: walker.dir, phase: walker.phase, gait: walker.gait, idleTime: walker.time, tool: "knife", ...character });
             else {
-                paintProp(ctx, o, walker.time, season);
+                if (o.depleted) paintLoot(ctx, o.loot || []); else paintProp(ctx, o, walker.time, season);
                 if (o.kind === "campfire") {
                     const fire = fires?.get(`${o.tx},${o.ty}`);
                     paintFlames(ctx, fire?.intensity || 0, walker.time, fire?.stack || []);
+                    paintCookware(ctx, fire, walker.time);
                 }
             }
             ctx.restore();

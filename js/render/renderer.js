@@ -1,3 +1,4 @@
+import { paintCookware, paintLoot } from "./cookware.js";
 /**
  * render — the frame.
  *
@@ -599,7 +600,7 @@ export class Renderer {
         }
 
         for (const obj of list) {
-            if (obj.removed) continue;
+            if (obj.removed || obj.depleted) continue;
             const hero = obj.kind === "__hero";
             const hgt = hero ? MIRROR.heroHeight : propHeight(obj.kind, obj.size || 1);
             if (hgt < MIRROR.minHeight) continue;
@@ -672,18 +673,19 @@ export class Renderer {
 
         for (const d of drawables) {
             const o = d.obj;
-            if (d.kind === "prop") this._occlude(o, player, dt);
+            if (d.kind === "prop" && !o.depleted) this._occlude(o, player, dt);
             const s = cam.worldToScreen(o.x, o.y);
             ctx.save();
             ctx.translate(d.kind === "prop" ? Math.round(s.x) : s.x, d.kind === "prop" ? Math.round(s.y) : s.y);
             ctx.scale(cam.zoom, cam.zoom);
             if (d.kind === "prop") {
                 if (o._fade > 0) ctx.globalAlpha = 1 - (1 - OCCLUDE.alpha) * o._fade;
-                paintProp(ctx, o, this.time, this.season);
+                if (o.depleted) paintLoot(ctx, o.loot || []); else paintProp(ctx, o, this.time, this.season);
                 ctx.globalAlpha = 1;
                 if (o.kind === "campfire") {
                     const fire = fires && fires.get(o.id != null ? o.id : `${o.tx},${o.ty}`);
                     paintFlames(ctx, fire ? fire.intensity : 0, this.time, fire ? fire.stack : []);
+                    paintCookware(ctx, fire, this.time);
                     if (fire) {
                         fire.spit.forEach((slot, i) => {
                             if (slot) paintSpitItem(ctx, i, slot.state, itemEmoji(slot.itemId), slot.itemId);
