@@ -7,6 +7,7 @@
  * except at the links declared in regions.js. Same seed → same valley, in the
  * browser and in tests.
  */
+import { installPlayableRelief } from "./playable-relief.js";
 import { RNG, mixSeeds, hashSeed, fbm2D, valueNoise2D } from "../core/rng.js";
 import { T, TILE_SIZE, tileInfo } from "./tiles.js";
 import { edgeScenery } from "./edges.js";
@@ -331,6 +332,7 @@ export function generateZone(zoneId, worldSeed = 1) {
     zone.terrain = map.terrain = new TerrainField(map, seed, def.biome);
     zone.edgeScenery = edgeScenery(zone, seed);
     pickSpawn(zone, rng);
+    installPlayableRelief(zone);
 
     map.markAllDirty();
     return zone;

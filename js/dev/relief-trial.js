@@ -48,6 +48,7 @@ export class ReliefTrialGame extends Game {
             });
             this.trialCollected = this.zone.objects.some((o) => o.kind === "firewood" && o.removed);
         });
+        this.camera.surface = null;
         this.camera.setBounds(RELIEF.width, RELIEF.height).snapTo(this.player.x, this.player.y);
         this.trialCollected = false;
         this.bus.on("world:harvest", ({ kind }) => { if (kind === "firewood") this.trialCollected = true; });

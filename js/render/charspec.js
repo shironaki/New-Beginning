@@ -32,33 +32,33 @@ export const QUANT = 0.125;
 export const BODY = {
     total: 36,
 
-    headH: 7.2,
-    headW: 6.8,
-    headY: -36,              // top of the skull
+    headH: 6.6,
+    headW: 6.2,
+    headY: -35.8,              // top of the skull
 
     torsoY: -28.4,             // shoulder line
     torsoH: 12.4,
-    shoulderW: 11.5,           // front/back view
-    shoulderWSide: 8.0,      // profile is narrower — that is what sells the turn
-    waistW: 8.5,             // the pinch, at 72% down the torso
+    shoulderW: 12.2,           // front/back view
+    shoulderWSide: 8.4,      // profile is narrower — that is what sells the turn
+    waistW: 8.1,             // the pinch, at 72% down the torso
     waistAt: 0.72,
-    hipW: 9,
+    hipW: 8.8,
 
     hipY: -15.8,
-    legW: 3.8,
+    legW: 3.2,
     legGap: 1.0,
     thigh: 7.0,
     shin: 6.6,
 
     ankleY: -2.4,
-    bootW: 5.2,
+    bootW: 4.7,
     bootH: 2.8,
     bootToe: 1.5,            // how far the toe sticks out past the ankle
     idleStance: 1.2,         // profile: feet part this much when standing
 
     armY: -27.4,               // shoulder pivot, just under the shoulder line
     armLen: 12.2,
-    armW: 2.5,
+    armW: 2.3,
     sleeveW: 1.3,            // the shoulder is wider than the forearm
     handH: 2.2,              // readable fingers, not a square cuff
     farArmX: 1.6,            // profile: how far the hidden arm peeks out
@@ -186,6 +186,8 @@ export const SHADOW = {
  * mass without costing responsiveness — at `accel` the hero is at full walk in
  * about 0.08 s and stops within ~2 px.
  */
+export const STAMINA = { drain: 16, walkRecovery: 7, idleRecovery: 14 };
+
 export const MOVE = {
     // The simulation step the hero moves on, independent of the frame rate.
     // 1/120 s divides every rate we care about (30, 60, 120), so all three

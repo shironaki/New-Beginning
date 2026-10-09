@@ -187,22 +187,6 @@ html, body {
     gap: var(--slot-gap);
 }
 
-.slot {
-    position: relative;
-    width: var(--slot); height: var(--slot);
-    min-width: 44px; min-height: 44px;
-    background: var(--panel-bg);
-    border: 1px solid var(--edge);
-    border-radius: var(--r-md);
-    display: flex; align-items: center; justify-content: center;
-    font-size: var(--t-xxl);
-    cursor: pointer;
-    transition: transform .12s ease, border-color .12s ease;
-}
-.slot:hover { transform: translateY(-2px); }
-.slot.active { border-color: var(--gold); box-shadow: 0 0 12px rgba(232,192,122,0.3); }
-.slotN { position: absolute; bottom: 2px; right: 5px; font-size: var(--t-xs); color: var(--ink); font-variant-numeric: tabular-nums; }
-
 /* ---------- panels ---------- */
 
 .panelWrap {
@@ -323,7 +307,7 @@ html, body {
 .sessionControls button { width: 46px; height: 46px; padding: 4px; color: var(--ink); background: rgba(20,25,21,.88); border: 1px solid #746745; border-radius: 12px; font: inherit; cursor: pointer; touch-action: manipulation; }
 .sessionControls button:hover { background: #363c2d; border-color: var(--gold); }
 .sessionControls .control-menu, .sessionControls .control-fullscreen { font-size: 24px; }
-.control-bag, .control-journal, .control-action, .touchStick { display: none; }
+.control-journal, .control-action, .touchStick { display: none; }
 /* Four corners instead of a platform-dependent fullscreen font glyph. */
 .sessionControls .control-fullscreen { position: relative; color: transparent; }
 .control-fullscreen::after { content: ""; position: absolute; inset: 14px; background:
@@ -346,17 +330,10 @@ html, body {
 .reliefTrialBanner small { display: none; }
 
 /* Narrow desktop windows reflow the desktop HUD, never summon a phone pad. */
-#stage[data-narrow="true"][data-controls="desktop"] .needsCard { width: 172px; padding: 8px; gap: 4px; }
-#stage[data-narrow="true"][data-controls="desktop"] .needIcon { display: none; }
-#stage[data-narrow="true"][data-controls="desktop"] .needLabel { width: 78px; font-size: 10px; }
-#stage[data-narrow="true"][data-controls="desktop"] .needVal { width: 25px; font-size: 10px; }
-#stage[data-narrow="true"][data-controls="desktop"] .need { gap: 4px; }
 #stage[data-narrow="true"][data-controls="desktop"] .skyCard { padding: 8px; font-size: 10px; }
 #stage[data-narrow="true"][data-controls="desktop"] .skyZone { display: none; }
-#stage[data-narrow="true"][data-controls="desktop"] .objectiveBar { top: 124px; max-width: 94%; }
+#stage[data-narrow="true"][data-controls="desktop"] .objectiveBar { top: 78px; max-width: 94%; }
 #stage[data-narrow="true"][data-controls="desktop"] .sessionControls { bottom: calc(var(--edge-bottom) + 58px); }
-#stage[data-narrow="true"] .hotbar { gap: 6px; }
-#stage[data-narrow="true"] .slot { width: 44px; height: 44px; font-size: 24px; }
 
 /* Touch: compact status strip, dedicated thumb controls, no keyboard HUD. */
 #stage[data-controls="touch"] {
@@ -366,27 +343,17 @@ html, body {
     --t-xs: 12px; --t-sm: 14px; --t-md: 14px;
     --t-lg: 18px; --t-xl: 22px; --t-xxl: 26px;
 }
-#stage[data-controls="touch"] .hudTop { flex-direction: column-reverse; gap: 5px; }
-#stage[data-controls="touch"] .needsCard { width: 100%; display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 9px; padding: 7px 10px; background: rgba(19,26,22,.82); box-shadow: none; }
-#stage[data-controls="touch"] .need { display: grid; gap: 4px; text-align: center; }
-#stage[data-controls="touch"] .needLabel { width: auto; font-size: 10px; line-height: 12px; }
-#stage[data-controls="touch"] .needFull, #stage[data-controls="touch"] .needIcon { display: none; }
-#stage[data-controls="touch"] .needShort { display: inline; }
-#stage[data-controls="touch"] .needVal { width: auto; text-align: center; font-size: 10px; line-height: 11px; }
-#stage[data-controls="touch"] .needBarOuter { height: 4px; min-width: 0; }
-#stage[data-controls="touch"] .skyCard { max-width: none; width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 4px; border: none; box-shadow: none; background: none; backdrop-filter: none; text-shadow: 0 1px 4px #000; }
+#stage[data-controls="touch"] .hudTop { flex-direction: row; gap: 8px; }
+#stage[data-controls="touch"] .skyCard { max-width: calc(100% - 184px); width: auto; display: block; padding: 0; border: none; box-shadow: none; background: none; backdrop-filter: none; text-shadow: 0 1px 4px #000; }
 #stage[data-controls="touch"] .skyTime { font-size: 19px; line-height: 26px; }
 #stage[data-controls="touch"] .skyMeta { font-size: 10px; white-space: nowrap; }
 #stage[data-controls="touch"] .skyZone { display: none; }
-#stage[data-controls="touch"] .objectiveBar { top: calc(var(--edge-top) + 88px); max-width: calc(100% - 24px); padding: 5px 12px; font-size: 11px; background: rgba(19,26,22,.7); border: none; }
-#stage[data-controls="touch"] .hotbar { gap: 6px; }
-#stage[data-controls="touch"] .slot { width: 44px; height: 44px; font-size: 24px; background: rgba(19,26,22,.8); border-radius: 10px; }
-#stage[data-controls="touch"] .sessionControls { display: grid; grid-template-columns: repeat(3,48px); grid-template-areas: "bag journal fullscreen" "action action menu"; gap: 6px; bottom: calc(var(--edge-bottom) + 58px); }
+#stage[data-controls="touch"] .objectiveBar { top: calc(var(--edge-top) + 68px); max-width: calc(100% - 24px); padding: 5px 12px; font-size: 11px; background: rgba(19,26,22,.7); border: none; }
+#stage[data-controls="touch"] .sessionControls { display: grid; grid-template-columns: repeat(2,48px); grid-template-areas: "journal fullscreen" "action menu"; gap: 6px; bottom: calc(var(--edge-bottom) + 58px); }
 #stage[data-controls="touch"] .sessionControls button { display: block; width: 100%; height: 48px; font-size: 10px; padding: 2px; background: rgba(19,26,22,.84); }
 #stage[data-controls="touch"] .sessionControls .control-fullscreen { grid-area: fullscreen; font-size: 24px; }
 #stage[data-controls="touch"] .sessionControls .control-menu { grid-area: menu; font-size: 24px; }
 #stage[data-controls="touch"] .control-action { grid-area: action; border-color: #ac945d; color: var(--gold); font-size: 12px; }
-#stage[data-controls="touch"] .control-bag { grid-area: bag; }
 #stage[data-controls="touch"] .control-journal { grid-area: journal; }
 #stage[data-controls="touch"] .touchStick { display: block; position: absolute; left: calc(var(--edge-left) + 6px); bottom: calc(var(--edge-bottom) + 64px); width: 82px; height: 82px; border: 1px solid rgba(232,213,160,.4); border-radius: 50%; background: rgba(19,26,22,.26); pointer-events: none; }
 .touchStick i { position: absolute; left: 25px; top: 25px; width: 30px; height: 30px; border-radius: 50%; background: rgba(232,213,160,.4); box-shadow: 0 2px 8px #0003; }
@@ -398,7 +365,6 @@ html, body {
 
 /* Landscape with browser chrome: reclaim the middle without shrinking buttons. */
 #stage[data-controls="touch"][data-short="true"] .hudTop { flex-direction: row; align-items: start; }
-#stage[data-controls="touch"][data-short="true"] .needsCard { width: min(310px, 50%); }
 #stage[data-controls="touch"][data-short="true"] .skyCard { width: auto; display: grid; grid-template-columns: auto auto; column-gap: 10px; }
 #stage[data-controls="touch"][data-short="true"] .skyTime { grid-row: 1 / 3; }
 #stage[data-controls="touch"][data-short="true"] .objectiveBar { top: auto; bottom: calc(var(--edge-bottom) + 58px); max-width: 48%; }
@@ -412,3 +378,33 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
+
+/* Stage 63: one weakest need, details only by hover/focus/tap. */
+.needsDisclosure { position: relative; z-index: 10; pointer-events: auto; flex-shrink: 0; }
+.needSummary { position: relative; overflow: hidden; display: flex; align-items: center; gap: 8px; width: 210px; height: 46px; padding: 0 12px 3px; color: var(--ink); background: rgba(20,25,21,.94); border: 1px solid #746745; border-radius: 12px; font: inherit; font-size: 13px; cursor: pointer; }
+.needSummary b { margin-left: auto; font-variant-numeric: tabular-nums; }
+.needSummary i { position: absolute; bottom: 0; left: 0; height: 3px; }
+.needSummary.critical { border-color: var(--danger); }
+.needsDetails { position: absolute; top: 100%; left: 0; padding-top: 6px; width: min(310px, calc(100vw - 24px)); }
+.needsDetails .needsCard { width: 100%; padding: 14px; gap: 10px; border-bottom-left-radius: 0; border-bottom-right-radius: 0; background: var(--panel); }
+.needsDetails .needLabel { width: 90px; font-size: 11px; }
+.needsDetails .needVal { font-size: 11px; width: 33px; flex-shrink: 0; }
+.needsDetails .needIcon { flex-shrink: 0; }
+.conditionButton { width: 100%; min-height: 44px; color: var(--gold); font: inherit; font-size: 13px; border: 1px solid var(--edge); border-top: 0; border-radius: 0 0 12px 12px; background: #26281e; cursor: pointer; }
+#stage[data-narrow="true"][data-controls="desktop"] .needSummary { width: 176px; font-size: 11px; }
+#stage[data-controls="touch"] .needSummary { width: 176px; gap: 6px; font-size: 11px; padding: 0 9px 3px; }
+/* Intent bar, not an inventory mirror: held tool / food / food chooser / bag. */
+.hotbar { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.1fr) 44px 44px; gap: 6px; width: min(340px, calc(100% - var(--edge-left) - var(--edge-right))); pointer-events: auto; }
+.hotbar button { min-width: 0; min-height: 48px; border: 1px solid #746745; border-radius: 12px; background: rgba(20,25,21,.94); color: var(--ink); cursor: pointer; font: inherit; }
+.hotbar button:hover { border-color: var(--gold); background: #30382b; }
+.hotbar button:disabled { opacity: .55; cursor: default; }
+.quickItem { display: flex; align-items: center; gap: 6px; padding: 5px 8px; text-align: left; }
+.quickGlyph { font-size: 22px; flex-shrink: 0; }
+.quickText { min-width: 0; display: grid; gap: 2px; }
+.quickText small { color: var(--ink-dim); font-size: 10px; }
+.quickText b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 500; }
+.quickIcon { font-size: 22px !important; padding: 4px; }
+#stage[data-controls="touch"] .quickGlyph { font-size: 19px; }
+#stage[data-controls="touch"] .quickItem { padding: 4px 6px; gap: 4px; }
+/* 640px landscape: narrow intent bar fits between both thumb zones. */
+#stage[data-controls="touch"][data-short="true"] .hotbar { width: min(294px, calc(100% - 32px)); }

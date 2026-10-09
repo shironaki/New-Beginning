@@ -7,7 +7,7 @@ import fs from "node:fs";
 import assert from "node:assert/strict";
 const base = process.argv[2] || "http://127.0.0.1:3000";
 const cdp = process.argv[3] || "http://127.0.0.1:9222";
-const out = ".artifacts/stage62";
+const out = process.env.REVIEW_OUT || ".artifacts/stage63";
 fs.mkdirSync(out, { recursive: true });
 const targets = await (await fetch(`${cdp}/json/list`)).json();
 const target = targets.find((t) => t.type === "page");
@@ -80,14 +80,14 @@ try {
                 ...Array.from(document.querySelectorAll('.sessionControls button')).map(el => '.' + el.className)];
             const rect = el => { const r = el.getBoundingClientRect(); return { x:r.x, y:r.y, w:r.width, h:r.height, shown:getComputedStyle(el).display !== 'none' }; };
             return { mode:GAME.controlMode, elements:Object.fromEntries(selectors.map(s => [s,rect(document.querySelector(s))])),
-                targets:Array.from(document.querySelectorAll('.slot,.sessionControls button')).map(rect) };
+                targets:Array.from(document.querySelectorAll('.hotbar button,.sessionControls button')).map(rect) };
         })()`);
         assert.equal(metrics.mode, touch ? "touch" : "desktop", name);
         for (const s of ["#stage", "#game", "#hud"]) {
             assert.equal(metrics.elements[s].w, width, `${name}: ${s} width`);
             assert.equal(metrics.elements[s].h, height, `${name}: ${s} height`);
         }
-        for (const s of [".touchStick", ".control-bag", ".control-journal", ".control-action"])
+        for (const s of [".touchStick", ".control-journal", ".control-action"])
             assert.equal(metrics.elements[s].shown, touch, `${name}: ${s} visibility`);
         const shown = metrics.targets.filter((r) => r.shown);
         for (const r of shown) {
@@ -99,6 +99,22 @@ try {
             assert.ok(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y, `${name}: controls overlap`);
         }
         summary.push({ name, ...metrics }); await screenshot(name);
+        // Real click consumes a berry and preserves the tool; empty slots are gone.
+        if (name === "phone" || name === "desktop") {
+            const before = await evaluate("({food:GAME.needs.food,n:GAME.inventory.count('berry'),active:GAME.inventory.activeSlot})");
+            await evaluate("document.querySelector('#eatItem').click(); GAME.update(0)");
+            const after = await evaluate("({food:GAME.needs.food,n:GAME.inventory.count('berry'),active:GAME.inventory.activeSlot})");
+            assert.equal(after.n, before.n - 1); assert.equal(after.active, before.active); assert.ok(after.food > before.food);
+            await evaluate("document.querySelector('#needSummary').click()"); await frames();
+            assert.equal(await evaluate("document.querySelector('#needSummary').getAttribute('aria-expanded')"), "true");
+            const details = await evaluate("document.querySelector('#needsDetails').getBoundingClientRect().toJSON()");
+            assert.ok(details.x >= 0 && details.right <= width && details.bottom <= height, name + ': needs disclosure bounds');
+            await screenshot(name + '-needs');
+            await evaluate("document.querySelector('#conditionButton').click()"); await frames();
+            assert.equal(await evaluate("GAME.hud.panelOpen"), "condition");
+            await screenshot(name + '-condition');
+            await evaluate("GAME.hud.closePanel(true)");
+        }
         if (name === "landscape" || name === "small-phone") {
             await evaluate("GAME.sessionButtons.menu.click()"); await frames();
             const panel = await evaluate(`(() => {
@@ -120,10 +136,20 @@ try {
             assert.equal(await evaluate("GAME.viewport.toggleFullscreen()", true), true);
             assert.equal(await evaluate("document.fullscreenElement === document.querySelector('#stage')"), true);
             assert.equal(await evaluate("GAME.viewport.toggleFullscreen()", true), true);
+            const walk = await evaluate("({x:GAME.player.x,y:GAME.player.y,h:GAME.zone.playableRelief.heightAt(GAME.player.x,GAME.player.y)})");
+            await evaluate("document.activeElement?.blur(); GAME.input.releaseAll(); GAME.loop.start()");
+            await send("Input.dispatchKeyEvent", { type: "keyDown", code: "KeyW", key: "w", windowsVirtualKeyCode: 87 });
+            await evaluate("new Promise(resolve => setTimeout(resolve, 3500))");
+            await send("Input.dispatchKeyEvent", { type: "keyUp", code: "KeyW", key: "w", windowsVirtualKeyCode: 87 });
+            await frames(); await evaluate("GAME.loop.stop(); GAME.input.releaseAll()");
+            const end = await evaluate("({x:GAME.player.x,y:GAME.player.y,h:GAME.zone.playableRelief.heightAt(GAME.player.x,GAME.player.y),fits:GAME.fitsAt(GAME.player.x,GAME.player.y)})");
+            assert.ok(end.y < walk.y - 30 && end.h > walk.h + 5 && end.fits, "real keyboard climb in normal game");
+            fs.writeFileSync(`${out}/keyboard-climb.json`, JSON.stringify({start:walk,end}, null, 2));
+            await screenshot("desktop-climb");
         }
     }
     assert.equal(errors.length, 0, "browser exceptions");
-    console.log(`PASS: ${summary.length} browser layouts, control bounds/separation, menus, story scrolling, stage fullscreen; no runtime exceptions.`);
+    console.log(`PASS: ${summary.length} browser layouts, control bounds/separation, menus, story scrolling, stage fullscreen, food use, needs disclosure and real keyboard climb; no runtime exceptions.`);
 } finally {
     fs.writeFileSync(`${out}/browser.json`, JSON.stringify({ summary, errors }, null, 2));
     for (const p of pending.values()) clearTimeout(p.timer);

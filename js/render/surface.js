@@ -24,7 +24,7 @@ export function drawWetGround(ctx, cam, state, time) {
     const x0 = Math.max(0, Math.floor(cam.x / TILE_SIZE) - 1);
     const y0 = Math.max(0, Math.floor(cam.y / TILE_SIZE) - 1);
     const x1 = Math.min(zone.map.w, Math.ceil((cam.x + cam.viewW) / TILE_SIZE) + 1);
-    const y1 = Math.min(zone.map.h, Math.ceil((cam.y + cam.viewH) / TILE_SIZE) + 1);
+    const y1 = Math.min(zone.map.h, Math.ceil((cam.y + cam.viewH + (zone.playableRelief?.maxHeight || 0)) / TILE_SIZE) + 1);
     ctx.save();
     // One weather wash, not rectangles laid over the continuous coast.
     ctx.globalAlpha = wet * (winter ? 0.12 : 0.17);

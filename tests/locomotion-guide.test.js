@@ -1,5 +1,6 @@
 /** Note 020: temporal regressions, not just a nice still image. */
 import { suite, test, assert, run } from "./tiny.js";
+import { TerrainField } from "../js/world/terrain.js";
 import { Player } from "../js/entities/player.js";
 import { generateZone } from "../js/world/worldgen.js";
 import { TileMap } from "../js/world/tilemap.js";
@@ -10,8 +11,11 @@ import { Input } from "../js/engine/input.js";
 import { ReliefWalker } from "../js/world/relief.js";
 import { ReliefGuide } from "../js/dev/relief-guide.js";
 const axes = [[1, 1], [-1, 1], [1, -1], [-1, -1]];
-function record(x, y, stamina = 100, fps = 120) {
+function record(x, y, stamina = 100, fps = 120, legacyTerrain = false) {
     const zone = generateZone("ashfall", 1066618561), p = new Player({ x: 137, y: 861 }); p.stamina = stamina;
+    // Stage 63 raises the home shelf; this old regression intentionally checks
+    // the pre-rollout terrain so art changes cannot silently alter locomotion.
+    if (legacyTerrain) zone.terrain.elevation = TerrainField.prototype.elevation;
     const axis = { x: x * Math.SQRT1_2, y: y * Math.SQRT1_2 }, frames = [];
     for (let i = 0; i < fps * 4; i++) {
         p.update(1 / fps, axis, zone, { wantRun: true, surfaceAt: (a, b) => ({ slope: zone.terrain.slope(a, b, x, y) }) });
@@ -33,7 +37,7 @@ for (const [x, y] of axes) test(`diagonal ${x},${y}: no exhaustion chatter or co
 });
 test("visual smoothing preserves all four pre-fix paths with a full stamina reserve", () => {
     const expected = [[393.55886492830064, 1112.0081936289366], [9.040813864490463, 1114.7045550587006], [447.12835362266566, 550.8716463773337], [52.78041069896668, 777.3332948191709]];
-    axes.forEach(([x, y], i) => { const { p } = record(x, y); assert.near(p.x, expected[i][0], 1e-8); assert.near(p.y, expected[i][1], 1e-8); });
+    axes.forEach(([x, y], i) => { const { p } = record(x, y, 100, 120, true); assert.near(p.x, expected[i][0], 1e-8); assert.near(p.y, expected[i][1], 1e-8); });
 });
 test("pushing a wall fades the gait and lean instead of holding a raised leg", () => {
     const map = new TileMap(12, 12, T.DIRT); map.fillRect(5, 0, 1, 12, T.CLIFF);

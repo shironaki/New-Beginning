@@ -172,7 +172,7 @@ export function installDevTools(game, win = window) {
         if (!state.unlocked) return;
         const ctx = game.renderer.ctx, cam = game.camera;
         if (state.grid) {
-            const T = 32, z = cam.zoom;
+            const T = 32;
             ctx.save();
             ctx.strokeStyle = "rgba(255,255,255,0.14)";
             ctx.lineWidth = 1;
@@ -182,10 +182,13 @@ export function installDevTools(game, win = window) {
                 ctx.beginPath(); ctx.moveTo(Math.round(s.x), 0);
                 ctx.lineTo(Math.round(s.x), game.renderer.canvas.height); ctx.stroke();
             }
-            for (let y = y0; y < cam.y + cam.viewH + T; y += T) {
-                const s = cam.worldToScreen(cam.x, y);
-                ctx.beginPath(); ctx.moveTo(0, Math.round(s.y));
-                ctx.lineTo(game.renderer.canvas.width, Math.round(s.y)); ctx.stroke();
+            for (let y = y0; y < cam.y + cam.viewH + T + (cam.surface?.maxHeight || 0); y += T) {
+                ctx.beginPath();
+                for (let x = cam.x; x <= cam.x + cam.viewW + 8; x += 8) {
+                    const s = cam.worldToScreen(x, y);
+                    if (x === cam.x) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
+                }
+                ctx.stroke();
             }
             ctx.restore();
         }
@@ -509,7 +512,7 @@ export function installDevTools(game, win = window) {
         const sx = (ev.clientX - r.left) * (canvas.width / r.width);
         const sy = (ev.clientY - r.top) * (canvas.height / r.height);
         const cam = game.camera;
-        return { x: cam.x + sx / cam.zoom, y: cam.y + sy / cam.zoom, sx, sy };
+        return { ...cam.screenToWorld(sx, sy), sx, sy };
     }
 
     /**

@@ -34,6 +34,10 @@ export class Camera {
 
     /** Jump straight to a target, no easing (teleports, zone changes). */
     snapTo(tx, ty) {
+        return this.snapViewTo(tx, ty - (this.surface?.heightAt(tx, ty) || 0));
+    }
+    /** View coordinates are already projected (viewport resize). */
+    snapViewTo(tx, ty) {
         this.x = tx - this.viewW / 2;
         this.y = ty - this.viewH / 2;
         this.clamp();
@@ -60,7 +64,7 @@ export class Camera {
 
         const cx = this.x + this.viewW / 2;
         const cy = this.y + this.viewH / 2;
-        const dx = tx + this.leadX - cx, dy = ty + this.leadY - cy;
+        const dx = tx + this.leadX - cx, dy = ty - (this.surface?.heightAt(tx, ty) || 0) + this.leadY - cy;
         const dist = Math.hypot(dx, dy);
         if (dist > this.deadzone) {
             const pull = (dist - this.deadzone) / dist;
@@ -127,21 +131,26 @@ export class Camera {
      * fine once per entity but not once per particle — hot loops use these.
      */
     toScreenX(wx) { return (wx - this.x + this.offsetX) * this.zoom; }
-    toScreenY(wy) { return (wy - this.y + this.offsetY) * this.zoom; }
+    toScreenY(wy, wx = 0) { return (wy - (this.surface?.heightAt(wx, wy) || 0) - this.y + this.offsetY) * this.zoom; }
 
     worldToScreen(wx, wy) {
         return {
             x: (wx - this.x + this.offsetX) * this.zoom,
-            y: (wy - this.y + this.offsetY) * this.zoom
+            y: this.toScreenY(wy, wx)
         };
     }
 
     screenToWorld(sx, sy) {
-        return { x: sx / this.zoom + this.x, y: sy / this.zoom + this.y };
+        const x = sx / this.zoom + this.x - this.offsetX;
+        const base = sy / this.zoom + this.y - this.offsetY;
+        let y = base;
+        for (let i = 0; this.surface && i < 18; i++) y = base + this.surface.heightAt(x, y);
+        return { x, y };
     }
 
     /** Culling test with a margin, in world units. */
     isVisible(wx, wy, margin = 48) {
+        wy -= this.surface?.heightAt(wx, wy) || 0;
         return wx >= this.x - margin && wx <= this.x + this.viewW + margin &&
                wy >= this.y - margin && wy <= this.y + this.viewH + margin;
     }

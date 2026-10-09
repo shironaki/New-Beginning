@@ -7,6 +7,7 @@
  * systems never touch the DOM themselves.
  */
 import { itemDef, itemEmoji, itemName } from "../sandbox/items.js";
+import { quickFood, holdable } from "./quick-actions.js";
 import { UI, applyTheme } from "./uispec.js";
 
 const NEED_DEFS = [
@@ -18,9 +19,10 @@ const NEED_DEFS = [
 ];
 
 export class HUD {
-    constructor(root, { onHotbar = () => {}, onAction = () => {} } = {}) {
+    constructor(root, { onHotbar = () => {}, onAction = () => {}, onEquipment = () => {}, onProvisions = () => {}, onEat = () => {}, onBag = () => {}, onCondition = () => {} } = {}) {
         this.root = root;
         this.onHotbar = onHotbar;
+        this.actions = { onEquipment, onProvisions, onEat, onBag, onCondition };
         this.onAction = onAction;
         this.els = {};
         this.panelOpen = null;
@@ -33,7 +35,13 @@ export class HUD {
     _build() {
         this.root.innerHTML = `
           <div class="hudTop">
-            <div class="needsCard" id="needsCard"></div>
+            <div class="needsDisclosure" id="needsDisclosure">
+              <button type="button" class="needSummary" id="needSummary" aria-expanded="false" aria-controls="needsDetails"></button>
+              <div class="needsDetails" id="needsDetails" hidden>
+                <div class="needsCard" id="needsCard"></div>
+                <button type="button" id="conditionButton" class="conditionButton">Состояние и причины</button>
+              </div>
+            </div>
             <div class="skyCard" id="skyCard"></div>
           </div>
           <div class="objectiveBar" id="objectiveBar"></div>
@@ -56,6 +64,7 @@ export class HUD {
 
         const $ = (id) => this.root.querySelector("#" + id);
         this.els = {
+            disclosure: $("needsDisclosure"), summary: $("needSummary"), details: $("needsDetails"),
             needs: $("needsCard"), sky: $("skyCard"), objective: $("objectiveBar"),
             toasts: $("toasts"), hotbar: $("hotbar"),
             panelWrap: $("panelWrap"), panel: $("panel"), panelTitle: $("panelTitle"),
@@ -93,24 +102,46 @@ export class HUD {
             this.needVals[n.key] = row.querySelector(".needVal");
         });
 
-        // Hotbar slots.
-        this.els.hotbar.innerHTML = Array.from({ length: 6 }, (_, i) =>
-            `<div class="slot" data-slot="${i}"><span class="slotIcon"></span><span class="slotN"></span></div>`
-        ).join("");
-        this.els.hotbar.querySelectorAll(".slot").forEach((el) => {
-            el.addEventListener("click", () => this.onHotbar(Number(el.dataset.slot)));
+        $("conditionButton").addEventListener("click", () => this.actions.onCondition());
+        this.els.summary.addEventListener("click", () => { this.needsPinned = !this.needsPinned; this.setNeedsExpanded(this.needsPinned); });
+        this.els.disclosure.addEventListener("pointerenter", (e) => { if (e.pointerType !== "touch") this.setNeedsExpanded(true); });
+        this.els.disclosure.addEventListener("pointerleave", () => { if (!this.needsPinned) this.setNeedsExpanded(false); });
+        this.els.disclosure.addEventListener("focusin", () => this.setNeedsExpanded(true));
+        this.els.disclosure.addEventListener("focusout", (e) => {
+            if (!this.els.disclosure.contains?.(e.relatedTarget)) { this.needsPinned = false; this.setNeedsExpanded(false); }
         });
+        this.els.disclosure.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); this.needsPinned = false; this.setNeedsExpanded(false); }
+        });
+        this.els.hotbar.setAttribute("role", "group");
+        this.els.hotbar.setAttribute("aria-label", "Предметы под рукой");
+        this.els.hotbar.innerHTML = `<button type="button" id="heldItem" class="quickItem"></button>
+            <button type="button" id="eatItem" class="quickItem"></button>
+            <button type="button" id="chooseFood" class="quickIcon" aria-label="Выбрать еду">⌄</button>
+            <button type="button" id="quickBag" class="quickIcon" aria-label="Рюкзак">🎒</button>`;
+        for (const [id, action] of [["heldItem", "onEquipment"], ["eatItem", "onEat"], ["chooseFood", "onProvisions"], ["quickBag", "onBag"]]) {
+            this.els[id] = $(id);
+            this.els[id].addEventListener("click", () => this.actions[action]());
+        }
+    }
+
+    setNeedsExpanded(open) {
+        this.els.details.hidden = !open;
+        this.els.summary.setAttribute("aria-expanded", String(open));
+        if (!open) this.needsPinned = false;
     }
 
     /** Per-frame refresh. */
     update(state) {
         const { needs, clock, weather, inventory, objective, zoneName } = state;
+        let worst = null;
         for (const n of NEED_DEFS) {
             const raw = n.key === "stamina" ? (state.player?.stamina ?? 100) : needs[n.key];
             const v = Math.max(0, Math.min(100, n.invert ? 100 - raw : raw));
             const bar = this.needBars[n.key];
             const row = this.needRows[n.key];
             const pct = Math.round(v);
+            if (!worst || v < worst.value) worst = { ...n, value: v, pct };
             bar.style.width = v + "%";
             // A number as well as a bar: "half full" is not a plan, "38 %" is.
             if (this.needVals[n.key].textContent !== pct + "%") {
@@ -121,6 +152,11 @@ export class HUD {
             row.classList.toggle("critical", v < UI.bar.critical);
         }
 
+        const summaryHTML = `<span class="summaryIcon" aria-hidden="true">${worst.icon}</span><span>${worst.label}</span><b>${worst.pct}%</b><span aria-hidden="true">⌄</span><i style="width:${worst.pct}%;background:${worst.color}"></i>`;
+        if (this.els.summary.innerHTML !== summaryHTML) this.els.summary.innerHTML = summaryHTML;
+        this.els.summary.setAttribute("aria-label", `${worst.label} ${worst.pct}%. Все показатели`);
+        this.els.summary.classList.toggle("critical", worst.value < UI.bar.critical);
+
         const w = weather.info;
         this.els.sky.innerHTML = `
           <div class="skyTime">${clock.clockString()}</div>
@@ -130,13 +166,16 @@ export class HUD {
 
         this.els.objective.textContent = objective ? "🎯 " + objective : "";
 
-        inventory.hotbar.forEach((slot, i) => {
-            const el = this.els.hotbar.querySelector(`[data-slot="${i}"]`);
-            el.classList.toggle("active", inventory.activeSlot === i);
-            el.querySelector(".slotIcon").textContent = slot ? itemEmoji(slot.id) : "";
-            el.querySelector(".slotN").textContent = slot && slot.n > 1 ? slot.n : "";
-            el.title = slot ? itemName(slot.id) : "";
-        });
+        const held = inventory.active, tool = held && holdable(held.id) ? held.id : null;
+        const food = quickFood(inventory, state.quickFoodId);
+        const card = (icon, title, subtitle) => `<span class="quickGlyph" aria-hidden="true">${icon}</span><span class="quickText"><small>${subtitle}</small><b>${title}</b></span>`;
+        const equipText = card(tool ? itemEmoji(tool) : "✋", tool ? itemName(tool) : "Предмет", "В руке");
+        if (this.els.heldItem.innerHTML !== equipText) this.els.heldItem.innerHTML = equipText;
+        this.els.heldItem.setAttribute("aria-label", tool ? `В руке ${itemName(tool)}. Сменить предмет` : "Выбрать предмет в руку");
+        const eatText = card(food ? itemEmoji(food) : "—", food ? `${itemName(food)} ×${inventory.count(food)}` : "Нет еды", "Съесть");
+        if (this.els.eatItem.innerHTML !== eatText) this.els.eatItem.innerHTML = eatText;
+        this.els.eatItem.disabled = !food;
+        this.els.eatItem.setAttribute("aria-label", food ? `Съесть ${itemName(food)}. Осталось ${inventory.count(food)}` : "Нет еды");
         return this;
     }
 
@@ -215,6 +254,7 @@ export class HUD {
      * @param {Array} rows [{ label, icon, hint, disabled, action }] or { html }
      */
     openPanel(title, rows, name = "panel", { locked = false } = {}) {
+        this.setNeedsExpanded(false);
         this.panelLocked = locked;
         this.els.panelClose.disabled = locked;
         this.panelOpen = name;

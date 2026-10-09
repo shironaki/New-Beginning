@@ -8,6 +8,7 @@
  * All rates are per in-game MINUTE, so they are independent of frame rate and
  * of how fast the clock runs.
  */
+import { healthEffects, NEED_RATES } from "./condition.js";
 import { feltWarmth, warmthBand } from "./temperature.js";
 
 export const DIFFICULTY = {
@@ -44,12 +45,12 @@ export class Needs {
         const activity = ctx.activity || (sleeping ? 0.35 : 1);
 
         // --- hunger -------------------------------------------------------
-        const hungerRate = 0.075 * d.drain * activity;
+        const hungerRate = NEED_RATES.hunger * d.drain * activity;
         this.food = clamp(this.food - hungerRate * minutes, 0, 100);
 
         // --- fatigue ------------------------------------------------------
-        if (sleeping) this.fatigue = clamp(this.fatigue - 0.22 * minutes, 0, 100);
-        else this.fatigue = clamp(this.fatigue + 0.055 * activity * d.drain * minutes, 0, 100);
+        if (sleeping) this.fatigue = clamp(this.fatigue - NEED_RATES.sleepRest * minutes, 0, 100);
+        else this.fatigue = clamp(this.fatigue + NEED_RATES.fatigue * activity * d.drain * minutes, 0, 100);
 
         // --- warmth: drift toward what the body actually feels ------------
         const target = feltWarmth({
@@ -71,20 +72,8 @@ export class Needs {
         }
 
         // --- health -------------------------------------------------------
-        let dmg = 0;
-        if (this.food <= 0) dmg += 0.14;
-        else if (this.food < 12) dmg += 0.05;
-        if (this.warmth < 12) dmg += 0.2;
-        else if (this.warmth < 25) dmg += 0.06;
-        if (this.warmth > 95) dmg += 0.05;
-        if (this.fatigue >= 100) dmg += 0.05;
-
-        if (dmg > 0) {
-            this.health = clamp(this.health - dmg * d.damage * minutes, 0, 100);
-        } else if (this.food > 45 && this.warmth > 35 && this.fatigue < 80) {
-            const heal = sleeping ? 0.18 : 0.045;
-            this.health = clamp(this.health + heal * minutes, 0, 100);
-        }
+        const healthRate = healthEffects(this, sleeping).reduce((sum, e) => sum + e.rate, 0);
+        this.health = clamp(this.health + healthRate * minutes, 0, 100);
 
         // --- spirit -------------------------------------------------------
         let mood = 0;

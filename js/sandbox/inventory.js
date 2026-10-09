@@ -101,7 +101,7 @@ export class Inventory {
     get active() { return this.slots[this.activeSlot] || null; }
 
     setActive(i) {
-        this.activeSlot = Math.max(0, Math.min(this.hotbarSize - 1, i));
+        this.activeSlot = Math.max(0, Math.min(this.size - 1, Number.isInteger(i) ? i : 0));
         if (this.bus) this.bus.emit("inv:active", { index: this.activeSlot, item: this.active });
         return this;
     }

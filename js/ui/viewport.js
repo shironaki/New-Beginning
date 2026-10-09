@@ -42,13 +42,13 @@ export function installViewport(game, stage, win = window, doc = document) {
         if (game.controlMode !== mode || bounds !== lastBounds) { game.input.releaseAll(); game.touch?.reset(); }
         lastBounds = bounds;
         game.controlMode = mode;
-        for (const id of ["bag", "journal", "action"]) game.sessionButtons[id].hidden = mode !== "touch";
+        for (const id of ["journal", "action"]) game.sessionButtons[id].hidden = mode !== "touch";
         const canvas = game.renderer.canvas;
         Object.assign(canvas.style, { width: `${rect.width}px`, height: `${rect.height}px` });
         if (canvas.width !== size.width || canvas.height !== size.height || cam.zoom !== UI.baseZoom * size.density) {
             game.renderer.resize(size.width, size.height);
             cam.zoom = UI.baseZoom * size.density;
-            cam.snapTo(center.x, center.y);
+            cam.snapViewTo(center.x, center.y);
             if (!cam.isVisible(game.player.x, game.player.y, -20)) cam.snapTo(game.player.x, game.player.y - 8);
         } else cam.zoom = UI.baseZoom * size.density;
         const button = game.sessionButtons.fullscreen;

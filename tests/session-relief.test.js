@@ -91,10 +91,10 @@ test("Continue gate prevents overwrite before the player chooses a session", () 
 });
 test("New Game requires confirmation; backing out keeps the old save", () => {
     const g = boot(); g.inventory.add("log", 4); g.save.write(); const old = g.save.storage.getItem(g.save.key);
-    openSessionMenu(g); click(g.hud._panelRows[3]); // resume, load, save, new
+    openSessionMenu(g); click(g.hud._panelRows.find((r) => r.innerHTML.includes("Новая игра")));
     assert.eq(g.inventory.count("log"), 4); assert.eq(g.save.storage.getItem(g.save.key), old);
     click(g.hud._panelRows[1]); assert.eq(g.save.storage.getItem(g.save.key), old);
-    click(g.hud._panelRows[3]); click(g.hud._panelRows[0]);
+    click(g.hud._panelRows.find((r) => r.innerHTML.includes("Новая игра"))); click(g.hud._panelRows[0]);
     assert.eq(g.inventory.count("log"), 0); assert.not(g.hud.isPanelOpen);
 });
 test("30 seconds of active time saves; an open menu neither moves nor recovers stamina", () => {

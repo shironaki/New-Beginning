@@ -39,6 +39,7 @@ export function openSessionMenu(game) {
             { label: "Назад", action: () => openSessionMenu(g) }
         ], "session");
     } });
+    if (!initial) rows.push({ label: "Состояние и причины", action: () => g.openCondition() });
     if (!initial) rows.push({ label: "Сохранить игру", icon: "💾", action: () => checkpoint(g) });
     if (!g.isTrial) rows.push({ label: "Новая игра", action: () => {
         g.hud.openPanel("Начать заново? Старый прогресс будет заменён после сохранения.", [
@@ -83,10 +84,9 @@ export function installSession(game) {
     game.initialState = JSON.parse(JSON.stringify(game.save.snapshot()));
     const bar = document.createElement("nav"); bar.className = "sessionControls";
     bar.setAttribute("aria-label", "Управление игрой");
-    game.sessionButtons = {};
+    game.sessionButtons = { bag: game.hud.els.quickBag };
     for (const [id, label, action] of [
         ["menu", "☰", () => openSessionMenu(game)],
-        ["bag", "Рюкзак", () => { game.input.releaseAll(); game.hud.hideStory(); game.openBackpack(); }],
         ["journal", "Дневник", () => { game.input.releaseAll(); game.hud.hideStory(); game.openJournal(); }],
         ["action", "Действие", () => game.input.tap("action")],
         ["fullscreen", "⛶", () => game.viewport?.toggleFullscreen()]

@@ -40,7 +40,7 @@ test("desktop stage, canvas and real renderer camera cover uncapped 1920x1080", 
     assert.eq(stage.style.width, "1920px"); assert.eq(stage.style.height, "1080px");
     assert.eq(canvas.style.width, stage.style.width); assert.eq(canvas.width, 1920);
     assert.eq(game.camera.width, 1920); assert.eq(game.camera.zoom, UI.baseZoom);
-    for (const id of ["bag", "journal", "action"]) assert.ok(game.sessionButtons[id].hidden);
+    for (const id of ["journal", "action"]) assert.ok(game.sessionButtons[id].hidden);
     assert.eq(stage.getAttribute("data-controls"), "desktop");
 });
 test("visible viewport resize, scrolling and orientation reposition HUD and stop held touch", () => {

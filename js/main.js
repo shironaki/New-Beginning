@@ -12,6 +12,8 @@ import { GameLoop } from "./core/loop.js";
 import { RNG, hashSeed } from "./core/rng.js";
 import { snapshotWorld, restoreWorld } from "./world/persistence.js";
 import { installSession, sessionTick, openSessionMenu, bindSessionLifecycle } from "./ui/session.js";
+import { conditionRows } from "./survival/condition.js";
+import { holdable, equip, openEquipment, openProvisions, eatQuick } from "./ui/quick-actions.js";
 import { bindTouch } from "./ui/touch.js";
 import { SaveManager } from "./core/save.js";
 import { Input } from "./engine/input.js";
@@ -77,7 +79,7 @@ export class Game {
         this.particles = new Particles();
         this.tracks = new Tracks();
         this.fires = new Map();          // `${zoneId}:${tx},${ty}` -> Campfire
-        this.look = { skin: "#d3ae86", hair: "#493b2d", shirt: "#65786f", pants: "#4e4337", accent: "#996847" };
+        this.look = { skin: "#caa27e", hair: "#39332b", shirt: "#899383", vest: "#41524e", pants: "#48473e", accent: "#b18058" };
 
         this.zone = this.world.get(START_ZONE);
         this.player = new Player({ x: this.zone.spawn.x, y: this.zone.spawn.y, bus: this.bus });
@@ -85,6 +87,7 @@ export class Game {
         this.camera = new Camera({ width: canvas.width, height: canvas.height,
                                   zoom: UI.baseZoom * (canvas.width > 1700 ? 2 : 1) });
         this.camera.followReducedMotion();
+        this.camera.surface = this.zone.playableRelief || null;
         this.camera.setBounds(this.zone.map.widthPx, this.zone.map.heightPx);
         this.camera.snapTo(this.player.x, this.player.y);
 
@@ -92,6 +95,9 @@ export class Game {
         this.input = new Input({ target: window });
         this.hud = new HUD(hudRoot, {
             onHotbar: (i) => this.inventory.setActive(i),
+            onEquipment: () => openEquipment(this), onProvisions: () => openProvisions(this),
+            onEat: () => eatQuick(this), onBag: () => { if (this.sessionReady !== false) this.openBackpack(); },
+            onCondition: () => this.openCondition(),
             onAction: () => {}
         });
         this.story = new StoryEngine({ bus: this.bus, game: this });
@@ -189,6 +195,10 @@ export class Game {
         this.save.register("clock", () => this.clock.toJSON(), (d) => this.clock.load(d));
         this.save.register("needs", () => this.needs.toJSON(), (d) => this.needs.load(d));
         this.save.register("inv", () => this.inventory.toJSON(), (d) => this.inventory.load(d));
+        this.save.register("quick", () => ({ food: this.quickFoodId || null }), (d) => {
+            if (d?.food && !foodValue(d.food)) throw new Error("Некорректная быстрая еда");
+            this.quickFoodId = d?.food || null;
+        });
         this.save.register("weather", () => this.weather.toJSON(), (d) => this.weather.load(d));
         this.save.register("player", () => ({ zone: this.zone.id, p: this.player.toJSON() }),
             (d) => {
@@ -280,6 +290,7 @@ export class Game {
         this.zone = zone;
         this.tracks.clear();        // prints belong to the ground we left
         this._prepareZone(zone);
+        this.camera.surface = zone.playableRelief || null;
         this.camera.setBounds(zone.map.widthPx, zone.map.heightPx);
         if (fromEdge) {
             const edge = oppositeEdge(fromEdge);
@@ -347,7 +358,7 @@ export class Game {
         const fp = this.player.facingPoint(16);
         let best = null, bestD = 30;
         for (const obj of this.zone.objects) {
-            if (obj.removed) continue;
+            if (obj.removed || (this.zone.playableRelief && !this.zone.playableRelief.canReach(this.player, obj))) continue;
             const def = propDef(obj.kind);
             if (!def) continue;
             if (!def.interact && !Array.isArray(def.drops)) continue;
@@ -532,7 +543,15 @@ export class Game {
 
     /* ---- backpack ---- */
 
+    openCondition() {
+        if (this.sessionReady === false) return;
+        this.input.releaseAll(); this.touch?.reset();
+        this.hud.setNeedsExpanded(false);
+        this.hud.openPanel("Состояние · что влияет сейчас", conditionRows(this), "condition");
+    }
+
     openBackpack() {
+        this.input.releaseAll(); this.touch?.reset();
         const rows = [{ html: `<b>Рюкзак</b> · ${this.inventory.used}/${this.inventory.size} · ${this.inventory.weight} кг` }];
         for (const s of this.inventory.list()) {
             const d = itemDef(s.id);
@@ -540,8 +559,11 @@ export class Game {
             rows.push({
                 icon: itemEmoji(s.id),
                 label: `${itemName(s.id)} ×${s.n}`,
-                hint: edible ? `съесть · +${edible.food}🍖` : (d.tool ? "инструмент" : ""),
-                action: edible ? () => { this.eat(s.id); this.openBackpack(); } : () => {}
+                hint: edible ? `съесть · +${edible.food}🍖` : holdable(s.id) ? "Взять в руку" : "О предмете",
+                action: edible ? () => { this.eat(s.id); this.openBackpack(); } : () => {
+                    if (holdable(s.id)) { equip(this, this.inventory.slots.findIndex((v) => v?.id === s.id)); this.openBackpack(); }
+                    else this.hud.toast(d.insulation ? `Одежда согревает, пока она в рюкзаке: +${d.insulation}°C` : d.burn ? "Топливо добавляется через меню костра." : d.tags.includes("readable") ? "Записи доступны в дневнике." : "Этот предмет хранится в рюкзаке; прямого использования пока нет.", itemEmoji(s.id));
+                }
             });
         }
         this.hud.openPanel("Рюкзак", rows, "bag");
@@ -549,11 +571,12 @@ export class Game {
 
     eat(id) {
         const val = foodValue(id);
-        if (!val) return;
-        if (!this.inventory.remove(id, 1)) return;
+        if (!val || this.sessionReady === false) return false;
+        if (!this.inventory.remove(id, 1)) return false;
         this.needs.consume(val);
         this.particles.text(this.player.x, this.player.y - 26, `+${val.food} 🍖`, { color: "#b7e37a" });
         this.hud.toast(`Съедено: ${itemName(id)}`, itemEmoji(id));
+        return true;
     }
 
     openJournal() {
@@ -617,6 +640,13 @@ export class Game {
 
     /* ===================== loop ===================== */
 
+    needsContext(sleeping = false) {
+        return { ambient: this.ambient, fireWarmth: this.fireWarmthNear(this.player.x, this.player.y),
+            insulation: this.inventory.has("cloak") ? 6 : 0,
+            sheltered: sleeping || this.shelteredAt(this.player.x, this.player.y), sleeping,
+            activity: sleeping ? .3 : this.player.activity(), company: false };
+    }
+
     /** Advance world systems by `minutes` in-game minutes. */
     simulateMinutes(minutes, sleeping = false) {
         this.weather.updateSurface(minutes);
@@ -626,15 +656,7 @@ export class Game {
             const obj = zone.objects.find((o) => this.fireKey(zone, o) === key);
             fire.update(seconds, this.fireEnvironment(zone, obj));
         }
-        this.needs.update(minutes, {
-            ambient: this.ambient,
-            fireWarmth: this.fireWarmthNear(this.player.x, this.player.y),
-            insulation: this.inventory.has("cloak") ? 6 : 0,
-            sheltered: sleeping || this.shelteredAt(this.player.x, this.player.y),
-            sleeping,
-            activity: sleeping ? 0.3 : this.player.activity(),
-            company: false
-        });
+        this.needs.update(minutes, this.needsContext(sleeping));
         if (this.weather.isWet && !sleeping && !this.shelteredAt(this.player.x, this.player.y)) {
             this.needs.wet = Math.min(1, this.needs.wet + 0.004 * minutes);
         }
@@ -805,7 +827,7 @@ export class Game {
             needs: this.needs, player: this.player,
             clock: this.clock,
             weather: this.weather,
-            inventory: this.inventory,
+            inventory: this.inventory, quickFoodId: this.quickFoodId,
             objective: this.story.objective,
             zoneName: this.zone.def.name,
             ambient: this.ambient

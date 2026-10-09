@@ -23,11 +23,12 @@ import { SUN, castShadow } from "./tilesart.js";
 import { BODY, GEAR, TONE, PALETTE, READ, SHADOW, WADE, GAIT, ACTION, ATTACH, fallPose, clamp01, easeInOutSine, q } from "./charspec.js";
 
 export const DEFAULT_LOOK = {
-    skin: "#d3ae86",
-    hair: "#4a3526",
-    shirt: "#65786f",
-    pants: "#4e4337",
-    accent: "#996847",       // one accent per figure — sash, flap, trim
+    skin: "#caa27e",
+    hair: "#39332b",
+    shirt: "#899383",
+    vest: "#41524e",
+    pants: "#48473e",
+    accent: "#b18058",       // one accent per figure — sash, flap, trim
     cloak: null,
     hairStyle: "short",
     stubble: true,
@@ -448,6 +449,25 @@ function paintCharacter(ctx, p) {
     poly(ctx, stripe(rows, 1, 0, sideView ? 1.2 : 1.6), band(shirt, "dark"), false);
     poly(ctx, stripe(rows, 1, 0, 0.5), band(shirt, "deep"), false);
     rect(ctx, -rows[0][1], top, rows[0][1] * 2, PALETTE.aoW * 2, PALETTE.ao, false);   // under the collar
+
+    // Worn waistcoat over a lighter linen shirt. Open neck, tapered panels
+    // and a split hem read as clothing instead of a single rectangular torso.
+    if (look.vest) {
+        const vw = rows[1][1], waist = rows[2][1];
+        if (back) {
+            poly(ctx, [[-vw + .5, top + .5], [vw - .5, top + .5], [waist, bottom - .8],
+                [0, bottom], [-waist, bottom - .8]], look.vest, false);
+            rect(ctx, -.25, top + 3, .5, 6, band(look.vest, "dark"), false);
+        } else {
+            poly(ctx, [[-vw + .4, top + .6], [-1.9, top + .8], [-.6, top + 4.6],
+                [-.6, bottom - 1], [-2.1, bottom + .3], [-waist, bottom - .8]], look.vest, false);
+            poly(ctx, [[vw - .4, top + .6], [1.8, top + .8], [.6, top + 4.6],
+                [.6, bottom - 1], [2.1, bottom + .3], [waist, bottom - .8]], band(look.vest, "dark"), false);
+            ctx.strokeStyle = "#a69a73"; ctx.lineWidth = .35;
+            ctx.beginPath(); ctx.moveTo(-1.9, top + 1); ctx.lineTo(-.6, top + 4.6); ctx.lineTo(-.6, bottom - 2); ctx.stroke();
+            rect(ctx, -waist + .8, top + 7, 1.9, .45, band(look.vest, "lit"), false);
+        }
+    }
 
     if (back) {
         rect(ctx, -0.5, top + 1.5, 1, BODY.torsoH - 4, PALETTE.ao, false);            // spine seam

@@ -8,7 +8,7 @@
 import { moveAndCollide } from "../world/tilemap.js";
 import { ICE } from "../world/surface.js";
 import { TILE_SIZE } from "../world/tiles.js";
-import { GAIT, MOVE, approach } from "../render/charspec.js";
+import { GAIT, MOVE, STAMINA, approach } from "../render/charspec.js";
 
 export const DIRS = ["down", "left", "right", "up"];
 
@@ -140,8 +140,8 @@ export class Player {
         // every time a small reserve happens to recover under a held key.
         const canRun = wantRun && !this.sprintLocked && mag > 0.6;
         this.running = canRun;
-        if (canRun) this.stamina = Math.max(0, this.stamina - 16 * dt);
-        else this.stamina = Math.min(this.maxStamina, this.stamina + (this.moving ? 7 : 14) * dt);
+        if (canRun) this.stamina = Math.max(0, this.stamina - STAMINA.drain * dt);
+        else this.stamina = Math.min(this.maxStamina, this.stamina + (this.moving ? STAMINA.walkRecovery : STAMINA.idleRecovery) * dt);
 
         // Analogue magnitude scales speed; sprint overrides the top end.
         const base = canRun ? this.runSpeed : this.walkSpeed;

@@ -11,6 +11,7 @@
  * Only visible chunks are drawn, and a chunk is re-baked only when a tile in
  * it changes. That is the whole performance story for a 96×72 zone.
  */
+import { projectGround } from "./projected-ground.js";
 import { syncWaterState, waterIce } from "../world/water-state.js";
 import { CHUNK } from "../world/tilemap.js";
 import { TILE_SIZE, TILES } from "../world/tiles.js";
@@ -225,7 +226,7 @@ export class Renderer {
         if (zone.terrain) {
             bakeTerrain(c, zone, cx, cy, size, this.season);
             this.stats.baked++;
-            return cv;
+            return zone.playableRelief ? projectGround(cv, zone.playableRelief, cx * size, cy * size) : cv;
         }
         for (let ty = 0; ty < CHUNK; ty++) {
             for (let tx = 0; tx < CHUNK; tx++) {
@@ -320,7 +321,8 @@ export class Renderer {
     drawGround(zone) {
         const cam = this.camera;
         const ctx = this.ctx;
-        const chunks = zone.map.chunksInRect(cam.x, cam.y, cam.viewW, cam.viewH);
+        const lift = zone.playableRelief?.maxHeight || 0;
+        const chunks = zone.map.chunksInRect(cam.x, cam.y, cam.viewW, cam.viewH + lift);
         this.stats.chunksDrawn = 0;
         for (const ch of chunks) {
             const key = `${zone.id}:${ch.key}`;
@@ -332,9 +334,10 @@ export class Renderer {
             if (!cv) { cv = this.bakeChunk(zone, ch.cx, ch.cy); this.chunkCache.set(key, cv); }
             const wx = ch.cx * CHUNK * TILE_SIZE;
             const wy = ch.cy * CHUNK * TILE_SIZE;
-            const s = cam.worldToScreen(wx, wy);
-            const size = CHUNK * TILE_SIZE * cam.zoom;
-            ctx.drawImage(cv, Math.round(s.x), Math.round(s.y), Math.ceil(size), Math.ceil(size));
+            // Texture already contains elevation; don't project its origin twice.
+            const sx = (wx - cam.x + cam.offsetX) * cam.zoom;
+            const sy = (wy - (cv.groundLift || 0) - cam.y + cam.offsetY) * cam.zoom;
+            ctx.drawImage(cv, sx, sy, cv.width * cam.zoom, cv.height * cam.zoom);
             this.stats.chunksDrawn++;
         }
         return this;
@@ -658,7 +661,8 @@ export class Renderer {
         // are broken by x and then by identity: two props on the same row used
         // to swap places between frames (sort is only stable for equal keys of
         // the same shape) and the overlap flickered.
-        drawables.sort((a, b) => (a.y - b.y) || (a.x - b.x) || (a.ord - b.ord));
+        const depth = (d) => d.y - (zone.playableRelief?.heightAt(d.x, d.y) || 0);
+        drawables.sort((a, b) => (depth(a) - depth(b)) || (a.x - b.x) || (a.ord - b.ord));
         this.stats.propsDrawn = drawables.length;
 
         for (const d of drawables) {
@@ -728,6 +732,7 @@ export class Renderer {
         const push = (x, y, r, i, flicker = 1, glow = 1) => {
             let L = out[n];
             if (!L) { L = { x: 0, y: 0, r: 0, i: 1, phase: 0 }; out[n] = L; }
+            L.anchorX = L.anchorY = undefined; L.localX = L.localY = 0;
             L.x = x; L.y = y; L.r = r; L.i = i; L.flicker = flicker; L.glow = glow;
             // Flicker phase keyed to the world, so two fires are out of step
             // with each other and neither changes beat when the camera moves.
@@ -747,6 +752,7 @@ export class Renderer {
             const attachment = toolAttachment({ ...p, phase: p.anim, idleTime: this.time,
                 torchWind: state.underground ? 0 : Math.cos(state.windAngle || 0) * (state.windStrength || 0) });
             push(p.x + attachment.x, p.y + attachment.y, state.playerLight, attachment.intensity, 0, 0.45);
+            Object.assign(out[n - 1], { anchorX: p.x, anchorY: p.y, localX: attachment.x, localY: attachment.y });
         }
         for (const L of state.extraLights || []) push(L.x, L.y, L.r, L.i || 0.7);
         out.length = n;
@@ -768,9 +774,11 @@ export class Renderer {
     _occlude(obj, player, dt) {
         const tall = propHeight(obj.kind, obj.size || 1);
         let want = 0;
-        if (tall >= OCCLUDE.minHeight && obj.y > player.y) {
+        const surface = this?.camera?.surface;
+        const objY = obj.y - (surface?.heightAt(obj.x, obj.y) || 0), playerY = player.y - (surface?.heightAt(player.x, player.y) || 0);
+        if (tall >= OCCLUDE.minHeight && objY > playerY) {
             const dx = Math.abs(obj.x - player.x);
-            const dy = obj.y - player.y;                 // prop is in front
+            const dy = objY - playerY;                 // prop is in front
             // A crown is as wide as the tree is tall, roughly; the overlap
             // that matters is crown half-width plus the hero's shoulders.
             const reach = tall * OCCLUDE.spread + OCCLUDE.bodyHalf;
@@ -1070,7 +1078,8 @@ export class Renderer {
         this.lightMap.begin();
         for (const L of this._lights || []) {
             if (!cam.isVisible(L.x, L.y, 200)) continue;
-            const s = cam.worldToScreen(L.x, L.y);
+            const s = cam.worldToScreen(L.anchorX ?? L.x, L.anchorY ?? L.y);
+            s.x += (L.localX || 0) * cam.zoom; s.y += (L.localY || 0) * cam.zoom;
             this.lightMap.add(s.x, s.y, L.r * cam.zoom,
                 { intensity: L.i, warmth: 0.88, flicker: L.flicker ?? 1, phase: L.phase || 0, glow: L.glow ?? 1 });
         }

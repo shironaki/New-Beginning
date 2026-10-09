@@ -52,7 +52,14 @@ export function terrainColour(field, wx, wy, season, palette) {
         // same world-space normal and cannot restart at a chunk edge.
         const dx = (field.elevation(wx + 6, wy) - field.elevation(wx - 6, wy)) / 12;
         const dy = (field.elevation(wx, wy + 6) - field.elevation(wx, wy - 6)) / 12;
-        tone += Math.max(-16, Math.min(16, (-dx - dy) * 48));
+        if (field.projected) {
+            // Exposed earth along the home shelf: material bands follow
+            // HEIGHT, never tile rows. Keep the flat summit ash-covered.
+            const bank = Math.max(0, Math.min(1, (Math.hypot(dx, dy) - .10) * 5));
+            const strata = Math.max(0, 1 - Math.abs(Math.sin(field.elevation(wx, wy) * .30 + field.noise(wx, wy, 38, 612) * .7)) * 5);
+            r += (123 - r) * bank * .7; g += (106 - g) * bank * .7; b += (81 - b) * bank * .7;
+            tone += Math.max(-30, Math.min(24, (dx + dy) * 65)) - strata * bank * 10 * Math.max(0, field.noise(wx, wy, 27, 613) * 2 - .8);
+        } else tone += Math.max(-16, Math.min(16, (-dx - dy) * 48));
         if (s.cliff > 0.05 && s.cliff < 0.5) tone -= s.cliff * 23;
         if (s.id === T.CLIFF) {
             const edge = Math.min(wx, wy, field.map.widthPx - wx, field.map.heightPx - wy) < 288;
@@ -130,7 +137,7 @@ export function bakeTerrain(ctx, zone, cx, cy, size, season) {
 }
 
 export function drawTerrainWater(ctx, zone, camera, time, daylight) {
-    const b = { left: camera.x - 16, top: camera.y - 16, right: camera.x + camera.viewW + 16, bottom: camera.y + camera.viewH + 16 }, z = camera.zoom;
+    const b = { left: camera.x - 16, top: camera.y - 16, right: camera.x + camera.viewW + 16, bottom: camera.y + camera.viewH + 16 + (zone.playableRelief?.maxHeight || 0) }, z = camera.zoom;
     ctx.save();
     ctx.strokeStyle = `rgba(179,219,215,${0.08 + daylight * 0.12})`; ctx.lineWidth = Math.max(0.7, z * 0.45);
     ctx.beginPath();
