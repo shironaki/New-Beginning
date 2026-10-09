@@ -206,8 +206,9 @@ export class Player {
         const x0 = this.x, y0 = this.y;
         if (zone) {
             const res = moveAndCollide(zone.map, this.x, this.y, dx, dy, this.radius,
-                (wx, wy) => zone.isBlockedTile(Math.floor(wx / TILE_SIZE), Math.floor(wy / TILE_SIZE)),
-                (px, py, r) => zone.propContact(px, py, r));
+                (wx, wy) => zone.isBlockedTile(Math.floor(wx / TILE_SIZE), Math.floor(wy / TILE_SIZE))
+                    || (!!zone.playableRelief && Math.abs(zone.playableRelief.heightAt(wx,wy)-zone.playableRelief.heightAt(x0,y0))>12),
+                (px, py, r) => zone.propContact(px, py, r) || zone.playableRelief?.contactAt(px,py,r));
             // Hitting something eats the speed in that direction: no
             // grinding along a rock at full tilt, and no stored energy that
             // fires the hero sideways the moment the wall ends.

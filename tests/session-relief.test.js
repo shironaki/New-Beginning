@@ -97,7 +97,8 @@ test("New Game requires confirmation; backing out keeps the old save", () => {
     assert.eq(g.inventory.count("log"), 4); assert.eq(g.save.storage.getItem(g.save.key), old);
     click(g.hud._panelRows[1]); assert.eq(g.save.storage.getItem(g.save.key), old);
     click(g.hud._panelRows.find((r) => r.innerHTML.includes("Новая игра"))); click(g.hud._panelRows[0]);
-    assert.eq(g.inventory.count("log"), 0); assert.not(g.hud.isPanelOpen);
+    assert.eq(g.inventory.count("log"), 0); assert.eq(g.hud.panelOpen,"appearance");
+    click(g.hud._panelRows.find(r=>r.innerHTML.includes("Начать путь"))); assert.not(g.hud.isPanelOpen);
 });
 test("30 seconds of active time saves; an open menu neither moves nor recovers stamina", () => {
     const g = boot(); g.player.stamina = 12;

@@ -55,8 +55,9 @@ export function terrainColour(field, wx, wy, season, palette) {
     } else {
         // Actual elevation also affects walking uphill. Hillshade uses the
         // same world-space normal and cannot restart at a chunk edge.
-        const dx = (field.elevation(wx + 6, wy) - field.elevation(wx - 6, wy)) / 12;
-        const dy = (field.elevation(wx, wy + 6) - field.elevation(wx, wy - 6)) / 12;
+        const elevation = field.shadeElevation || field.elevation;
+        const dx = (elevation.call(field, wx + 6, wy) - elevation.call(field, wx - 6, wy)) / 12;
+        const dy = (elevation.call(field, wx, wy + 6) - elevation.call(field, wx, wy - 6)) / 12;
         if (field.projected) {
             // Exposed earth along the home shelf: material bands follow
             // HEIGHT, never tile rows. Keep the flat summit ash-covered.

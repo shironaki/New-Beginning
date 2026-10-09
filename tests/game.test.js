@@ -40,6 +40,8 @@ test("the game constructs with a world, a hero and a HUD", () => {
 test("opening narration does not pause survival", () => {
     const g = boot();
     g.start();
+    assert.eq(g.hud.panelOpen, "appearance");
+    g.hud._panelRows.find(r=>r.innerHTML.includes("Начать путь")).dispatch("click");
     assert.ok(g.hud.isStoryOpen, "the prologue text should be on screen");
     assert.not(g.paused);
     const time = g.clock.minute; g.update(1); assert.gt(g.clock.minute,time);

@@ -1,3 +1,4 @@
+import { handCapacity } from "./carry.js";
 /**
  * sandbox — slot-based inventory with stacking, weight and optional physical hands.
  *
@@ -118,13 +119,13 @@ export class Inventory {
         if (!this.hands) { this.hands = { left: null, right: null }; this.dominant = "right"; this.equipHand("right", this.activeSlot); }
         return this;
     }
-    equipHand(side, index = -1) {
+    equipHand(side, index = -1, amount = 1) {
         if (!this.hands || !["left", "right"].includes(side) || this.handAction) return false;
         const selected = index >= 0 ? this.slots[index] : null;
-        if (index >= 0 && !selected) return false;
+        if (index >= 0 && (!selected || !Number.isInteger(amount) || amount < 1 || amount > handCapacity(selected.id) || selected.n < amount)) return false;
         // Dry-run both movements; failed stowing must neither drop nor duplicate.
         const bag = new Inventory({ slots: this.size }); bag.slots = this.slots.map((s) => s && { ...s });
-        const next = selected ? bag.takeFromSlot(index, 1) : null;
+        const next = selected ? bag.takeFromSlot(index, amount) : null;
         const old = this.hands[side];
         if (old && bag.add(old.id, old.n)) return false;
         this.slots = bag.slots; this.hands[side] = next;

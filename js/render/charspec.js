@@ -23,32 +23,32 @@
 export const QUANT = 0.125;
 
 /**
- * Body proportions — "Albion lean": small head, heavy shoulders, waist pulled
+ * Body proportions — the travelling coat silhouette: small head, heavy shoulders, waist pulled
  * in, hips and boots wide again. The pyramid is what makes a 60 px figure
  * read as a person with gear instead of a cute doll.
  *
  * head : body ≈ 1 : 4.4
  */
 export const BODY = {
-    total: 36,
+    total: 42,
 
-    headH: 6.6,
-    headW: 6.2,
-    headY: -35.8,              // top of the skull
+    headH: 7.5,
+    headW: 7.0,
+    headY: -42,              // top of the skull
 
-    torsoY: -28.4,             // shoulder line
-    torsoH: 12.4,
+    torsoY: -33,             // shoulder line
+    torsoH: 14,
     shoulderW: 12.2,           // front/back view
     shoulderWSide: 8.4,      // profile is narrower — that is what sells the turn
-    waistW: 8.1,             // the pinch, at 72% down the torso
+    waistW: 8.8,             // the pinch, at 72% down the torso
     waistAt: 0.72,
-    hipW: 8.8,
+    hipW: 10,
 
-    hipY: -15.8,
-    legW: 3.2,
+    hipY: -19,
+    legW: 3.7,
     legGap: 1.0,
-    thigh: 7.0,
-    shin: 6.6,
+    thigh: 8.8,
+    shin: 7.9,
 
     ankleY: -2.4,
     bootW: 4.7,
@@ -56,8 +56,8 @@ export const BODY = {
     bootToe: 1.5,            // how far the toe sticks out past the ankle
     idleStance: 1.2,         // profile: feet part this much when standing
 
-    armY: -27.4,               // shoulder pivot, just under the shoulder line
-    armLen: 12.2,
+    armY: -32,               // shoulder pivot, just under the shoulder line
+    armLen: 14.5,
     armW: 2.3,
     sleeveW: 1.3,            // the shoulder is wider than the forearm
     handH: 2.2,              // readable fingers, not a square cuff

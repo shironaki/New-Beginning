@@ -1,3 +1,4 @@
+import { paintTerraceFace } from "./terrace.js";
 import { paintCookware, paintLoot } from "./cookware.js";
 /**
  * render — the frame.
@@ -663,15 +664,19 @@ export class Renderer {
             drawables.push({ y: player.y, x: player.x, ord: drawables.length, kind: "player", obj: player });
         }
 
+        for(const face of zone.playableRelief?.faces || []) {
+            if(cam.isVisible(face.x,face.y,140)) drawables.push({x:face.x,y:face.y,ord:drawables.length,kind:"face",obj:face});
+        }
         // Painter's order. The key is the foot line, not the centre, and ties
         // are broken by x and then by identity: two props on the same row used
         // to swap places between frames (sort is only stable for equal keys of
         // the same shape) and the overlap flickered.
-        const depth = (d) => d.y - (zone.playableRelief?.heightAt(d.x, d.y) || 0);
+        const depth = (d) => zone.playableRelief?.faces ? d.y : d.y - (zone.playableRelief?.heightAt(d.x, d.y) || 0);
         drawables.sort((a, b) => (depth(a) - depth(b)) || (a.x - b.x) || (a.ord - b.ord));
         this.stats.propsDrawn = drawables.length;
 
         for (const d of drawables) {
+            if(d.kind === "face") { paintTerraceFace(ctx,d.obj,zone.playableRelief,cam,this.season);continue; }
             const o = d.obj;
             if (d.kind === "prop" && !o.depleted) this._occlude(o, player, dt);
             const s = cam.worldToScreen(o.x, o.y);

@@ -6,7 +6,7 @@ function shade(c, amount) {
     return `rgb(${[n >> 16, (n >> 8) & 255, n & 255].map((v) => Math.max(0, Math.min(255, v + amount))).join(",")})`;
 }
 export function drawHead(ctx, { x, y, dir, slant = 0, look, time }) {
-    const w = BODY.headW, h = BODY.headH, side = dir === "left" ? -1 : 1;
+    const w = BODY.headW * (look.gender === "female" ? .93 : 1), h = BODY.headH, side = dir === "left" ? -1 : 1;
     const profile = dir === "left" || dir === "right", back = dir === "up";
     const quarter = profile ? Math.min(1, Math.abs(slant)) : 0;
     const away = profile && slant < -0.5;
@@ -56,5 +56,13 @@ export function drawHead(ctx, { x, y, dir, slant = 0, look, time }) {
     }
     if (away) polygon([[-0.48, 0.28], [0.18, 0.22], [0.15, 0.64], [-0.04, 0.87], [-0.33, 0.81], [-0.46, 0.63]], hair);
     if (look.hairStyle === "long") polygon([[-0.48, 0.3], [-0.31, 0.36], [-0.27, 1.07], [-0.52, 1.01]], hair);
+    if (look.hairStyle === "braid") {
+        for(let i=0;i<6;i++) {
+            ctx.fillStyle=i%2?shade(hair,14):hair;ctx.beginPath();
+            ctx.ellipse(-w*.4+Math.sin(time*1.7+i*.3)*.18,h*.8+i*.65,.9,.65,.2,0,Math.PI*2);ctx.fill();
+        }
+        ctx.fillStyle=look.accent;ctx.fillRect(-w*.4-.8,h*.8+3.6,1.6,.8);
+    }
+    if(look.hairStyle === "long") polygon([[-.49,.4],[-.28,.65],[-.27,1.28],[-.57,1.21]],hair);
     ctx.restore();
 }

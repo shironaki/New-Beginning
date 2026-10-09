@@ -1,7 +1,7 @@
 import {test,assert,run} from './tiny.js';
 import {installDOM,FakeElement} from './dom-harness.js';
 import {MemoryStorage} from '../js/core/save.js';
-import {startPickup,tickHands,openBag,handRender} from '../js/ui/hands.js';
+import {startPickup,tickHands,openBag,handRender,startMeal} from '../js/ui/hands.js';
 import {armRig,toolAttachment} from '../js/render/character.js';
 import {paintCookware} from '../js/render/cookware.js';
 import {openSessionMenu} from '../js/ui/session.js';
@@ -23,6 +23,8 @@ test('pickup takes time and leaves wood held, not silently stored',()=>{
 });
 test('stowing a held bundle is explicit and conserves every unit',()=>{
  const g=boot(),o=wood(g);reach(g,o);g.harvest(o);tickHands(g,1);assert.ok(g.inventory.equipHand('left'));assert.eq(g.inventory.count('firewood'),3);assert.eq(g.inventory.hands.left,null);
+ g.inventory.hands.right={id:'torch',n:1};g.inventory.equipHand('left',g.inventory.slots.findIndex(s=>s?.id==='firewood'),3);
+ assert.ok(startMeal(g,'berry'));tickHands(g,1);assert.eq(g.inventory.hands.left.id,'firewood');assert.eq(g.inventory.hands.left.n,3);
 });
 test('both occupied hands/full bag retain all loot in the world',()=>{
  const g=boot(),o=wood(g);g.inventory.hands.left={id:'torch',n:1};g.inventory.slots.fill(null);for(let i=0;i<24;i++)g.inventory.slots[i]={id:'stone',n:50};reach(g,o);g.harvest(o);

@@ -1,3 +1,4 @@
+import { openAppearance } from "./appearance.js";
 /** Browser session controls. No automatic overwrite until Continue/New Game
  * has been explicitly selected; failed loads keep both live state and disk. */
 export function checkpoint(game, quiet = false) {
@@ -44,6 +45,7 @@ export function openSessionMenu(game) {
             action: () => { g.inventory.setDominant(side); openSessionMenu(g); }
         })), "handedness");
     } });
+    if (!initial) rows.push({ label: "Внешность", action: () => openAppearance(g, () => openSessionMenu(g)) });
     if (!initial) rows.push({ label: "Состояние и причины", action: () => g.openCondition() });
     if (!initial) rows.push({ label: "Сохранить игру", icon: "💾", action: () => checkpoint(g) });
     if (!g.isTrial) rows.push({ label: "Новая игра", action: () => {
@@ -53,7 +55,7 @@ export function openSessionMenu(game) {
                 g.sessionReady = true; g.hud.closePanel(true); g.hud.hideStory();
                 g.input.releaseAll(); g.tracks.clear(); g.particles.n = 0;
                 g.camera.snapTo(g.player.x, g.player.y); g.renderer.invalidate();
-                checkpoint(g);
+                openAppearance(g, () => { g.hud.closePanel(true); checkpoint(g); }, true);
             } },
             { label: "Назад", action: () => openSessionMenu(g) }
         ], "session", { locked: initial });

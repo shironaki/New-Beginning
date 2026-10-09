@@ -113,11 +113,11 @@ test("production relief is on the real home zone only, deterministic and indepen
     assert.gt(a.playableRelief.heightAt(p.x, p.y), 20);
     assert.eq(a.terrain.elevation(p.x, p.y), a.playableRelief.heightAt(p.x, p.y));
 });
-test("height bounds and both derivatives prevent folded ground, including banks and map edges", () => {
+test("smooth base remains bounded underneath explicit cliff geometry", () => {
     const z = generateZone("ashfall", 1066618561), f = z.playableRelief;
     for (let y = 0; y < z.map.heightPx; y += 19) for (let x = 0; x < z.map.widthPx; x += 17) {
         const h = f.heightAt(x, y); assert.gte(h, 0); assert.lte(h, f.maxHeight);
-        assert.lte(Math.abs(f.heightAt(x + 1, y) - h), .481); assert.lte(Math.abs(f.heightAt(x, y + 1) - h), .481);
+        assert.lte(Math.abs(f.baseHeightAt(x + 1, y) - f.baseHeightAt(x,y)), .481); assert.lte(Math.abs(f.baseHeightAt(x, y + 1) - f.baseHeightAt(x,y)), .481);
     }
     for (const [x, y] of [[0, 500], [500, 0], [z.map.widthPx, 500], [500, z.map.heightPx]]) assert.lt(f.heightAt(x, y), .001);
 });

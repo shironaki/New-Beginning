@@ -1,3 +1,4 @@
+import { normalizeLook, openAppearance } from "./ui/appearance.js";
 import { handCapacity } from "./sandbox/carry.js";
 import { startMeal, tickHands, handRender, useHand, openBag, startPickup } from "./ui/hands.js";
 import { canReceive, startPotFromInventory } from "./survival/cooking-actions.js";
@@ -81,7 +82,7 @@ export class Game {
         this.particles = new Particles();
         this.tracks = new Tracks();
         this.fires = new Map();          // `${zoneId}:${tx},${ty}` -> Campfire
-        this.look = { skin: "#caa27e", hair: "#39332b", shirt: "#899383", vest: "#41524e", pants: "#48473e", accent: "#b18058" };
+        this.look = normalizeLook();
 
         this.zone = this.world.get(START_ZONE);
         this.player = new Player({ x: this.zone.spawn.x, y: this.zone.spawn.y, bus: this.bus });
@@ -203,6 +204,7 @@ export class Game {
         this.save.register("clock", () => this.clock.toJSON(), (d) => this.clock.load(d));
         this.save.register("needs", () => this.needs.toJSON(), (d) => this.needs.load(d));
         this.save.register("inv", () => this.inventory.toJSON(), (d) => this.inventory.load(d));
+        this.save.register("look", () => ({ ...this.look }), (d) => { this.look = normalizeLook(d); });
         this.save.register("weather", () => this.weather.toJSON(), (d) => this.weather.load(d));
         this.save.register("player", () => ({ zone: this.zone.id, p: this.player.toJSON() }),
             (d) => {
@@ -256,7 +258,8 @@ export class Game {
                 const a = inv.handAction;
                 if (a && a.type === "eat" && (a.type !== "eat" || !["left", "right"].includes(a.side) || !foodValue(a.id)
                     || inv.hands[a.side]?.id !== a.id || !Number.isFinite(a.remaining) || a.remaining < 0 || a.remaining > .9
-                    || (a.previous && !itemDef(a.previous)))) throw Error("Некорректное действие рук");
+                    || (a.previous && !itemDef(a.previous))
+                    || (a.previousN !== undefined && (!Number.isInteger(a.previousN) || a.previousN < 1 || a.previousN > handCapacity(a.previous))))) throw Error("Некорректное действие рук");
             }
             const action = inv.handAction;
             if (action && !["eat", "pickup"].includes(action.type)) throw Error("Неизвестное действие рук");
@@ -277,7 +280,7 @@ export class Game {
      */
     fitsAt(x, y, radius = this.player.radius) {
         const zone = this.zone;
-        return !bodyBlocked(
+        return (!zone.playableRelief || zone.playableRelief.canStand(x,y,radius)) && !bodyBlocked(
             (wx, wy) => zone.map.solidAt(wx, wy) ||
                         zone.isBlockedTile(Math.floor(wx / TILE_SIZE), Math.floor(wy / TILE_SIZE)),
             x, y, radius,
@@ -1000,7 +1003,7 @@ export class Game {
             this.loop.start();
             return this;
         }
-        // Opening narration, then the loop.
+        // Opening narration remains readable; first launch includes creation.
         this.bus.emit("story:step", {
             title: "Новое начало",
             text: "Неделю назад долина выгорела за одну ночь. Ты вернулся к тому, что было " +
@@ -1008,6 +1011,7 @@ export class Game {
                   "Палатка стоит, костёр — холодный.",
             next: this.story.objective
         });
+        if (!this.isTrial) { this.hud.hideStory(); openAppearance(this, () => { this.hud.closePanel(true); this.hud.showStory({ title: "Новое начало", text: "Ты вернулся к пепелищу своего дома. До темноты осталось немного времени.", next: this.story.objective }); }, true); }
         this.loop.start();
         return this;
     }

@@ -143,6 +143,7 @@ export class Camera {
     screenToWorld(sx, sy) {
         const x = sx / this.zoom + this.x - this.offsetX;
         const base = sy / this.zoom + this.y - this.offsetY;
+        if (this.surface?.unprojectY) return { x, y: this.surface.unprojectY(x,base) };
         let y = base;
         for (let i = 0; this.surface && i < 18; i++) y = base + this.surface.heightAt(x, y);
         return { x, y };

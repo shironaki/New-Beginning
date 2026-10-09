@@ -11,17 +11,17 @@ export function startMeal(game, id, preferredSide = null) {
     if (!ready(game) || !foodValue(id) || !inv.has(id) || !inv.hands) return false;
     let side = preferredSide && inv.hands[preferredSide]?.id === id ? preferredSide
         : [inv.dominant, inv.dominant === "left" ? "right" : "left"].find((s) => inv.hands[s]?.id === id);
-    let previous = id;
+    let previous = id, previousN = 1;
     if (!side) {
         const other = inv.dominant === "left" ? "right" : "left";
         side = [inv.dominant, other].find((s) => !inv.hands[s]);
         if (!side) side = [inv.dominant, other].find((s) => !itemDef(inv.hands[s].id)?.light && canStow(inv, s));
         if (!side) side = [inv.dominant, other].find((s) => canStow(inv, s));
         if (!side) { game.hud.toast("Обе руки заняты, в рюкзаке нет места для предмета.", "🎒"); return false; }
-        previous = inv.hands[side]?.id || null;
+        previous = inv.hands[side]?.id || null; previousN = inv.hands[side]?.n || 1;
         if (!inv.equipHand(side, inv.slots.findIndex((s) => s?.id === id))) return false;
     }
-    inv.handAction = { type: "eat", side, id, previous, remaining: .9 };
+    inv.handAction = { type: "eat", side, id, previous, previousN, remaining: .9 };
     game.input.releaseAll(); game.touch?.reset(); game.hud.closePanel();
     return true;
 }
@@ -37,16 +37,17 @@ export function tickHands(game, dt) {
     inv.bus?.emit("inv:remove", { owner: inv.owner, id: a.id, n: 1 });
     if (a.previous && !inv.hands[a.side]) {
         const i = inv.slots.findIndex((s) => s?.id === a.previous);
-        if (i >= 0) inv.equipHand(a.side, i);
+        if (i >= 0) inv.equipHand(a.side, i, Math.min(a.previousN || 1, inv.slots[i].n));
     }
     game.needs.consume(foodValue(a.id));
     game.bus.emit("player:ate", { id: a.id });
+    if (game.hud.panelOpen === "bag") openBag(game, game.bagCategory);
     game.hud.toast(`Съедено: ${itemName(a.id)}`, itemEmoji(a.id));
 }
 export function handTool(slot) {
     if (!slot) return null;
     const d = itemDef(slot.id);
-    return { id: slot.id, n: slot.n, tool: d?.tool || (d?.light ? "torch" : foodValue(slot.id) ? "food" : ["log", "firewood"].includes(slot.id) ? "bundle" : "item") };
+    return { id: slot.id, n: slot.n, tool: d?.tool || (d?.light ? "torch" : foodValue(slot.id) ? "food" : slot.id === "pot" ? "pot" : slot.id === "diary_burnt" ? "book" : ["log", "firewood"].includes(slot.id) ? "bundle" : "item") };
 }
 export function handRender(inv) {
     return { leftTool: handTool(inv.hands?.left), rightTool: handTool(inv.hands?.right),
@@ -87,6 +88,7 @@ const GROUPS = [
     ["materials", "Материалы", (d) => d.tags.some((t) => ["fuel", "build", "craft", "feed"].includes(t))]
 ];
 export function openBag(game, category = "all") {
+    game.bagCategory = category;
     game.input.releaseAll(); game.touch?.reset();
     const inv = game.inventory, available = GROUPS.filter(([id,,match]) => id === "all" || inv.list().some((s) => match(itemDef(s.id))));
     if (!available.some(([id]) => id === category)) category = "all";
@@ -141,5 +143,6 @@ function finishPickup(game, a) {
     if (a.id === "pot" && obj.kind === "hearth_ruin") game.story.setFlag("home_pot_taken");
     inv.bus?.emit("inv:add", { owner: inv.owner, id: a.id, n: a.n, left: 0 });
     if (a.id === "diary_burnt") { game.story.setFlag("own_diary"); game.readDiary(); }
+    if (game.hud.panelOpen === "bag") openBag(game, game.bagCategory);
     game.hud.toast(`${itemName(a.id)} ×${a.n} · ${sideName(a.side).toLowerCase()}`, itemEmoji(a.id));
 }

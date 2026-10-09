@@ -9,7 +9,7 @@
  * you want to change a proportion, a colour or the length of a stride, edit
  * the spec. This file only knows how to paint what the spec describes.
  *
- * Style target: Albion's readable chunk — small head, heavy shoulders, pinched
+ * Style target: an ink-cut travelling figure — small head, heavy shoulders, pinched
  * waist, big hands and boots, three tone bands with a warm rim, and a contour
  * that exists only on the shadow side. Locomotion is distance driven (see
  * entities/player.js) and carries weight: the pelvis swings over the
@@ -23,12 +23,13 @@ import { SUN, castShadow } from "./tilesart.js";
 import { BODY, GEAR, TONE, PALETTE, READ, SHADOW, WADE, GAIT, ACTION, ATTACH, fallPose, clamp01, easeInOutSine, q } from "./charspec.js";
 
 export const DEFAULT_LOOK = {
-    skin: "#caa27e",
-    hair: "#39332b",
+    gender: "male", coat: "#446d68",
+    skin: "#e0b594",
+    hair: "#302b29",
     shirt: "#899383",
     vest: "#41524e",
     pants: "#48473e",
-    accent: "#b18058",       // one accent per figure — sash, flap, trim
+    accent: "#c9a063",       // one accent per figure — sash, flap, trim
     cloak: null,
     hairStyle: "short",
     stubble: true,
@@ -327,7 +328,7 @@ function paintCharacter(ctx, p) {
     const dir = p.dir || "down";
     const idle = p.idleTime || 0;
 
-    const skin = look.skin, shirt = look.shirt, pants = look.pants;
+    const skin = look.skin, shirt = look.coat || look.shirt, pants = look.pants;
     const leather = PALETTE.leather;
 
     /* ---- contact shadow, under the FEET, not under the sprite ---------- */
@@ -463,74 +464,36 @@ function paintCharacter(ctx, p) {
     const waistY = top + BODY.torsoH * BODY.waistAt;
     const quarter = sideView ? Math.abs(slant) : 0;
     const narrow = sideView ? (BODY.shoulderWSide + quarter * 2) / BODY.shoulderW : 1;
-    const rows = [
-        [top, BODY.shoulderW * 0.36 * narrow],
-        [top + 1.5, BODY.shoulderW / 2 * narrow],
-        [waistY, BODY.waistW / 2 * narrow],
-        [bottom, BODY.hipW / 2 * narrow]
-    ];
-    poly(ctx, silhouette(rows), band(shirt, "base"));
-    poly(ctx, stripe(rows, -1, 0, sideView ? 1.4 : 2.0), band(shirt, "lit"), false);      // sun side
-    poly(ctx, stripe(rows, 1, 0, sideView ? 1.2 : 1.6), band(shirt, "dark"), false);
-    poly(ctx, stripe(rows, 1, 0, 0.5), band(shirt, "deep"), false);
-    rect(ctx, -rows[0][1], top, rows[0][1] * 2, PALETTE.aoW * 2, PALETTE.ao, false);   // under the collar
-
-    // Worn waistcoat over a lighter linen shirt. Open neck, tapered panels
-    // and a split hem read as clothing instead of a single rectangular torso.
-    if (look.vest) {
-        const vw = rows[1][1], waist = rows[2][1];
-        if (back) {
-            poly(ctx, [[-vw + .5, top + .5], [vw - .5, top + .5], [waist, bottom - .8],
-                [0, bottom], [-waist, bottom - .8]], look.vest, false);
-            rect(ctx, -.25, top + 3, .5, 6, band(look.vest, "dark"), false);
-        } else {
-            poly(ctx, [[-vw + .4, top + .6], [-1.9, top + .8], [-.6, top + 4.6],
-                [-.6, bottom - 1], [-2.1, bottom + .3], [-waist, bottom - .8]], look.vest, false);
-            poly(ctx, [[vw - .4, top + .6], [1.8, top + .8], [.6, top + 4.6],
-                [.6, bottom - 1], [2.1, bottom + .3], [waist, bottom - .8]], band(look.vest, "dark"), false);
-            ctx.strokeStyle = "#a69a73"; ctx.lineWidth = .35;
-            ctx.beginPath(); ctx.moveTo(-1.9, top + 1); ctx.lineTo(-.6, top + 4.6); ctx.lineTo(-.6, bottom - 2); ctx.stroke();
-            rect(ctx, -waist + .8, top + 7, 1.9, .45, band(look.vest, "lit"), false);
-        }
-    }
-
-    if (back) {
-        rect(ctx, -0.5, top + 1.5, 1, BODY.torsoH - 4, PALETTE.ao, false);            // spine seam
-    } else if (!sideView) {
-        rect(ctx, -2, top, 4, 1.5, band(shirt, "dark"), false);                        // collar
-    }
-
+    const frame = look.gender === "female" ? .9 : 1;
+    const sw = BODY.shoulderW / 2 * narrow * frame, waist = BODY.waistW / 2 * narrow;
+    const hem = (BODY.hipW / 2 + (look.gender === "female" ? 2 : 1)) * narrow;
+    const rows = [[top,sw*.75],[top+2,sw],[waistY,waist],[bottom,hem]];
+    const coat = look.coat || look.vest || shirt;
+    // New silhouette: a short travelling coat, split skirts, layered linen,
+    // high collar and gathered sleeves; no armour wedges/waistcoat geometry.
+    poly(ctx, [[-sw*.65,top], [sw*.65,top], [sw+.5,top+2], [waist+1,waistY],
+        [hem+1,bottom+5], [1.1+flagX*.22,bottom+4], [0,bottom],
+        [-1.4+flagX*.3,bottom+5.5], [-hem-1,bottom+4], [-waist-1,waistY], [-sw-.5,top+2]], coat);
+    poly(ctx,[[-sw*.65,top],[-1.5,top+1],[-1.5,bottom+3],[-hem+.4,bottom+4],[-waist,waistY],[-sw+.3,top+2]],shadeHex(coat,19),false);
+    poly(ctx,[[sw*.7,top+1],[sw+.5,top+2],[waist+1,waistY],[hem+1,bottom+5],[3,bottom+3],[waist-.5,waistY]],shadeHex(coat,-24),false);
     if (!back) {
-        poly(ctx, [[-3, top], [3, top + 0.5], [1, top + 3], [-1.5, top + 2.5]], look.accent, false);
-        poly(ctx, [[1, top + 2], [3, top + 2], [2.5 + Math.sin(idle * 1.7) * 0.7, top + 6], [0.5, top + 5]],
-            shadeHex(look.accent, -16), false);
+        poly(ctx,[[-2.3,top],[2.3,top],[1.5,bottom-1],[-1.8,bottom-1]],'#c3b89b',false);
+        poly(ctx,[[-3,top],[-.9,top+5],[-3.5,top+3]],shadeHex(coat,-15),false);
+        poly(ctx,[[3,top],[.9,top+5],[3.5,top+3]],shadeHex(coat,27),false);
+        for(let i=0;i<3;i++) { ctx.fillStyle='#645a45';ctx.beginPath();ctx.arc(.2,top+6+i*2.2,.35,0,Math.PI*2);ctx.fill(); }
+    } else { ctx.strokeStyle=shadeHex(coat,-20);ctx.lineWidth=.5;ctx.beginPath();ctx.moveTo(0,top+3);ctx.lineTo(0,bottom+3);ctx.stroke(); }
+    const beltY = bottom - 2;
+    rect(ctx,-waist-1,beltY,waist*2+2,1.4,'#594939',false);
+    rect(ctx,-.8,beltY,1.6,1.4,'#bbab79',false);
+    // Rolled neck scarf and a wind-responsive tail are distinct at game zoom.
+    poly(ctx,[[-3.3,top-.4],[3.1,top-.3],[3.5,top+1.5],[-2.9,top+2.1]],look.accent,false);
+    if(!back) poly(ctx,[[1.3,top+1],[3,top+1],[3.5+flagX*.4,top+7],[1.1+flagX*.3,top+6]],shadeHex(look.accent,-17),false);
+    if(look.satchel) {
+        const sign=back?-1:1;
+        ctx.strokeStyle='#baa178';ctx.lineWidth=1.4;ctx.beginPath();ctx.moveTo(-sw*.65*sign,top+2);ctx.lineTo((hem+1)*sign,bottom);ctx.stroke();
+        poly(ctx,[[hem*sign,bottom-2],[(hem+3.5)*sign,bottom-1],[(hem+3.1)*sign,bottom+4],[(hem-.5)*sign,bottom+3]],'#7c6041',false);
+        ctx.strokeStyle='#c0a77b';ctx.lineWidth=.5;ctx.beginPath();ctx.moveTo(hem*sign,bottom);ctx.lineTo((hem+3.2)*sign,bottom+.5);ctx.stroke();
     }
-    if (look.satchel) {
-        // Cloth strap and a rounded pouch, not metal blocks on every joint.
-        const sign = back ? -1 : 1;
-        ctx.strokeStyle = "#46392a"; ctx.lineWidth = 1.9;
-        ctx.beginPath(); ctx.moveTo(-3.5 * sign, top + 0.6); ctx.lineTo(3.1 * sign, bottom - 1); ctx.stroke();
-        ctx.strokeStyle = "#99805a"; ctx.lineWidth = 0.7; ctx.stroke();
-        poly(ctx, [[2 * sign, bottom - 3], [5.6 * sign, bottom - 2.4], [6 * sign, bottom + 1.5],
-            [4.8 * sign, bottom + 2.7], [2.1 * sign, bottom + 2.1]], PALETTE.leather, false);
-        rect(ctx, 2.6 * sign, bottom - 1.7, 2.2, 0.6, "#a88c5c", false);
-    }
-    // Belt, buckle and the accent flap that trails the pelvis.
-    const beltY = bottom - 2.2;
-    rect(ctx, -rows[2][1] - 0.2, beltY, rows[2][1] * 2 + 0.4, 2.2, PALETTE.belt);
-    rect(ctx, (sideView ? side * 1.8 : 0) - 1.1, beltY + 0.3, 2.2, 1.6, PALETTE.buckle, false);
-    if (look.beltFlap) {
-        const fw = GEAR.flapW;
-        const fx = (sideView ? side * 1.0 : rows[2][1] - fw * 0.35) + flagX * 0.6;
-        rect(ctx, fx - fw / 2, beltY + 1.5, fw, GEAR.flapH, look.accent);
-        rect(ctx, fx - fw / 2, beltY + 1.5, fw * 0.3, GEAR.flapH,
-            shadeHex(look.accent, TONE.lit), false);
-    }
-    if (look.cloak) {
-        poly(ctx, silhouette(rows.map(([y, hw]) => [y + 0.5, hw + 1])), look.cloak);
-    }
-
-    rect(ctx, -rows[0][1], top + 0.5, PALETTE.rimW, BODY.torsoH * 0.55, PALETTE.rim, false);
 
     // Pauldrons go on AFTER the arms, so they cover the shoulder joint — that
     // is what makes gear read as worn instead of glued on.
@@ -618,6 +581,11 @@ function drawHeldTool(ctx, tool, dir, side, swing, arm, behind, pose = {}, hand 
         case "rod": drawRod(ctx); break;
         case "hoe": drawHoe(ctx); break;
         case "torch": drawTorch(ctx, pose); break;
+        case "pot":
+            ctx.fillStyle="#53635f";ctx.beginPath();ctx.ellipse(0,-4,4,3,0,0,Math.PI*2);ctx.fill();
+            ctx.strokeStyle="#a1b0a8";ctx.lineWidth=.6;ctx.beginPath();ctx.arc(0,-5,3,Math.PI,0);ctx.stroke();break;
+        case "book":
+            ctx.fillStyle="#5b3e2e";ctx.fillRect(-3,-6,6,7);ctx.fillStyle="#c6b994";ctx.fillRect(-2,-5,4,5);break;
         case "bundle":
             ctx.rotate(-angle); // horizontal bundle balanced across the forearm
             for (let i = 0; i < Math.min(5, tool.n || 1); i++) {
