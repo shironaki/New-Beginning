@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark">
+  <title>Слойный Canvas-риг персонажа</title><link rel="stylesheet" href="./layered.css">
+</head>
+<body>
+<main class="shell">
+  <header class="topbar">
+    <div><p class="eyebrow">ИЗОЛИРОВАННЫЙ ПРОТОТИП · CANVAS 2D · ES MODULES</p><h1>Герой, которого можно одевать</h1><p class="intro">Базовое человекоподобное тело — отдельный слой. Рубаха, штаны, плащ, обувь и снаряжение добавляются независимо; мокрую одежду можно снять и сушить.</p></div>
+    <nav class="top-links" aria-label="Другие стенды"><a class="back-link" href="./sprite-lab.html">Игровые sprite-риги <span>↗</span></a><a class="back-link" href="./comparison.html">Сравнение стилей <span>↗</span></a></nav>
+  </header>
+  <section class="toolbar" aria-label="Поза персонажа">
+    <div class="control"><small>Движение</small><div class="segmented"><button data-motion="idle" aria-pressed="true">Покой</button><button data-motion="walk">Шаг</button><button data-motion="run">Бег</button></div></div>
+    <div class="control"><small>Ракурс</small><div class="segmented directions"><button data-direction="down" aria-label="Спереди" aria-pressed="true">↓</button><button data-direction="left" aria-label="Влево">←</button><button data-direction="up" aria-label="Со спины">↑</button><button data-direction="right" aria-label="Вправо">→</button></div></div>
+    <label class="control lead-control"><small>Ведущая рука</small><select id="leadHand"><option value="right" selected>Правая · стандарт</option><option value="left">Левая</option></select></label>
+    <span id="poseStatus" class="pose-status" role="status">Покой · спереди</span>
+  </section>
+
+  <section class="workbench">
+    <div class="stage-panel">
+      <div class="stage-heading"><span>СЛОЙНЫЙ РИГ</span><span id="viewMode">FRONT / IDLE</span></div>
+      <div class="stage"><div class="sun-glow"></div><div class="grid-ground"></div><canvas id="rigCanvas" width="760" height="620" aria-label="Человекоподобная базовая модель с переключаемыми слоями одежды"></canvas><div class="stage-caption"><span>BASE BODY → GARMENTS → GEAR</span><span id="stageWetness">ОДЕЖДА СУХАЯ</span></div></div>
+      <div class="readouts"><div><small>ТЕПЛОЗАЩИТА</small><b id="warmthValue">0 / 12</b><span class="meter"><i id="warmthMeter"></i></span></div><div><small>ВЛАЖНОСТЬ ТКАНИ</small><b id="wetnessValue">0%</b><span class="meter wet"><i id="wetnessMeter"></i></span></div><p>Только визуальный прототип слоёв; игровые инвентарь, тепло и сушку не подключал.</p></div>
+    </div>
+
+    <aside class="wardrobe-panel">
+      <div class="panel-title"><div><p class="eyebrow">КОНСТРУКТОР</p><h2>Слои и одежда</h2></div><span class="layer-count" id="layerCount">0 СЛОЁВ</span></div>
+      <div class="quick-actions"><button id="dressSet" class="primary">Надеть комплект</button><button id="stripAll" class="quiet">Снять одежду</button></div>
+      <fieldset class="layer-list"><legend>Одежда · нажми, чтобы снять/надеть</legend>
+        <label class="layer-row"><input type="checkbox" data-garment="shirt" checked><i style="--sw:#b79572"></i><span><b>Льняная рубаха</b><small>торс · рукава</small></span><em>+2 тепла</em></label>
+        <label class="layer-row"><input type="checkbox" data-garment="trousers" checked><i style="--sw:#465354"></i><span><b>Шерстяные штаны</b><small>ноги · пояс</small></span><em>+2 тепла</em></label>
+        <label class="layer-row"><input type="checkbox" data-garment="coat" checked><i style="--sw:#6f4938"></i><span><b>Дорожный кафтан</b><small>верхний слой · карманы</small></span><em>+3 тепла</em></label>
+        <label class="layer-row"><input type="checkbox" data-garment="scarf" checked><i style="--sw:#d7c9a8"></i><span><b>Шарф</b><small>ворот · складки ткани</small></span><em>+1 тепло</em></label>
+        <label class="layer-row"><input type="checkbox" data-garment="boots" checked><i style="--sw:#654332"></i><span><b>Сапоги</b><small>обувь · подошва</small></span><em>+2 тепла</em></label>
+        <label class="layer-row"><input type="checkbox" data-garment="cloak"><i style="--sw:#405044"></i><span><b>Плащ</b><small>за спиной · отдельный слой</small></span><em>+2 тепла</em></label>
+        <label class="layer-row"><input type="checkbox" data-garment="pack" checked><i style="--sw:#76563a"></i><span><b>Рюкзак</b><small>за плечами · back layer</small></span><em>снаряжение</em></label>
+      </fieldset>
+
+      <fieldset class="layer-list hands"><legend>Предметы · отдельные точки крепления рук</legend>
+        <label class="item-select"><span>Правая рука</span><select id="rightItem"><option value="axe" selected>Топор</option><option value="torch">Факел</option><option value="none">Свободна</option></select></label>
+        <label class="item-select"><span>Левая рука</span><select id="leftItem"><option value="torch" selected>Факел</option><option value="axe">Топор</option><option value="none">Свободна</option></select></label>
+      </fieldset>
+
+      <section class="fabric-state"><div class="fabric-title"><div><small>СОСТОЯНИЕ ТКАНИ</small><b id="fabricLabel">Сухая</b></div><label class="dry-switch"><input id="drying" type="checkbox"><span></span>Сушить</label></div>
+        <label class="range-label" for="wetness"><span>Мокро</span><input id="wetness" type="range" min="0" max="100" value="92"><span>Сухо</span></label>
+        <p>При включённой сушке ткань светлеет и высыхает постепенно. Здесь показана только визуальная логика.</p>
+      </section>
+      <div class="architecture-note"><b>Порядок рендера</b><span>рюкзак → тело → брюки/рубаха → верхняя одежда → руки/предметы</span></div>
+    </aside>
+  </section>
+  <footer><span>Слойный прототип не меняет игру и её Canvas-рендерер.</span><span><a href="./comparison.html">Открыть галерею четырёх технологий</a></span></footer>
+</main>
+<script type="module" src="./layers/main.js"></script>
+</body>
+</html>

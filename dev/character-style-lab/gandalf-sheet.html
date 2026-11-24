@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Листовой проигрыватель · GandalfHardcore-style</title>
+  <link rel="stylesheet" href="./sprite-lab.css">
+  <style>
+    .sheet-wrap { display: grid; gap: 18px; }
+    .sheet-stage { background: #10190f; border: 1px solid #2c4030; border-radius: 14px; padding: 18px; display: grid; justify-items: center; gap: 12px; }
+    #sheetCanvas { image-rendering: pixelated; max-width: 100%; height: auto; }
+    .sheet-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    .sheet-controls label { display: grid; gap: 4px; font-size: 12px; color: #b9c7b3; }
+    .sheet-controls select, .sheet-controls input[type=range] { accent-color: #8fb169; }
+    .source-tag { font-size: 12px; color: #9db38f; }
+    .source-tag b { color: #d9e6c8; }
+    .strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+    .strip figure { margin: 0; display: grid; gap: 6px; }
+    .strip img { width: 100%; image-rendering: pixelated; border-radius: 8px; border: 1px solid #2c4030; }
+    .strip figcaption { font-size: 11px; color: #97a88e; }
+    .howto { border: 1px dashed #3c5238; border-radius: 12px; padding: 14px 16px; font-size: 13px; color: #b9c7b3; }
+    .howto code { color: #e5d9a8; }
+  </style>
+</head>
+<body>
+<main class="lab-shell">
+  <header class="lab-header">
+    <div class="header-copy">
+      <p class="eyebrow">ИЗОЛИРОВАННЫЙ СТЕНД · ЛИСТОВОЙ ПИКСЕЛЬ-РИГ</p>
+      <h1>Спрайтшит-проигрыватель<br><span>в стиле пака GandalfHardcore</span></h1>
+      <p class="intro">Тот же формат, что в «2D Pixel Art Male and Female Character»: персонаж нарезан кадрами фиксированной ячейки, ряды — Idle / Walk / Run / Jump / Fall / Attack / Death. Пока исходный архив не подключён, стенд играет демо-лист, сгенерированный нашим пиксель-ригом; как только в <code>gandalf-refs/</code> лягут <code>male.png</code> или <code>female.png</code>, плеер подхватит их автоматически.</p>
+      <nav class="nav-links" aria-label="Другие стенды">
+        <a href="./">← Sprite Lab</a>
+        <a href="./index.html">Слойная студия</a>
+        <a href="./comparison.html">Старая галерея вариантов ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="sheet-wrap">
+    <div class="sheet-stage">
+      <canvas id="sheetCanvas" width="768" height="384" aria-label="Проигрывание спрайтшита персонажа"></canvas>
+      <div class="sheet-controls">
+        <label>Анимация
+          <select id="rowPick">
+            <option value="0" selected>Idle</option>
+            <option value="1">Walk</option>
+            <option value="2">Run</option>
+            <option value="3" disabled>Jump</option>
+            <option value="4" disabled>Fall</option>
+            <option value="5" disabled>Attack</option>
+            <option value="6" disabled>Death</option>
+          </select>
+        </label>
+        <label>Направление
+          <select id="facePick"><option value="1" selected>Влево (как в паке)</option><option value="-1">Вправо (зеркало)</option></select>
+        </label>
+        <label>FPS <input id="fpsPick" type="range" min="4" max="18" value="9"></label>
+        <label>Зум <input id="zoomPick" type="range" min="1" max="3" value="1"></label>
+        <span class="source-tag">Источник: <b id="sourceTag">не определён</b></span>
+      </div>
+    </div>
+
+    <div class="howto">
+      <b>Как показать оригинальный пак:</b> скачайте бесплатный пак
+      <i>«FREE — 2D Pixel Art Male and Female Character»</i> с itch.io
+      (gandalfhardcore.itch.io) и положите распакированные листы в
+      <code>dev/character-style-lab/gandalf-refs/male.png</code> и
+      <code>female.png</code>. Папка добавлена в <code>.gitignore</code>:
+      лицензия пака запрещает перераспространение, поэтому бинарники
+      ассетов в репозиторий не попадают — стенд читает их локально.
+    </div>
+
+    <section aria-label="Официальные превью пака">
+      <h2>Превью оригинала (для сверки стиля)</h2>
+      <div class="strip">
+        <figure><img src="./gandalf-refs/gandalfhardcore-itch-io-2d-pixel-art-mal-3.gif" alt="Мужской и женский персонажи, базовые позы, лесной фон" loading="lazy"><figcaption>gandalfhardcore.itch.io — превью пака, скачано для ориентира, в git не коммитится</figcaption></figure>
+        <figure><img src="./gandalf-refs/gandalfhardcore-itch-io-2d-pixel-art-mal-2.gif" alt="Персонажи в красной одежде, походка" loading="lazy"><figcaption>тот же кадр с одеждой — слои костюма в паке отдельные файлы</figcaption></figure>
+        <figure><img src="./gandalf-refs/gandalfhardcore-itch-io-2d-pixel-art-mal-1.png" alt="Базовые тела персонажей без одежды" loading="lazy"><figcaption>базовые тела: та же сетка, пропорции ~4.5 головы</figcaption></figure>
+        <figure><img src="./gandalf-refs/gandalfhardcore-itch-io-2d-pixel-art-mal-4.gif" alt="Персонажи в средневековой одежде" loading="lazy"><figcaption>наслоение одежды поверх тела — как наш послойный риг</figcaption></figure>
+      </div>
+    </section>
+  </section>
+</main>
+<script type="module" src="./gandalf-sheet.js"></script>
+</body>
+</html>
