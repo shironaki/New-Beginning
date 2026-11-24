@@ -9,7 +9,7 @@
  * you want to change a proportion, a colour or the length of a stride, edit
  * the spec. This file only knows how to paint what the spec describes.
  *
- * Style target: Albion's readable chunk — small head, heavy shoulders, pinched
+ * Style target: an ink-cut travelling figure — small head, heavy shoulders, pinched
  * waist, big hands and boots, three tone bands with a warm rim, and a contour
  * that exists only on the shadow side. Locomotion is distance driven (see
  * entities/player.js) and carries weight: the pelvis swings over the
@@ -17,31 +17,57 @@
  *
  * Body frame: origin between the feet, on the ground; up is negative Y.
  */
+import { drawHead } from "./head.js";
+import { torchFlame, paintTorchFlame } from "./torch.js";
 import { SUN, castShadow } from "./tilesart.js";
-import { BODY, GEAR, TONE, PALETTE, READ, SHADOW, WADE, GAIT, ACTION, clamp01, easeInOutSine, q } from "./charspec.js";
+import { heroSprite, heroHandAnchor } from "./hero3d.js";
+import { ITEMS } from "../sandbox/items.js";
+import { BODY, GEAR, TONE, PALETTE, READ, SHADOW, WADE, GAIT, ACTION, ATTACH, fallPose, clamp01, easeInOutSine, q, shadeHex } from "./charspec.js";
 
 export const DEFAULT_LOOK = {
-    skin: "#e2b48a",
-    hair: "#4a3526",
-    shirt: "#6d7f4a",
-    pants: "#524636",
-    accent: "#8a4b32",       // one accent per figure — sash, flap, trim
+    gender: "male", coat: "#446d68",
+    skin: "#e0b594",
+    hair: "#302b29",
+    shirt: "#899383",
+    vest: "#41524e",
+    pants: "#48473e",
+    accent: "#c9a063",       // one accent per figure — sash, flap, trim
     cloak: null,
     hairStyle: "short",
-    shoulders: true,         // gear as silhouette
-    bracers: true,
-    bootCuff: true,
-    beltFlap: true
+    stubble: true,
+    satchel: true,
+    shoulders: false,         // gear as silhouette
+    bracers: false,
+    bootCuff: false,
+    beltFlap: false
 };
 
-function shadeHex(hex, amount) {
-    const c = hex.replace("#", "");
-    const r = parseInt(c.slice(0, 2), 16), g = parseInt(c.slice(2, 4), 16), b = parseInt(c.slice(4, 6), 16);
-    const f = (v) => Math.max(0, Math.min(255, Math.round(v + amount)));
-    return `rgb(${f(r)},${f(g)},${f(b)})`;
+/**
+ * Tone band of a base colour: band(c, "lit" | "base" | "dark" | "deep").
+ * Сам сдвиг тона переехал в charspec.shadeHex: оттуда же его берёт запекка
+ * спрайтов, чтобы «светлая сторона» у героя и у поселенца была одним числом.
+ */
+/**
+ * Что дальняя рука обязана показать поверх корпуса: предметы со светом. Факел,
+ * спрятанный за телом, превращает ночь в слепое пятно, и «факел виден всегда»
+ * из charspec важнее честной окклюзии. Список берётся из тегов ITEMS, а не из
+ * догадок: добавишь источник света в items.js — он окажется здесь сам.
+ */
+export const LIGHT_ITEMS = new Set(
+    Object.entries(ITEMS).filter(([, it]) => it.tags && it.tags.includes("light")).map(([id]) => id)
+);
+/** Во сколько раз предмет меньше векторного у спрайтового героя: пальцы там короче. */
+export const SPRITE_ITEM_SCALE = 0.92;
+
+/**
+ * Рисовать ли предмет дальней руки ПЕРЕД спрайтом. По умолчанию нет: в профиль
+ * рука уходит за корпус, и клинок поверх груди читается наклейкой. Исключения —
+ * еда у рта и всё, что светит (см. LIGHT_ITEMS).
+ */
+export function farItemInFront(p, farHand, tool) {
+    return p.eatingHand === farHand || (!!tool && LIGHT_ITEMS.has(tool));
 }
 
-/** Tone band of a base colour: band(c, "lit" | "base" | "dark" | "deep"). */
 const band = (hex, name) => shadeHex(hex, TONE[name]);
 
 /* --- primitives ---------------------------------------------------------
@@ -141,6 +167,7 @@ function knee(hx, hy, ax, ay, bendDir) {
  * unit tested — this is where the left/right mirror bug lived.
  */
 export function posture(p) {
+    if (p.fallTimer > 0) p = { ...p, gait: 0, runBlend: 0, ax: 0, ay: 0, leanAX: 0, leanAY: 0, actionTimer: 0 };
     const dir = p.dir || "down";
     const phase = (p.phase != null ? p.phase : p.anim) || 0;
     const gaitRaw = clamp01(p.gait != null ? p.gait : (p.moving ? 1 : 0));
@@ -152,10 +179,10 @@ export function posture(p) {
     const back = dir === "up";
     const sideView = dir === "left" || dir === "right";
 
-    // Stride -> swing amplitude. stride/4 units of foot travel per step is
-    // exactly the ground covered per step, so the plant does not slide.
+    // Distance-driven cadence; bound the visual swing by anatomical reach.
     const strideU = (GAIT.strideWalk + (GAIT.strideRun - GAIT.strideWalk) * run) / GAIT.pxPerUnit;
-    const amp = strideU / 4;
+    // Cadence may slow without overextending the legs or pumping the head.
+    const amp = Math.min(3.5, strideU / 4);
     const liftAmp = GAIT.liftWalk + (GAIT.liftRun - GAIT.liftWalk) * run;
     const bobAmp = GAIT.bobWalk + (GAIT.bobRun - GAIT.bobWalk) * run;
 
@@ -163,8 +190,9 @@ export function posture(p) {
     // it the feet swung backwards when the hero walked left.
     const swingN = side * Math.sin(phase) * amp * g;           // near leg, forward+
     const swingF = side * Math.sin(phase + Math.PI) * amp * g; // far leg, antiphase
-    const liftN = Math.max(0, Math.cos(phase)) * liftAmp * g;
-    const liftF = Math.max(0, Math.cos(phase + Math.PI)) * liftAmp * g;
+    const fallen = fallPose(p).amount;
+    const liftN = Math.max(0, Math.cos(phase)) * liftAmp * g + fallen * 3.5;
+    const liftF = Math.max(0, Math.cos(phase + Math.PI)) * liftAmp * g + fallen * 1.4;
 
     // Hips are HIGH when the legs pass under the body, LOW on contact, with an
     // extra dip the instant the heel lands.
@@ -187,7 +215,7 @@ export function posture(p) {
     // How much of the acceleration points the way the hero faces: positive
     // while starting off, negative while braking.
     const fmag = Math.hypot(p.faceX || 0, p.faceY || 0) || 1;
-    const accAlong = ((p.ax || 0) * (p.faceX || 0) + (p.ay || 0) * (p.faceY || 0)) / fmag;
+    const accAlong = ((p.leanAX ?? p.ax ?? 0) * (p.faceX || 0) + (p.leanAY ?? p.ay ?? 0) * (p.faceY || 0)) / fmag;
     const accK = Math.max(-1, Math.min(1, accAlong / GAIT.accelRef));
     const lean = (sideView ? side * GAIT.leanRun * run * g : 0)
                + (sideView ? side * GAIT.leanAccel * accK : 0);
@@ -203,10 +231,95 @@ export function posture(p) {
             : Math.sin(((act - ACTION.windUp) / (1 - ACTION.windUp)) * Math.PI) * ACTION.strikeAmp)
         : 0;
 
-    bob += accLift;                       // head-on: push off / settle back
+    bob += accLift - fallPose(p).crouch;                       // head-on: push off / settle back
+    // Keep each ankle planted without stretching the shin beyond its IK
+    // reach. Previously only the knee target was clamped: the boot was not.
+    const reach = BODY.thigh + BODY.shin - 0.08;
+    for (const [travel, lift] of [[sideView ? swingN + stance : 0, liftN], [sideView ? swingF - stance : 0, liftF]]) {
+        const vertical = Math.sqrt(Math.max(0, reach * reach - travel * travel));
+        bob = Math.min(bob, BODY.hipY - BODY.ankleY + lift + vertical);
+    }
     return { dir, phase, g, run, idle, side, back, sideView, amp,
         swingN, swingF, liftN, liftF, bob, sway, counter, flagX,
         lean, squash, stance, swing };
+}
+
+/** Anatomical hands. RIGHT is screen-left head-on, screen-right from behind;
+ * near in right profile, far in left profile. Never swaps hands for visibility. */
+export function armRig(p, pose = posture(p)) {
+    const { sideView, side, back, bob, counter, lean, swingN, swingF, swing, g, idle } = pose;
+    const make = (x, reach, lift) => {
+        const sx = x + counter + lean, sy = BODY.armY - bob;
+        const ex = sx + reach, ey = sy + BODY.armLen - Math.abs(reach) * 0.25 - lift;
+        return { sx, sy, ex, ey, mx: (sx + ex) / 2 + reach * 0.1, my: (sy + ey) / 2 };
+    };
+    const ax = BODY.shoulderW / 2 + BODY.armW / 2;
+    const behind = p.dir === "left" || back;
+    const rest = Math.sin(idle * 1.3) * 0.45 * (1 - g);
+    const rs = p.actionHand === "left" ? 0 : swing, ls = p.actionHand === "left" ? swing : 0;
+    const lr = p.leftTool ? GAIT.armRatioTool : GAIT.armRatio;
+    const right = sideView
+        ? make(behind ? -BODY.farArmX * side : BODY.nearArmX * side,
+            -(behind ? swingF : swingN) * GAIT.armRatioTool + side * rs * 2.2 + rest, Math.max(0, rs) * 1.5)
+        : make(back ? ax : -ax, rest, (back ? 1 : -1) * swingN * GAIT.armRatioTool - rs * 2.2);
+    const left = sideView
+        ? make(behind ? BODY.nearArmX * side : -BODY.farArmX * side,
+            -(behind ? swingN : swingF) * lr + side * ls * 2.2 - rest, Math.max(0, ls) * 1.5)
+        : make(back ? -ax : ax, -rest, (back ? -1 : 1) * swingN * lr - ls * 2.2);
+    // A held far-hand item is carried ahead of the torso in profile, not
+    // buried inside it. This changes reach, NEVER anatomical assignment.
+    if (sideView) for (const hand of ["left", "right"]) {
+        const held = p[hand + "Tool"] || (hand === "right" ? p.tool : null);
+        if (held) { const a = hand === "left" ? left : right;
+            a.ex += side * (hand === (behind ? "right" : "left") ? 6 : 4);
+            a.ey -= 1.8; a.mx = (a.sx + a.ex) / 2; a.my = (a.sy + a.ey) / 2;
+        }
+    }
+    // Eating has a real occupied hand at the mouth; the other item stays held.
+    if (p.eatingHand) {
+        const a = p.eatingHand === "left" ? left : right;
+        a.ex = sideView ? side * 5 : (p.eatingHand === "right" ? -2 : 2);
+        a.ey = BODY.headY + 6 - bob;
+        a.mx = (a.sx + a.ex) / 2 + (p.eatingHand === "right" ? -3 : 3); a.my = (a.sy + a.ey) / 2 + 5;
+    }
+    // A free hand braces the fall; held items remain in their anatomical hand.
+    const brace = fallPose(p).amount;
+    left.ex += side * brace * 3; left.ey -= brace * 3;
+    left.mx = (left.sx + left.ex) / 2; left.my = (left.sy + left.ey) / 2 - brace;
+    return { right, left, behind };
+}
+
+function heldToolAngle(dir, side, swing, hand = "right") {
+    const anatomical = hand === "left" ? -1 : 1;
+    const lean = dir === "up" ? .65 * anatomical : dir === "down" ? -.65 * anatomical : side * .8;
+    return lean - side * swing * 1.9;
+}
+
+/** Shared attachment for sprite and light map, relative to the foot line. */
+export function toolAttachment(p, hand = "right") {
+    const pose = posture(p), rig = armRig(p, pose);
+    const dir = p.dir || "down";
+    const angle = heldToolAngle(dir, pose.side, p.actionHand && p.actionHand !== hand ? 0 : pose.swing, hand);
+    // Спрайтовый герой: кисть уже известна из 3D-рига, и она не совпадает с нашей
+    // векторной рукой. Свет факела и предмет обязаны идти за кадром запекки, иначе
+    // огненная точка живёт своей жизнью на полшага от ладони.
+    const baked = heroHandAnchor(p, hand, {
+        angle,
+        behind: hand === "right" ? rig.behind : !rig.behind
+    });
+    const gx = baked ? baked.x : rig[hand].ex;
+    const gy = baked ? baked.y : rig[hand].ey + BODY.handH / 2 - 0.5;
+    const narrow = pose.sideView ? 1 - GAIT.slantNarrow * Math.abs(p.slant || 0) : 1;
+    const flame = torchFlame(p.idleTime || 0, p.torchWind || 0, p.gait || 0);
+    const localX = flame.x * (dir === "left" ? -1 : 1);
+    let x = (gx + localX * Math.cos(angle) - flame.y * Math.sin(angle)) * narrow;
+    let y = gy + localX * Math.sin(angle) + flame.y * Math.cos(angle);
+    if (p.fallTimer > 0) {
+        const f = fallPose(p), a = f.angle, xx = x;
+        x = xx * Math.cos(a) - y * Math.sin(a);
+        y = xx * Math.sin(a) + y * Math.cos(a) + f.y;
+    }
+    return { x, y, intensity: flame.intensity, gripX: gx, gripY: gy, angle, behind: baked ? baked.behind : (hand === "right" ? rig.behind : !rig.behind) };
 }
 
 /**
@@ -215,6 +328,18 @@ export function posture(p) {
  *                     actionTimer, tool, idleTime }
  */
 export function drawCharacter(ctx, p) {
+    const fall = fallPose(p);
+    if (!(p.fallTimer > 0)) { paintCharacter(ctx, p); return; }
+    ctx.save();
+    // Contact shadow stays on the ground; never rotate it with the body.
+    ctx.fillStyle = "rgba(12,16,17,0.22)"; ctx.beginPath();
+    ctx.ellipse(Math.sin(fall.angle) * 10, 1, 7 + fall.amount * 10, 2.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.translate(0, fall.y); ctx.rotate(fall.angle);
+    paintCharacter(ctx, { ...p, _noShadow: true });
+    ctx.restore();
+}
+function paintCharacter(ctx, p) {
+    ctx.save();
     // A diagonal is drawn as the side view, turned: the body narrows a little
     // and the head leads the travel direction. Cheap, and it stops diagonal
     // movement from looking like the hero is sliding on rails.
@@ -231,7 +356,7 @@ export function drawCharacter(ctx, p) {
     const dir = p.dir || "down";
     const idle = p.idleTime || 0;
 
-    const skin = look.skin, shirt = look.shirt, pants = look.pants;
+    const skin = look.skin, shirt = look.coat || look.shirt, pants = look.pants;
     const leather = PALETTE.leather;
 
     /* ---- contact shadow, under the FEET, not under the sprite ---------- */
@@ -245,6 +370,7 @@ export function drawCharacter(ctx, p) {
     // every prop around him, so he throws the same kind of shadow. The CORE
     // below still sits strictly under the feet — that is what keeps him
     // planted while the cast part stretches away from the light.
+    if (!p._noShadow) {
     ctx.save();
     // In the shallows the water takes the shadow; drawing one under a boot
     // that is underwater reads as a hole in the lake.
@@ -268,6 +394,49 @@ export function drawCharacter(ctx, p) {
     ctx.ellipse(centroid, 0, SHADOW.coreRX * shrink, SHADOW.coreRY * shrink, 0, 0, Math.PI * 2);
     ctx.fill();
 
+    }
+    /* ---- запечённый герой: форма из 3D-рига, а не из примитивов ------- */
+    const sprite = heroSprite(p, look);
+    if (sprite) {
+        const rig = armRig(p);
+        const held = { right: p.rightTool === undefined ? p.tool : p.rightTool, left: p.leftTool || null };
+        const paintItem = (hand, far) => {
+            const tool = held[hand];
+            if (!tool) return;
+            const anchor = heroHandAnchor(p, hand, {
+                angle: heldToolAngle(dir, side, !p.actionHand || p.actionHand === hand ? swing : 0, hand),
+                behind: far,
+                // Инструмент идёт за кистью из кадра; еда и свет — нет: у них свой
+                // сценарий (еда у рта, факел поднятым), завязанный на векторный замах.
+                follow: !!tool && !LIGHT_ITEMS.has(tool) && tool !== "bundle" && p.eatingHand !== hand
+            });
+            if (!anchor) return;
+            // Предмет держат пальцы, а не запястье: у спрайтового героя кисть
+            // занимает несколько пикселей, и векторный клинок в полный размер
+            // выглядит наклейкой поверх руки. Чуть уменьшаем — так он выходит из
+            // кулака, а не лежит поперёк предплечья.
+            ctx.save();
+            ctx.translate(anchor.gripX, anchor.gripY);
+            ctx.scale(SPRITE_ITEM_SCALE, SPRITE_ITEM_SCALE);
+            ctx.translate(-anchor.gripX, -anchor.gripY);
+            drawHeldToolAt(ctx, tool, dir, side, anchor, p, hand);
+            ctx.restore();
+        };
+        const farHand = rig.behind ? "right" : "left";
+        const nearHand = farHand === "right" ? "left" : "right";
+        const farInFront = farItemInFront(p, farHand, held[farHand]);
+        if (!farInFront) paintItem(farHand, true);
+        ctx.imageSmoothingEnabled = false;         // спрайт 1:1, интерполяция тут = каша
+        ctx.drawImage(sprite.canvas, sprite.x, sprite.y, sprite.w, sprite.h);
+        ctx.imageSmoothingEnabled = true;
+        paintItem(nearHand, false);
+        if (farInFront) paintItem(farHand, false);
+        if (p.wading) paintWaterline(ctx, idle);
+        if (turning) ctx.restore();
+        ctx.restore();
+        return;
+    }
+
     /* ---- legs ---------------------------------------------------------- */
     const drawLeg = (hipX, footX, lift, far, bendDir) => {
         const hx = hipX + sway;
@@ -283,7 +452,9 @@ export function drawCharacter(ctx, p) {
         const toe = sideView ? side * BODY.bootToe : 0;
         const bw = sideView ? BODY.bootW : BODY.bootW * 0.74;
         const bx = ax - bw / 2 + toe, by = ay - 0.4;
-        rect(ctx, bx, by, bw, BODY.bootH, far ? PALETTE.bootFar : PALETTE.boot, "all");
+        poly(ctx, [[bx + 0.7, by], [bx + bw - 0.8, by], [bx + bw, by + 1],
+            [bx + bw - 0.3, by + BODY.bootH], [bx + 0.2, by + BODY.bootH], [bx, by + 1]],
+            far ? PALETTE.bootFar : PALETTE.boot);
         rect(ctx, bx, by + BODY.bootH - 0.9, bw, 0.9, far ? PALETTE.soleFar : PALETTE.sole, false);
         // A lit edge on top of the boot and a dark line where it meets the
         // ground: without them the leg and the boot are one brown column.
@@ -300,20 +471,14 @@ export function drawCharacter(ctx, p) {
     };
 
     /* ---- arms: kinematics first, the tool needs the hand --------------- */
-    const armPose = (shoulderX, reach, lift) => {
-        const sx = shoulderX + counter, sy = BODY.armY - bob + lean;
-        const ex = sx + reach, ey = sy + BODY.armLen - Math.abs(reach) * 0.25 - lift;
-        return { sx, sy, ex, ey, mx: (sx + ex) / 2 + reach * 0.1, my: (sy + ey) / 2 };
-    };
-
     const paintHand = (a, far) => {
         // The cuff line: a hand that butts straight onto a sleeve of the same
         // value disappears at this size.
         rect(ctx, a.ex - BODY.armW / 2 - 0.2, a.ey - 1.1, BODY.armW + 0.4, 0.7,
             `rgba(0,0,0,${READ.handEdgeA})`, false);
-        rect(ctx, a.ex - BODY.armW / 2, a.ey - 0.5, BODY.armW, BODY.handH,
-            far ? shadeHex(skin, PALETTE.skinDeep) : shadeHex(skin, PALETTE.skinLit),
-            far ? true : "all");
+        ctx.fillStyle = far ? shadeHex(skin, PALETTE.skinDeep) : shadeHex(skin, PALETTE.skinLit);
+        ctx.beginPath(); ctx.ellipse(a.ex, a.ey + BODY.handH / 2 - 0.5,
+            BODY.armW * 0.49, BODY.handH * 0.57, 0.12, 0, Math.PI * 2); ctx.fill();
         rect(ctx, a.ex - BODY.armW / 2, a.ey - 0.5 + BODY.handH - 0.7, BODY.armW, 0.7,
             PALETTE.ao, false);
     };
@@ -321,8 +486,8 @@ export function drawCharacter(ctx, p) {
     const paintArm = (a, far, hand = true) => {
         const sleeve = far ? shadeHex(shirt, PALETTE.shirtFar) : band(shirt, "deep");
         const skinC = far ? shadeHex(skin, PALETTE.skinDeep) : skin;
-        limb(ctx, a.sx, a.sy, a.mx, a.my, BODY.armW * BODY.sleeveW, BODY.armW, sleeve, "all");
-        limb(ctx, a.mx, a.my, a.ex, a.ey, BODY.armW, BODY.armW * 0.85, skinC, "all");
+        limb(ctx, a.sx, a.sy, a.mx, a.my, BODY.armW * BODY.sleeveW, BODY.armW, sleeve, true);
+        limb(ctx, a.mx, a.my, a.ex, a.ey, BODY.armW, BODY.armW * 0.85, skinC, true);
         if (look.bracers) {                                   // gear: bracer
             const bw = BODY.armW * GEAR.bracerW;
             rect(ctx, a.ex - bw / 2 + (a.mx - a.ex) * 0.1, a.ey - 0.6 - GEAR.bracerH, bw, GEAR.bracerH,
@@ -331,21 +496,19 @@ export function drawCharacter(ctx, p) {
         if (hand) paintHand(a, far);
     };
 
-    // Arms counter-swing the legs: the far arm goes with the NEAR leg. Head-on
-    // the tool is in the right hand, from behind it is on the left, so the free
-    // arm swaps sides too — otherwise the hero loses an arm.
-    const ax0 = BODY.shoulderW / 2 + BODY.armW / 2 - 1.0;      // outside, slight overlap
-    const farArm = sideView
-        ? armPose(-BODY.farArmX * side, -swingF * GAIT.armRatio, 0)
-        : armPose(back ? ax0 : -ax0, 0, (back ? 1 : -1) * swingN * GAIT.armRatio);
-    const toolArm = sideView
-        ? armPose(BODY.nearArmX * side,
-            -swingN * GAIT.armRatioTool + side * swing * 2.2, Math.max(0, swing) * 1.5)
-        : armPose(back ? -ax0 : ax0, 0,
-            (back ? -1 : 1) * swingN * GAIT.armRatioTool - swing * 2.2);
-
-    if (sideView) paintArm(farArm, true);
-    if (p.tool && back) { drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, true); paintHand(toolArm, false); }
+    const rig = armRig(p);
+    const held = { right: p.rightTool === undefined ? p.tool : p.rightTool, left: p.leftTool || null };
+    const paintHeldArm = (hand, far) => {
+        const arm = rig[hand], tool = held[hand];
+        paintArm(arm, far, !tool);
+        if (tool) {
+            const handSwing = !p.actionHand || p.actionHand === hand ? swing : 0;
+            drawHeldTool(ctx, tool, dir, side, handSwing, arm, far, p, hand); paintHand(arm, far);
+        }
+    };
+    const farHand = rig.behind ? "right" : "left";
+    const farInFront = p.eatingHand === farHand || (!sideView && !back);
+    if (!farInFront) paintHeldArm(farHand, true);
 
     if (sideView) {
         drawLeg(-0.9 * side, swingF - stance, liftF, true, side);
@@ -369,40 +532,38 @@ export function drawCharacter(ctx, p) {
     const top = BODY.torsoY - bob;
     const bottom = top + BODY.torsoH;
     const waistY = top + BODY.torsoH * BODY.waistAt;
-    const narrow = sideView ? BODY.shoulderWSide / BODY.shoulderW : 1;
-    const rows = [
-        [top, BODY.shoulderW / 2 * narrow],
-        [waistY, BODY.waistW / 2 * narrow],
-        [bottom, BODY.hipW / 2 * narrow]
-    ];
-    poly(ctx, silhouette(rows), band(shirt, "base"));
-    poly(ctx, stripe(rows, -1, 0, 2.4), band(shirt, "lit"), false);      // sun side
-    poly(ctx, stripe(rows, 1, 0, 2.0), band(shirt, "dark"), false);
-    poly(ctx, stripe(rows, 1, 0, 0.8), band(shirt, "deep"), false);
-    rect(ctx, -rows[0][1], top, rows[0][1] * 2, PALETTE.aoW * 2, PALETTE.ao, false);   // under the collar
-
-    if (back) {
-        rect(ctx, -0.5, top + 1.5, 1, BODY.torsoH - 4, PALETTE.ao, false);            // spine seam
-    } else if (!sideView) {
-        rect(ctx, -2, top, 4, 1.5, band(shirt, "dark"), false);                        // collar
+    const quarter = sideView ? Math.abs(slant) : 0;
+    const narrow = sideView ? (BODY.shoulderWSide + quarter * 2) / BODY.shoulderW : 1;
+    const frame = look.gender === "female" ? .9 : 1;
+    const sw = BODY.shoulderW / 2 * narrow * frame, waist = BODY.waistW / 2 * narrow;
+    const hem = (BODY.hipW / 2 + (look.gender === "female" ? 2 : 1)) * narrow;
+    const rows = [[top,sw*.75],[top+2,sw],[waistY,waist],[bottom,hem]];
+    const coat = look.coat || look.vest || shirt;
+    // New silhouette: a short travelling coat, split skirts, layered linen,
+    // high collar and gathered sleeves; no armour wedges/waistcoat geometry.
+    poly(ctx, [[-sw*.65,top], [sw*.65,top], [sw+.5,top+2], [waist+1,waistY],
+        [hem+1,bottom+5], [1.1+flagX*.22,bottom+4], [0,bottom],
+        [-1.4+flagX*.3,bottom+5.5], [-hem-1,bottom+4], [-waist-1,waistY], [-sw-.5,top+2]], coat);
+    poly(ctx,[[-sw*.65,top],[-1.5,top+1],[-1.5,bottom+3],[-hem+.4,bottom+4],[-waist,waistY],[-sw+.3,top+2]],shadeHex(coat,19),false);
+    poly(ctx,[[sw*.7,top+1],[sw+.5,top+2],[waist+1,waistY],[hem+1,bottom+5],[3,bottom+3],[waist-.5,waistY]],shadeHex(coat,-24),false);
+    if (!back) {
+        poly(ctx,[[-2.3,top],[2.3,top],[1.5,bottom-1],[-1.8,bottom-1]],'#c3b89b',false);
+        poly(ctx,[[-3,top],[-.9,top+5],[-3.5,top+3]],shadeHex(coat,-15),false);
+        poly(ctx,[[3,top],[.9,top+5],[3.5,top+3]],shadeHex(coat,27),false);
+        for(let i=0;i<3;i++) { ctx.fillStyle='#645a45';ctx.beginPath();ctx.arc(.2,top+6+i*2.2,.35,0,Math.PI*2);ctx.fill(); }
+    } else { ctx.strokeStyle=shadeHex(coat,-20);ctx.lineWidth=.5;ctx.beginPath();ctx.moveTo(0,top+3);ctx.lineTo(0,bottom+3);ctx.stroke(); }
+    const beltY = bottom - 2;
+    rect(ctx,-waist-1,beltY,waist*2+2,1.4,'#594939',false);
+    rect(ctx,-.8,beltY,1.6,1.4,'#bbab79',false);
+    // Rolled neck scarf and a wind-responsive tail are distinct at game zoom.
+    poly(ctx,[[-3.3,top-.4],[3.1,top-.3],[3.5,top+1.5],[-2.9,top+2.1]],look.accent,false);
+    if(!back) poly(ctx,[[1.3,top+1],[3,top+1],[3.5+flagX*.4,top+7],[1.1+flagX*.3,top+6]],shadeHex(look.accent,-17),false);
+    if(look.satchel) {
+        const sign=back?-1:1;
+        ctx.strokeStyle='#baa178';ctx.lineWidth=1.4;ctx.beginPath();ctx.moveTo(-sw*.65*sign,top+2);ctx.lineTo((hem+1)*sign,bottom);ctx.stroke();
+        poly(ctx,[[hem*sign,bottom-2],[(hem+3.5)*sign,bottom-1],[(hem+3.1)*sign,bottom+4],[(hem-.5)*sign,bottom+3]],'#7c6041',false);
+        ctx.strokeStyle='#c0a77b';ctx.lineWidth=.5;ctx.beginPath();ctx.moveTo(hem*sign,bottom);ctx.lineTo((hem+3.2)*sign,bottom+.5);ctx.stroke();
     }
-
-    // Belt, buckle and the accent flap that trails the pelvis.
-    const beltY = bottom - 2.2;
-    rect(ctx, -rows[2][1] - 0.2, beltY, rows[2][1] * 2 + 0.4, 2.2, PALETTE.belt);
-    rect(ctx, (sideView ? side * 1.8 : 0) - 1.1, beltY + 0.3, 2.2, 1.6, PALETTE.buckle, false);
-    if (look.beltFlap) {
-        const fw = GEAR.flapW;
-        const fx = (sideView ? side * 1.0 : rows[2][1] - fw * 0.35) + flagX * 0.6;
-        rect(ctx, fx - fw / 2, beltY + 1.5, fw, GEAR.flapH, look.accent);
-        rect(ctx, fx - fw / 2, beltY + 1.5, fw * 0.3, GEAR.flapH,
-            shadeHex(look.accent, TONE.lit), false);
-    }
-    if (look.cloak) {
-        poly(ctx, silhouette(rows.map(([y, hw]) => [y + 0.5, hw + 1])), look.cloak);
-    }
-
-    rect(ctx, -rows[0][1], top + 0.5, PALETTE.rimW, BODY.torsoH * 0.55, PALETTE.rim, false);
 
     // Pauldrons go on AFTER the arms, so they cover the shoulder joint — that
     // is what makes gear read as worn instead of glued on.
@@ -416,78 +577,38 @@ export function drawCharacter(ctx, p) {
             [s * (inner - 0.4), top + GEAR.shoulderH + drop * 0.5]
         ], s < 0 ? shadeHex(leather, PALETTE.leatherLit) : leather, "all");
         const out = sw + GEAR.shoulderW * 0.42;
-        // In profile a single compact cap sits on the near shoulder; a slab
-        // across the chest reads as a plank, not as armour.
-        if (sideView) pad(side, -1.0, sw + 0.9, GEAR.shoulderDrop * 0.6);
-        else { pad(-1, sw - 2.6, out, GEAR.shoulderDrop); pad(1, sw - 2.6, out, GEAR.shoulderDrop); }
+        if (sideView) {
+            // In profile the visible cap sits on the near shoulder.
+            pad(side, -1.0, sw + 0.9, GEAR.shoulderDrop * 0.6);
+        } else {
+            pad(-1, sw - 2.6, out, GEAR.shoulderDrop);
+            pad(1, sw - 2.6, out, GEAR.shoulderDrop);
+        }
     };
 
     /* ---- near arm ------------------------------------------------------- */
-    if (!sideView) paintArm(farArm, false);
-    paintArm(toolArm, false, !p.tool);        // with a tool the hand comes later
     paintPauldrons();
 
-    /* ---- head ----------------------------------------------------------- */
-    let headY = BODY.headY - bob;
-    const headH = BODY.headH, headW = BODY.headW;
-    const headX = (sideView ? side * 0.5 : 0) + counter * 0.5;
-    if (turning) headY += GAIT.slantHead * slant;      // look where you are going
-    rect(ctx, -2.2, headY + headH - 0.5, 4.4, 1.6, PALETTE.ao, false);          // neck
-    rect(ctx, headX - headW / 2, headY, headW, headH, skin);
-    rect(ctx, headX + headW / 2 - 1.8, headY + 1, 1.8, headH - 1, shadeHex(skin, PALETTE.skinShade), false);
-    rect(ctx, headX - headW / 2, headY + 1, 1.3, headH - 2, shadeHex(skin, PALETTE.skinLit), false);
-    rect(ctx, headX - headW / 2, headY + 1, PALETTE.rimW, headH - 3, PALETTE.rim, false);
-    if (back) rect(ctx, headX - headW / 2, headY + headH - 2.2, headW, 2.2,
-        shadeHex(skin, PALETTE.skinShade), false);
-
-    const hairDark = shadeHex(look.hair, PALETTE.hairShade);
-    const hairLit = shadeHex(look.hair, PALETTE.hairLit);
-    if (back) {
-        rect(ctx, headX - headW / 2 - 0.5, headY - 1, headW + 1, headH - 1, look.hair);
-        rect(ctx, headX + headW / 2 - 2.2, headY - 1, 2.2, headH - 1, hairDark, false);
-        rect(ctx, headX - headW / 2 + 1, headY - 0.5, 3, 1.2, hairLit, false);
-    } else {
-        rect(ctx, headX - headW / 2 - 0.5, headY - 1, headW + 1, 3.6, look.hair);
-        rect(ctx, headX + headW / 2 - 2.2, headY - 1, 2.2, 3.6, hairDark, false);
-        if (look.hairStyle === "long") {
-            rect(ctx, headX - headW / 2 - 1.2, headY, 1.7, 6.5, look.hair, false);
-            rect(ctx, headX + headW / 2 - 0.5, headY, 1.7, 6.5, look.hair, false);
-        } else {
-            rect(ctx, headX - headW / 2 - 1, headY + 0.5, 1.4, 2.2, look.hair, false);
-            rect(ctx, headX + headW / 2 - 0.4, headY + 0.5, 1.4, 2.2, look.hair, false);
-        }
-        rect(ctx, headX - headW / 2 + 1, headY - 0.5, 2.6, 1, hairLit, false);
-    }
-
-    if (!back) {
-        const blink = (idle % GAIT.blinkEvery) < GAIT.blinkFor;
-        const eyeH = blink ? 0.5 : 1.4, eyeW = 1.4;
-        const eyeY = headY + (blink ? 4.8 : 4);
-        if (dir === "left") {
-            rect(ctx, headX - 3.2, eyeY, eyeW, eyeH, PALETTE.eye, false);
-            rect(ctx, headX - headW / 2 - 0.5, headY + 4, 1, 1.4, shadeHex(skin, PALETTE.skinShade), false);
-            rect(ctx, headX - 3.6, headY + 6.2, 2.2, 0.9, "rgba(0,0,0,0.2)", false);
-        } else if (dir === "right") {
-            rect(ctx, headX + 1.8, eyeY, eyeW, eyeH, PALETTE.eye, false);
-            rect(ctx, headX + headW / 2 - 0.5, headY + 4, 1, 1.4, shadeHex(skin, PALETTE.skinShade), false);
-            rect(ctx, headX + 1.4, headY + 6.2, 2.2, 0.9, "rgba(0,0,0,0.2)", false);
-        } else {
-            rect(ctx, headX - 2.7, eyeY, eyeW, eyeH, PALETTE.eye, false);
-            rect(ctx, headX + 1.3, eyeY, eyeW, eyeH, PALETTE.eye, false);
-            rect(ctx, headX - 0.9, headY + 6.2, 1.8, 0.9, "rgba(0,0,0,0.16)", false);
-        }
-    }
+    /* ---- head: authored silhouette, narrow neck, shaped hair and jaw ---- */
+    drawHead(ctx, {
+        x: (sideView ? side * 0.5 : 0) + counter * 0.5 + Math.sin(idle * 0.65) * 0.35 * (1 - g),
+        y: BODY.headY - bob + (turning ? GAIT.slantHead * slant : 0),
+        dir, slant, look, time: idle
+    });
 
     ctx.restore();
 
-    // Tool in the near hand, in front of the body; the fist closes over the
-    // handle afterwards so the grip reads as a grip and not as a loose block.
-    if (p.tool && !back) {
-        drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, false);
-        paintHand(toolArm, false);
-    }
+    if (farInFront) paintHeldArm(farHand, false);
+    paintHeldArm(rig.behind ? "left" : "right", false);
     // --- the waterline -------------------------------------------------
-    if (p.wading) {
+    if (p.wading) paintWaterline(ctx, idle);
+
+    if (turning) ctx.restore();
+    ctx.restore();
+}
+
+/** Ватерлиния: кольцо на поверхности, вода поверх ботинок, пена у тела. */
+function paintWaterline(ctx, idle) {
         const t = idle * WADE.breatheHz;
         const grow = 1 + Math.sin(t) * (WADE.breathe / WADE.ringRX);
         ctx.globalAlpha = 1;
@@ -508,26 +629,32 @@ export function drawCharacter(ctx, p) {
         ctx.beginPath();
         ctx.ellipse(0, WADE.lineY, WADE.rx, WADE.ry, 0, 0, Math.PI * 2);
         ctx.stroke();
-    }
-
-    if (turning) ctx.restore();
 }
 
 /**
  * Draw the held tool at the hand. `dir` decides which side of the body the
  * grip sits on; the tool is rotated around the grip when swinging.
  */
-function drawHeldTool(ctx, tool, dir, side, swing, arm, behind) {
+/**
+ * Предмет в запечённой точке хвата (3D-спрайт): графика та же, что у поселенцев,
+ * якорь — из позиции кости кисти на этом кадре.
+ */
+export function drawHeldToolAt(ctx, tool, dir, side, anchor, pose = {}, hand = "right") {
+    drawHeldTool(ctx, tool, dir, side, 0, { ex: anchor.x, ey: anchor.y - BODY.handH / 2 + 0.5 },
+        anchor.behind, { ...pose, toolAngle: anchor.angle, noMirror: anchor.noMirror }, hand);
+}
+
+function drawHeldTool(ctx, tool, dir, side, swing, arm, behind, pose = {}, hand = "right") {
     // The grip IS the hand of the tool arm — passing a fixed GRIP_Y used to
     // leave the knife floating next to a second, phantom hand.
     const gx = arm.ex, gy = arm.ey + BODY.handH / 2 - 0.5;
-    const lean = dir === "up" ? -0.35 : dir === "down" ? 0.3 : side * 0.45;
-    const angle = lean - side * swing * 1.9;
+    const angle = pose.toolAngle !== undefined ? pose.toolAngle : heldToolAngle(dir, side, swing, hand);
 
     ctx.save();
     ctx.translate(gx, gy);
     ctx.rotate(angle);
-    if (dir === "left") ctx.scale(-1, 1);          // mirror so tools face forward
+    // Зеркало нужно векторной руке; запечённый угол ракурс уже учитывает.
+    if (!pose.noMirror && (dir === "left" || (hand === "left" && (dir === "up" || dir === "down")))) ctx.scale(-1, 1);
     if (behind) ctx.globalAlpha = 0.9;
 
     const id = typeof tool === "string" ? tool : (tool.tool || tool.id || "");
@@ -539,7 +666,23 @@ function drawHeldTool(ctx, tool, dir, side, swing, arm, behind) {
         case "spear": drawSpear(ctx); break;
         case "rod": drawRod(ctx); break;
         case "hoe": drawHoe(ctx); break;
-        case "torch": drawTorch(ctx); break;
+        case "torch": drawTorch(ctx, pose); break;
+        case "pot":
+            ctx.fillStyle="#53635f";ctx.beginPath();ctx.ellipse(0,-4,4,3,0,0,Math.PI*2);ctx.fill();
+            ctx.strokeStyle="#a1b0a8";ctx.lineWidth=.6;ctx.beginPath();ctx.arc(0,-5,3,Math.PI,0);ctx.stroke();break;
+        case "book":
+            ctx.fillStyle="#5b3e2e";ctx.fillRect(-3,-6,6,7);ctx.fillStyle="#c6b994";ctx.fillRect(-2,-5,4,5);break;
+        case "bundle":
+            ctx.rotate(-angle); // horizontal bundle balanced across the forearm
+            for (let i = 0; i < Math.min(5, tool.n || 1); i++) {
+                ctx.fillStyle = i % 2 ? "#80603c" : "#a68652";
+                ctx.fillRect(-9 + i % 2, -4 - i * 1.5, 18, 2);
+                ctx.fillStyle = "#dac090"; ctx.fillRect(7 + i % 2, -4 - i * 1.5, 2, 2);
+            }
+            ctx.fillStyle = "#574b34"; ctx.fillRect(-1, -4 - Math.min(5,tool.n || 1)*1.5, 2, 10); break;
+        case "food":
+            ctx.fillStyle = itemId === "berry" ? "#555984" : itemId.includes("tea") ? "#b3aa88" : "#b18b54";
+            ctx.beginPath(); ctx.ellipse(0, -2, itemId === "berry" ? 1.4 : 2.6, itemId === "berry" ? 1.2 : 2.2, 0, 0, Math.PI * 2); ctx.fill(); break;
         default: drawGeneric(ctx); break;
     }
 
@@ -643,23 +786,11 @@ function drawHoe(ctx) {
     ctx.fillRect(-0.8, -13.6, 6.4, 0.6);
 }
 
-function drawTorch(ctx) {
-    ctx.fillStyle = "#5e4228";
-    ctx.fillRect(-1.3, -11, 2.6, 13);
-    ctx.fillStyle = "#3f2c18";
-    ctx.fillRect(0.4, -11, 0.9, 13);
-    ctx.fillStyle = "#2a211a";                  // pitch-soaked rag
-    ctx.fillRect(-2.2, -13.5, 4.4, 3);
-    ctx.fillStyle = "rgba(255,120,40,0.85)";
-    ctx.beginPath();
-    ctx.moveTo(-2.6, -13); ctx.quadraticCurveTo(0, -22, 2.6, -13);
-    ctx.quadraticCurveTo(0, -11.5, -2.6, -13);
-    ctx.closePath(); ctx.fill();
-    ctx.fillStyle = "rgba(255,220,140,0.9)";
-    ctx.beginPath();
-    ctx.moveTo(-1.2, -13.5); ctx.quadraticCurveTo(0, -18.5, 1.2, -13.5);
-    ctx.quadraticCurveTo(0, -12.6, -1.2, -13.5);
-    ctx.closePath(); ctx.fill();
+function drawTorch(ctx, pose) {
+    ctx.fillStyle = "#5e4228"; ctx.fillRect(-1.2, -11, 2.4, 13);
+    ctx.fillStyle = "#95704a"; ctx.fillRect(-1.2, -10, 0.7, 9);
+    ctx.fillStyle = "#302b22"; ctx.fillRect(-2.1, -13.5, 4.2, 3.2);
+    paintTorchFlame(ctx, pose.idleTime || 0, pose.torchWind || 0, pose.gait || 0);
 }
 
 function drawGeneric(ctx) {
