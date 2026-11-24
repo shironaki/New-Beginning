@@ -1640,7 +1640,10 @@ export const PROP_HEIGHT = {
     burnt_tree: 38, dead_tree: 34,
     hearth_ruin: 34, tent: 30, ruin_wall: 26,
     rock: 14, ore_rock: 14, beach_pebbles: 2.5, scree: 4, burnt_stump: 13, bush: 12, chest_old: 11,
-    burnt_beam: 7, campfire: 6, firewood: 6, driftwood: 5, diary: 3
+    burnt_beam: 7, campfire: 6, firewood: 6, driftwood: 5, diary: 3,
+    // Детали деревни (Quaternius «Medieval Village MegaKit», CC0). Печатаются из
+    // tools/prop-bake.js теми же числами — тест проверяет, что они не разъехались.
+    hut_wall: 46, hut_roof: 56, chimney: 30, fence: 22, crate: 16, wagon: 40
 };
 /** These grow with the prop's own `size`; the rest are built, not grown. */
 const HEIGHT_SCALES = new Set([

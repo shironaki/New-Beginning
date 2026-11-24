@@ -12,9 +12,15 @@
 Как перепечь:
 
 ```
-node tools/prop-bake.js --sheet --ppu 3      # лист current | 3D в .artifacts/prop-bake.png
-node tools/prop-bake.js --emit js/render/propsprites.js --ppu 4.8
+node tools/prop-bake.js --sheet --ppu 1 --colors 10    # лист current | 3D в .artifacts/prop-bake.png
+node tools/prop-bake.js --emit js/render/propsprites.js --ppu 1 --colors 10
 ```
+
+`--ppu 1` — это не мелочь: кадр пропа в игре занимает ровно `propHeight(kind, 1)`
+логических пикселей (32-тайловый мир, зум 2.6), поэтому 1 пиксель модели = 1
+пиксель кадра. При `--ppu 4.8` получался спрайт вчетверо крупнее, и игра либо
+резала его, либо топорщила крону. `--colors 10` — столько тонов у запечённого
+low-poly реально есть; дальше палитра начинает плодить «шум» на гранях.
 
 В git попадают только GLB (по 5–30 КБ) и лицензия: запечь проп заново должен
 быть возможным без внешней загрузки.

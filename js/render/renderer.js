@@ -18,6 +18,7 @@ import { CHUNK } from "../world/tilemap.js";
 import { TILE_SIZE, TILES } from "../world/tiles.js";
 import { paintTile, paintSnowGround, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, setWalker, setBreeze, propHeight, propTone, puddleScreenPath, coastReach } from "./tilesart.js";
 import { drawCharacter, drawSleeping, toolAttachment } from "./character.js";
+import { paintProp3D } from "./props3d.js";
 import { LightMap, LIGHT } from "./lighting.js";
 import { bakeTerrain, drawTerrainWater } from "./terrain.js";
 import { drawWetGround } from "./surface.js";
@@ -680,7 +681,15 @@ export class Renderer {
             ctx.scale(cam.zoom, cam.zoom);
             if (d.kind === "prop") {
                 if (o._fade > 0) ctx.globalAlpha = 1 - (1 - OCCLUDE.alpha) * o._fade;
-                if (o.depleted) paintLoot(ctx, o.loot || []); else paintProp(ctx, o, this.time, this.season);
+                if (o.depleted) paintLoot(ctx, o.loot || []);
+                // Настоящая 3D-модель, запечённая в спрайт (props3d), если она для
+                // этого kind есть; процедурная кривая остаётся запасным путём —
+                // побитые пропы, зима без кадра, среда без канваса.
+                else if (!paintProp3D(ctx, o, {
+                    time: this.time, season: this.season,
+                    weather: state.weather, groundWet: state.groundWet,
+                    wind: state.underground ? 0 : Math.cos(state.windAngle || 0) * (state.windStrength || 0)
+                })) paintProp(ctx, o, this.time, this.season);
                 ctx.globalAlpha = 1;
                 if (o.kind === "campfire") {
                     const fire = fires && fires.get(o.id != null ? o.id : `${o.tx},${o.ty}`);

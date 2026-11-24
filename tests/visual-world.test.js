@@ -17,6 +17,10 @@ import { BODY, RAMPS } from "../js/render/charspec.js";
 import { DEFAULT_LOOK } from "../js/render/character.js";
 import { META as HERO_META, PALETTE_HEX as HERO_PALETTE, STREAMS as HERO_STREAMS } from "../js/render/heroframes.js";
 import { heroLookPalette } from "../js/render/hero3d.js";
+import { PROP_SPRITES, PROP_META } from "../js/render/propsprites.js";
+import { paintProp3D, prop3dStatus, PROPS3D } from "../js/render/props3d.js";
+import { PROP_HEIGHT, propHeight } from "../js/render/tilesart.js";
+import { ITEMS } from "../js/sandbox/items.js";
 
 suite("final coastline and beach");
 test("every final coast, including the outer border, starts with shallows on 16 seeds", () => {
@@ -462,4 +466,50 @@ test("which hand is behind the body comes from the frame's depth buffer, not the
         }
     }
 });
+suite("props from real 3D packs");
+test("запеченный кадр пропа рисуется, а побитый и незнакомый уходят к кривым", () => {
+    // Среде нужен createElement('canvas'): в браузере он есть, в тесте — подстава.
+    if (!globalThis.document) {
+        globalThis.document = { createElement: (tag) => (tag === "canvas" ? new ShimCanvas(1, 1) : {}) };
+    }
+    PROPS3D.enabled = true;
+    const cv = new ShimCanvas(140, 110), ctx = cv.getContext("2d");
+    ctx.translate(70, 96);               // точка опоры пропа — основание, вверх y<0
+    const n0 = PROPS3D.stats.drawn;
+    assert.ok(paintProp3D(ctx, { kind: "pine", tx: 5, ty: 9, size: 1 }, { season: "spring" }),
+        "сосна обязана нарисоваться из PROP_SPRITES");
+    let lit = 0;
+    for (let i = 3; i < cv.data.length; i += 4) if (cv.data[i] > 0) lit += 1;
+    assert.ok(lit > 300, `на кадре должны быть пиксели дерева, а их ${lit}`);
+    assert.eq(PROPS3D.stats.drawn, n0 + 1, "счетчик отрисовок должен идти");
+    assert.ok(!paintProp3D(ctx, { kind: "tent", tx: 1, ty: 1 }), "для «tent» кадра нет — рисует tilesart");
+    assert.ok(!paintProp3D(ctx, { kind: "pine", tx: 1, ty: 1, hits: 1 }), "побитый проп остаётся процедурным");
+    assert.eq(prop3dStatus().kinds, Object.keys(PROP_SPRITES).length, "статус обязан врать, если лист не тот");
+});
+test("размер кадра = propHeight: сетка коллизий и силуэт не разъезжаются", () => {
+    for (const kind of ["pine", "spruce", "rock", "ore_rock", "hut_wall", "hut_roof", "chimney", "fence", "crate", "wagon"]) {
+        const e = PROP_SPRITES[kind];
+        assert.ok(e, `в листе нет кадра «${kind}»`);
+        const want = propHeight(kind, 1);
+        assert.ok(Math.abs(e.height - want) <= 1.5, `${kind}: кадр ${e.height} px против propHeight ${want}`);
+    }
+    for (const kind of ["hut_wall", "hut_roof", "chimney", "fence", "crate", "wagon"]) {
+        assert.ok(PROP_HEIGHT[kind] !== undefined, `«${kind}» нет в PROP_HEIGHT — тень и окклюзия считают его по умолчанию`);
+    }
+    assert.ok(PROP_META.pxPerUnit > 0 && PROP_META.source, "источник запекки должен быть подписан");
+});
+test("пепелище собирается из настоящих деталей пака, и они ломаются в предмет", () => {
+    const zone = generateZone("ashfall", 1066618561);
+    const seen = new Set(zone.objects.map(o => o.kind));
+    for (const kind of ["hut_wall", "hut_roof", "chimney", "crate", "wagon", "fence"]) {
+        assert.ok(seen.has(kind), `во дворе нет «${kind}»`);
+        const def = PROPS[kind];
+        assert.ok(def, `«${kind}» нет в PROPS — по нему нельзя кликнуть`);
+        assert.ok(PROP_SPRITES[kind], `«${kind}» нет в листе запекки`);
+        for (const [item] of def.drops) {
+            assert.ok(ITEMS[item], `«${kind}» роняет несуществующий «${item}»`);
+        }
+    }
+});
+
 await run("visual-world");

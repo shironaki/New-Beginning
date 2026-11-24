@@ -1120,6 +1120,22 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
                 }
             }
         }
+        // Стиль пропов мира включается так же, как стиль героя: ?props3d=off
+        // возвращает процедурные кривые, ?props3d=on заставляет 3D-спрайты даже
+        // если среда их не потянула (причина видна в prop3dStatus()).
+        const propsMode = new URLSearchParams(window.location.search).get("props3d");
+        const props3d = await import("./render/props3d.js");
+        if (propsMode === "off" || propsMode === "vector") props3d.PROPS3D.enabled = false;
+        if (propsMode === "on") props3d.PROPS3D.enabled = true;
+        // Штамп сборки: без него «правки не доехали» и «правки не видно»
+        // выглядят одинаково. Здесь ровно то, что реально загрузилось.
+        try {
+            const st = props3d.prop3dStatus();
+            const stamp = document.createElement("div");
+            stamp.id = "buildStamp";
+            stamp.textContent = `сборка 71 · 3D-пропы: ${st.enabled ? st.kinds : 0} (${st.reason || "ок"})`;
+            (document.body || document.documentElement).appendChild(stamp);
+        } catch { /* штамп — не игра */ }
         window.GAME = game;
         // The owner's control room. Loaded lazily and locked behind a
         // password, so an ordinary player never sees it and the module costs

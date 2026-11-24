@@ -22,6 +22,8 @@
     "hero3d": "node tools/hero-bake.js --poses --emit",
     "hero:strip": "node tools/hero-strip.js",
     "scene": "node tools/scene.js",
+    "props3d": "node tools/prop-bake.js --emit js/render/propsprites.js --ppu 1 --colors 10",
+    "props:check": "node tools/prop-bake.js --sheet --ppu 1 --colors 10",
     "surface": "node tools/surface-review.js",
     "environment": "node tools/environment-review.js",
     "visual": "node tools/visual-review.js",

@@ -31,6 +31,14 @@ export const PROPS = {
     burnt_stump: { name: "Обугленный пень", tool: null, hits: 2, drops: [["charcoal", 1], ["ash_dust", 1]], solid: false, xp: 1, block: 3.6 },
     driftwood:   { name: "Плавник",      tool: null, hits: 1, drops: [["firewood", 2]], solid: false, xp: 1, block: 0 },
 
+    /* ---- постройки (3D-детали деревни, разбираются руками/инструментом) ---- */
+    crate:    { name: "Ящик",        tool: null, hits: 2, drops: [["plank", 2], ["fiber", 1, 0.4]], solid: true, xp: 1, block: 1.6 },
+    fence:    { name: "Плетень",     tool: null, hits: 2, drops: [["fiber", 2], ["log", 1, 0.3]], solid: true, xp: 1, block: 1.8 },
+    wagon:    { name: "Телега",      tool: "axe", hits: 4, drops: [["plank", 3], ["log", 2]], solid: true, xp: 3, block: 3.2 },
+    chimney:  { name: "Труба",       tool: "pick", hits: 5, drops: [["stone", 4], ["ash_dust", 2]], solid: true, xp: 3, block: 2.6 },
+    hut_wall: { name: "Стена дома",  tool: "pick", hits: 6, drops: [["stone", 3], ["plank", 2]], solid: true, xp: 4, block: 3.4 },
+    hut_roof: { name: "Крыша",       tool: "axe", hits: 5, drops: [["hay", 3], ["plank", 1, 0.5]], solid: false, xp: 3, block: 0 },
+
     /* ---- stone & ore --------------------------------------------------- */
     beach_pebbles: { name: "Галька", tool: null, hits: 1, drops: [["stone", 2], ["flint", 1, 0.3]], solid: false, xp: 1, instant: true, block: 0 },
     /**

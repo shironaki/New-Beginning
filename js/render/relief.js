@@ -7,6 +7,7 @@ import { RELIEF_STEPS } from "../dev/relief-guide.js";
 import { RELIEF, RELIEF_PROPS } from "../world/relief.js";
 import { drawCharacter } from "./character.js";
 import { paintProp, paintFlames, setSun, setFireLights } from "./tilesart.js";
+import { paintProp3D } from "./props3d.js";
 export const RELIEF_OBJECTS = RELIEF_PROPS;
 export function reliefMesh(patch, { season = "spring", wet = 0, zone = null, freezing = false } = {}) {
     const mesh = [], step = 8;
@@ -60,7 +61,8 @@ export function drawRelief(ctx, patch, walker, { mesh = reliefMesh(patch), colle
             ctx.save(); ctx.translate(p.x, p.y);
             if (d.player) drawCharacter(ctx, { dir: walker.dir, phase: walker.phase, gait: walker.gait, idleTime: walker.time, tool: "knife", ...character });
             else {
-                if (o.depleted) paintLoot(ctx, o.loot || []); else paintProp(ctx, o, walker.time, season);
+                if (o.depleted) paintLoot(ctx, o.loot || []);
+                else if (!paintProp3D(ctx, o, { time: walker.time, season })) paintProp(ctx, o, walker.time, season);
                 if (o.kind === "campfire") {
                     const fire = fires?.get(`${o.tx},${o.ty}`);
                     paintFlames(ctx, fire?.intensity || 0, walker.time, fire?.stack || []);

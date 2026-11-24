@@ -767,6 +767,24 @@ function placeStoryProps(zone, rng) {
         addProp(zone, "firewood", cx + 1, cy + 1, { solid: false, amount: 2 });
         addProp(zone, "firewood", cx, cy - 1, { solid: false, amount: 2 });
         zone.spawnHint = { tx: cx, ty: cy + 1 };
+
+        // Что уцелело от дома — уже не нарисованный отрезок, а деталь из пака
+        // (Quaternius «Medieval Village MegaKit», CC0): обломок стены с наличником,
+        // крыша, труба, ящик, плетень вдоль двора и телега у калитки. Ставим ПОСЛЕ
+        // расчистки лагеря и мимо него: лагерь вычищает тайлы вместе с пропами, и
+        // телега, поставленная в (cx-2, cy), просто исчезала под палаткой.
+        for (const [x, y] of [[hx, hy + 1], [hx + 6, hy + 1]]) {
+            if (map.inBounds(x, y)) addProp(zone, "hut_wall", x, y, { solid: true });
+        }
+        // Крышу и трубу ставим СЕВЕРО-ВОСТОЧНИЕ стены, на тайл выше: y-сортировка
+        // рисует их до стены, и деталь ложится на неё, а не повисает над пеплом.
+        if (map.inBounds(hx + 1, hy)) addProp(zone, "hut_roof", hx + 1, hy, { solid: false, size: 0.94, lift: 34 });
+        if (map.inBounds(hx + 2, hy - 1)) addProp(zone, "chimney", hx + 2, hy - 1, { solid: true });
+        if (map.inBounds(hx + 5, hy + 3)) addProp(zone, "crate", hx + 5, hy + 3, { solid: true });
+        if (map.inBounds(hx + 8, hy + 3)) addProp(zone, "wagon", hx + 8, hy + 3, { solid: true });
+        for (const [x, y] of [[hx - 3, hy + 5], [hx - 3, hy + 7], [hx - 3, hy + 9]]) {
+            if (map.inBounds(x, y)) addProp(zone, "fence", x, y, { solid: true });
+        }
     }
 
     if (def.id === "ruins") {
@@ -784,6 +802,16 @@ function placeStoryProps(zone, rng) {
                     if (edge && rng.chance(0.55)) addProp(zone, "ruin_wall", x, y, { solid: true, variant: rng.int(0, 2) });
                 }
             }
+            // Из конструктора собираем то, чего процедурная отрисовка не давала:
+            // уцелевший угол с крышей и трубой. Две детали на фундамент — и это
+            // уже «дом», а не «прямоугольник из сажи».
+            if (map.inBounds(bx, by) && rng.chance(0.7)) addProp(zone, "hut_wall", bx, by, { solid: true });
+            if (map.inBounds(bx + 1, by - 1)) addProp(zone, "hut_roof", bx + 1, by - 1, { solid: false, size: 0.9, lift: 30 });
+            if (map.inBounds(bx + 3, by - 1) && rng.chance(0.5)) addProp(zone, "chimney", bx + 3, by - 1, { solid: true });
+            if (map.inBounds(bx + bw - 1, by + bh - 2) && rng.chance(0.45)) {
+                addProp(zone, "crate", bx + bw - 1, by + bh - 2, { solid: true });
+            }
+            if (map.inBounds(bx - 2, by + 1) && rng.chance(0.35)) addProp(zone, "wagon", bx - 2, by + 1, { solid: true });
             if (rng.chance(0.6)) addProp(zone, "chest_old", bx + 1, by + 1, { solid: true, looted: false });
         }
     }

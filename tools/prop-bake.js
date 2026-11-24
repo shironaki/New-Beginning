@@ -28,7 +28,8 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { readGlb, readMesh, materialInfo } from "./gltf-rig.js";
+import { readGlb, readGltf, readMesh, materialInfo } from "./gltf-rig.js";
+import { loadPngFile, decodePng } from "./png-decode.js";
 import { makeFrame, cameraBasis, renderFrame } from "./raster3d.js";
 import { ShimCanvas, encodePNG } from "./canvas-shim.js";
 import { paintProp, setSun, propHeight } from "../js/render/tilesart.js";
@@ -44,38 +45,77 @@ const num = (name, dflt) => {
     const v = flag(name, null);
     return v === null || v === true ? dflt : Number(v);
 };
-const ASSETS = path.resolve("dev/character-style-lab/assets/kenney");
+/** Каталог пака; PACKS объявлен ниже, поэтому резолвим лениво. */
+const packDir = (name) => path.resolve((PACKS[name] || PACKS.kenney));
 const PX_PER_UNIT = num("ppu", 2.4);                                   // как у героя
 const PITCH = num("pitch", 0.2);
-const YAW = num("yaw", 0);
+// 0.7 рад, а не «в анфас»: мир виден под three-quarter, и проп с этого же
+// ракурса садится в кадр, тогда как фронтальный wagon выглядит табуреткой.
+const YAW = num("yaw", 0.7);
 const COLORS = num("colors", 15);
 const OUT = String(flag("sheet", null) === null ? ".artifacts/prop-bake.png" : (flag("out") || ".artifacts/prop-bake.png"));
 
 /**
- * kind пропа → файл модели и высота в единицах мира. Высоты взяты не с потолка:
- * `propHeight(kind, 1)` в tilesart уже задаёт, насколько пропа быть, и печём ровно
- * под него — иначе проп встанет в другую сетку коллизий и «утонет» в земле.
+ * kind пропа → модель, пак и размер. Высоты взяты не с потолка: `propHeight(kind, 1)`
+ * в tilesart уже задаёт, насколько пропа быть, и печём ровно под него — иначе проп
+ * встанет в другую сетку коллизий и «утонет» в земле.
+ *
+ * Поля записи: `file` — модель, `pack` — откуда брать (см. PACKS), `px` — размер в
+ * пикселях экрана (по умолчанию propHeight), `fit` — по какой оси подгонять:
+ * `y` (дерево: рост = Y) или `max` (бревно, ящик, крыша: длинная ось лежит на земле,
+ * и подгонка по Y раздула бы её вдесятеро).
  */
+const PACKS = {
+    kenney: "dev/character-style-lab/assets/kenney",
+    village: "dev/character-style-lab/assets/quaternius/village"
+};
 const PROP_MODEL = {
     rock: "rock_largeA.glb",
     ore_rock: "rock_tallB.glb",
-    scree: "stone_tallD.glb",
-    beach_pebbles: "stone_tallB.glb",
-    log: "log.glb",
-    driftwood: "log_large.glb",
-    firewood: "log.glb",
+    scree: { file: "stone_tallD.glb", fit: "max" },
+    beach_pebbles: { file: "stone_tallB.glb", fit: "max", px: 4 },
+    log: { file: "log.glb", fit: "max", px: 16 },
+    driftwood: { file: "log_large.glb", fit: "max", px: 20 },
+    firewood: { file: "log.glb", fit: "max", px: 12 },
     burnt_stump: "stump_old.glb",
     bush: "plant_bushDetailed.glb",
-    mushroom_patch: "mushroom_redGroup.glb",
+    mushroom_patch: { file: "mushroom_redGroup.glb", fit: "max", px: 12 },
     pine: "tree_pineTallA.glb",
     spruce: "tree_pineTallB.glb",
     tree_pine: "tree_pineTallD.glb",
     dead_tree: "tree_thin_dark.glb",
-    ancient_oak: "tree_simple_dark.glb"
+    ancient_oak: "tree_simple_dark.glb",
+    /* Деревня: Quaternius «Medieval Village MegaKit» (CC0), glTF-модули.
+       Это НЕ «дом целиком» — это детали конструктора, из которых дом собирается
+       на сетке: стена + крыша + труба дают reading, которого у процедурного
+       «треугольника с полосками» нет никогда. */
+    hut_wall: { file: "Overhang_Plaster_Long.gltf", pack: "village", fit: "max", px: 46 },
+    // Обваловавшаяся стена руин — та же деталь, но ниже: из фундамента торчит
+    // половина. Отдельный px здесь важнее, чем отдельная модель.
+    ruin_wall: { file: "Overhang_Plaster_Long.gltf", pack: "village", fit: "max", px: 26 },
+    hut_roof: { file: "Roof_RoundTiles_6x6.gltf", pack: "village", fit: "max", px: 56 },
+    chimney: { file: "Prop_Chimney.gltf", pack: "village", fit: "y", px: 30 },
+    fence: { file: "Prop_WoodenFence_Single.gltf", pack: "village", fit: "max", px: 22 },
+    crate: { file: "Prop_Crate.gltf", pack: "village", fit: "max", px: 16 },
+    wagon: { file: "Prop_Wagon.gltf", pack: "village", fit: "max", px: 40 }
 };
+/** Запись таблицы → нормализованный вид. Строка — это просто файл. */
+function modelOf(kind) {
+    const raw = PROP_MODEL[kind];
+    if (!raw) return null;
+    const spec = typeof raw === "string" ? { file: raw } : raw;
+    return { file: spec.file, pack: spec.pack || "kenney", fit: spec.fit || "y", px: spec.px || null };
+}
 const KINDS = String(flag("kinds", null) || Object.keys(PROP_MODEL)).split(",");
 
 /* ----------------------------- растеризация ----------------------------- */
+
+const TEX_CACHE = new Map();
+/** PNG читается один раз на каталог: 6 моделей дергают одну T_WoodTrim. */
+function loadPng(file) {
+    if (!TEX_CACHE.has(file)) TEX_CACHE.set(file, loadPngFile(file));
+    return TEX_CACHE.get(file);
+}
 
 /**
  * Пак Kenney перекрашивается на рантайме: в GLB «grass» = бирюза (0.17,0.85,0.72),
@@ -93,6 +133,19 @@ const MATERIAL_TINT = [
     [/red|berry|mushroom|toadstool|cap/i, "#9c5140"],
     [/tan|sand|dirt|soil|ground|stem|_default/i, "#a3937a"]
 ];
+/**
+ * Каменные пропы пака выкрашены «землёй» и «мхом» — salmon-дирт даёт белую
+ * булку вместо валуна. Для каменной семьи переопределяем роль материала.
+ */
+const STONE_KINDS = /rock|stone|scree|pebble|ore|flint/i;
+const STONE_TINT = {
+    grass: "#5c6a4f", dirt: "#82807a", stone: "#8d8a83", moss: "#66744f",
+    snow: "#cfd8da", tan: "#8a857c", _default: "#82807a"
+};
+function stoneRole(name) {
+    const key = Object.keys(STONE_TINT).find(k => k !== "_default" && new RegExp(k, "i").test(name || ""));
+    return STONE_TINT[key || "_default"];
+}
 const lumOf = (rgb) => 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
 function tintFactor(name, factor) {
     const hit = MATERIAL_TINT.find(([re]) => re.test(name || ""));
@@ -110,30 +163,44 @@ function tintFactor(name, factor) {
  * между гранями и низкая полигонажность остаётся видимой.
  */
 function bakeKind(kind) {
-    const file = PROP_MODEL[kind];
-    if (!file) throw new Error(`для «${kind}» нет модели в PROP_MODEL`);
-    const full = path.join(ASSETS, file);
-    if (!fs.existsSync(full)) throw new Error(`нет файла ${full} — распакуйте пак (см. README в assets/kenney)`);
-    const rig = readGlb(full);
+    const spec = modelOf(kind);
+    if (!spec) throw new Error(`для «${kind}» нет модели в PROP_MODEL`);
+    const { file, pack, fit, px } = spec;
+    const dir = packDir(pack);
+    const full = path.join(dir, file);
+    if (!fs.existsSync(full)) throw new Error(`нет файла ${full} — импортируйте пак (tools/pack-import.js, см. README пака)`);
+    const rig = full.endsWith(".glb") ? readGlb(full) : readGltf(full);
     const meshes = [];
     for (let m = 0; m < (rig.json.meshes?.length || 0); m += 1) {
         for (const prim of readMesh(rig, m)) meshes.push(prim);
     }
     if (!meshes.length) throw new Error(`${file}: ни одного примитива`);
-    const height = propHeight(kind, 1) || 8;                      // единиц мира
+    const height = px || propHeight(kind, 1) || 8;                // пикселей экрана при зуме 1
+    const basis = cameraBasis({ yaw: YAW, pitch: PITCH, target: [0, height * 0.45, 0], distance: height * 3.2 });
+    const fwd = basis.fwd;
     const drawables = meshes.map((prim) => {
         const count = prim.count;
         let positions = prim.positions, normals = prim.normals, used = count;
+        let uv = prim.uv;
         const index = prim.indices;
         if (index) {                                              // разворачиваем индексы
             positions = new Float32Array(index.length * 3);
+            if (uv) uv = new Float32Array(index.length * 2);
             for (let i = 0; i < index.length; i += 1) {
                 const v = index[i] * 3;
                 positions[i * 3] = prim.positions[v]; positions[i * 3 + 1] = prim.positions[v + 1]; positions[i * 3 + 2] = prim.positions[v + 2];
+                // UV обязан развернуться вместе с позициями: после разворота
+                // вершин их стало втрое больше, и старый массив на новый индекс
+                // просто не тянет — растеризатор читает undefined, получает NaN
+                // и вместо камня рисует чёрную дыру.
+                if (uv) { const t = index[i] * 2; uv[i * 2] = prim.uv[t]; uv[i * 2 + 1] = prim.uv[t + 1]; }
             }
             used = index.length;
         }
         normals = new Float32Array(used * 3);                     // плоские нормали по граням
+        let ctr = [0, 0, 0];
+        for (let i = 0; i < used * 3; i += 3) { ctr[0] += positions[i]; ctr[1] += positions[i + 1]; ctr[2] += positions[i + 2]; }
+        ctr = ctr.map(v => v / Math.max(1, used));
         for (let t = 0; t + 2 < used; t += 3) {
             const a = t * 3, b = a + 3, c = a + 6;
             const ux = positions[b] - positions[a], uy = positions[b + 1] - positions[a + 1], uz = positions[b + 2] - positions[a + 2];
@@ -141,26 +208,79 @@ function bakeKind(kind) {
             let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
             const ln = Math.hypot(nx, ny, nz) || 1;
             nx /= ln; ny /= ln; nz /= ln;
+            // Грань разворачиваем «наружу» от центра примитива: у деталей
+            // конструктора (стена, крыша, труба) половина треугольников смотрит
+            // от камеры, и без этого они выходят абсолютно чёрными — растеризатор
+            // не отбрасывает задние грани, а света для них он не считает.
+            const cxm = (positions[a] + positions[b] + positions[c]) / 3 - ctr[0];
+            const cym = (positions[a + 1] + positions[b + 1] + positions[c + 1]) / 3 - ctr[1];
+            const czm = (positions[a + 2] + positions[b + 2] + positions[c + 2]) / 3 - ctr[2];
+            if (nx * cxm + ny * cym + nz * czm < 0) { nx = -nx; ny = -ny; nz = -nz; }
+            // …и добиваем разворотом к камере: проп — билборд, задняя грань стены
+            // или внутренняя скат крышы не должны оставаться неосвещёнными,
+            // иначе в листе они чёрным пятном (у конструктора грани тонкие).
+            // …но только у конструктора: у Kenney-моделей задняя грань и должна
+            // оставаться тёмной, иначе крона дерева выцветает в плоское пятно.
+            if (pack === "village" && nx * fwd[0] + ny * fwd[1] + nz * fwd[2] > 0) { nx = -nx; ny = -ny; nz = -nz; }
             for (const o of [a, b, c]) { normals[o] = nx; normals[o + 1] = ny; normals[o + 2] = nz; }
         }
-        const mat = materialInfo(rig, prim.material, path.dirname(full), () => null);
-        const factor = tintFactor(mat.name, mat.factor);
-        // Модель в метрах: приводим к нужной высоте в единицах мира и ставим ногами в 0.
-        let minY = Infinity, maxY = -Infinity;
-        for (let i = 1; i < used * 3; i += 3) { minY = Math.min(minY, positions[i]); maxY = Math.max(maxY, positions[i]); }
-        const scale = height / Math.max(1e-4, maxY - minY);
+        const mat = materialInfo(rig, prim.material, dir, (uri) => path.join(dir, path.basename(decodeURIComponent(uri))));
+        const texFile = mat.texture?.file && fs.existsSync(mat.texture.file) ? mat.texture.file : null;
+        const texture = texFile ? loadPng(texFile) : (mat.texture?.buffer ? decodePng(mat.texture.buffer) : null);
+        // Текстура сама несёт цвет — красить её поверх фактора пака значит получить
+        // кашу: для текстурных материалов factor остаётся как есть.
+        let factor = texture ? (mat.factor || [1, 1, 1, 1]) : tintFactor(mat.name, mat.factor);
+        if (!texture && STONE_KINDS.test(kind)) {
+            const hex = stoneRole(mat.name).replace("#", "");
+            const base = [parseInt(hex.slice(0, 2), 16) / 255, parseInt(hex.slice(2, 4), 16) / 255, parseInt(hex.slice(4, 6), 16) / 255];
+            const l = Math.max(0.5, Math.min(1.15, lumOf(mat.factor) / 0.62));
+            factor = [base[0] * l, base[1] * l, base[2] * l, 1];
+        }
+        // Модель в метрах: приводим к нужному размеру и ставим ногами в 0.
+        // «y» — рост по вертикали (дерево), «max» — самая длинная ось (бревно,
+        // крыша, ящик): у лежащей детали Y — это толщина, и подгонка по ней
+        // раздула бы проп во столько раз, во сколько он длинный.
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+        for (let i = 0; i < used * 3; i += 3) {
+            minX = Math.min(minX, positions[i]); maxX = Math.max(maxX, positions[i]);
+            minY = Math.min(minY, positions[i + 1]); maxY = Math.max(maxY, positions[i + 1]);
+            minZ = Math.min(minZ, positions[i + 2]); maxZ = Math.max(maxZ, positions[i + 2]);
+        }
+        const spanY = Math.max(1e-4, maxY - minY);
+        const span = fit === "max" ? Math.max(spanY, maxX - minX, maxZ - minZ) : spanY;
+        const scale = height / span;
         const pos = new Float32Array(used * 3);
         for (let i = 0; i < used; i += 1) {
             pos[i * 3] = positions[i * 3] * scale;
             pos[i * 3 + 1] = (positions[i * 3 + 1] - minY) * scale;
             pos[i * 3 + 2] = positions[i * 3 + 2] * scale;
         }
-        return { positions: pos, normals, uv: prim.uv, count: used, indices: null, factor, texture: mat.texture, doubleSided: mat.doubleSided };
+        // Плита «под моделью»: паки стелют под проп горизонтальную подложку
+        // (мох/земля), и в билборде она разрастается в бледный щит поверх тайлов.
+        // Режем треугольники, которые лежат на земле и смотрят строго вверх.
+        const keep = [];
+        for (let t = 0; t + 2 < used; t += 3) {
+            const a = t * 3, b = a + 3, c = a + 6;
+            const ny = (normals[a + 1] + normals[b + 1] + normals[c + 1]) / 3;
+            const yMax = Math.max(pos[a + 1], pos[b + 1], pos[c + 1]);
+            if (Math.abs(ny) > 0.92 && yMax < height * 0.03) continue;
+            keep.push(t, t + 1, t + 2);
+        }
+        if (keep.length !== used) {
+            const kp = new Float32Array(keep.length * 3), kn = new Float32Array(keep.length * 3);
+            const ku = texture ? new Float32Array(keep.length * 2) : null;
+            keep.forEach((v, i) => {
+                kp[i * 3] = pos[v * 3]; kp[i * 3 + 1] = pos[v * 3 + 1]; kp[i * 3 + 2] = pos[v * 3 + 2];
+                kn[i * 3] = normals[v * 3]; kn[i * 3 + 1] = normals[v * 3 + 1]; kn[i * 3 + 2] = normals[v * 3 + 2];
+                if (ku) { ku[i * 2] = uv[v * 2]; ku[i * 2 + 1] = uv[v * 2 + 1]; }
+            });
+            return { positions: kp, normals: kn, uv: ku, count: keep.length, indices: null, factor, texture, doubleSided: true };
+        }
+        return { positions: pos, normals, uv: texture ? uv : null, count: used, indices: null, factor, texture, doubleSided: true };
     });
     const w = Math.ceil(height * PX_PER_UNIT * 2) + 8;            // ширина с запасом на тень и уклон
     const h = Math.ceil(height * PX_PER_UNIT) + 10;
     const frame = makeFrame(w, h);
-    const basis = cameraBasis({ yaw: YAW, pitch: PITCH, target: [0, height * 0.45, 0], distance: height * 3.2 });
     renderFrame(frame, { basis }, drawables, { pxPerUnit: PX_PER_UNIT });
     if (flag("debug")) {
         let lit = 0, maxA = 0;
@@ -189,11 +309,20 @@ function bakeKind(kind) {
 function quantize(frame, colors) {
     const bins = new Map();
     const d = frame.data;
+    // Контраст по яркости с точкой 0.45: flat-нормали low-poly дают «ватное»
+    // освещение, и валун выглядит пенной подушкой. Поднимаем разброс вокруг
+    // середины — тени становятся тенями, как это делают RAMPS у героя.
+    const ramp = (v) => {
+        const t = Math.max(0, Math.min(1, 1.45 * (v / 255 - 0.45) + 0.45));
+        return Math.round(t * 255);
+    };
+    const px = (i) => [ramp(d[i]), ramp(d[i + 1]), ramp(d[i + 2])];
     for (let i = 0; i < d.length; i += 4) {
         if (d[i + 3] < 40) continue;
-        const key = ((d[i] >> 4) << 8) | ((d[i + 1] >> 4) << 4) | (d[i + 2] >> 4);
+        const [r, g, b] = px(i);
+        const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
         const bin = bins.get(key) || [0, 0, 0, 0];
-        bin[0] += d[i]; bin[1] += d[i + 1]; bin[2] += d[i + 2]; bin[3] += 1;
+        bin[0] += r; bin[1] += g; bin[2] += b; bin[3] += 1;
         bins.set(key, bin);
     }
     const pal = [...bins.values()].sort((a, b) => b[3] - a[3]).slice(0, colors)
@@ -202,9 +331,10 @@ function quantize(frame, colors) {
     const index = new Uint8Array(frame.width * frame.height);
     for (let i = 0, p = 0; i < d.length; i += 4, p += 1) {
         if (d[i + 3] < 40) { index[p] = 0; continue; }
+        const [r, g, b] = px(i);
         let best = 0, dist = Infinity;
         for (let c = 0; c < pal.length; c += 1) {
-            const dr = pal[c][0] - d[i], dg = pal[c][1] - d[i + 1], db = pal[c][2] - d[i + 2];
+            const dr = pal[c][0] - r, dg = pal[c][1] - g, db = pal[c][2] - b;
             const s = dr * dr * 0.3 + dg * dg * 0.59 + db * db * 0.11;
             if (s < dist) { dist = s; best = c; }
         }
@@ -234,6 +364,7 @@ function bakeAll() {
     for (const kind of KINDS) {
         try {
             const entry = bakeKind(kind);
+            entry.pack = modelOf(kind).pack;
             entry.q = quantize(entry.frame, COLORS);
             out.push(entry);
         } catch (err) {
@@ -292,16 +423,25 @@ const EMIT = String(flag("emit", "") === true ? "js/render/propsprites.js" : (fl
 if (EMIT) {
     const kinds = {};
     for (const e of entries) {
+        const bw = e.bbox.x1 - e.bbox.x0 + 1, bh = e.bbox.y1 - e.bbox.y0 + 1;
+        // Поток режем по габоиту, а не по кадру: в файле должно жить ровно то, что
+        // рисуется. Иначе рантайму пришлось бы знать размеры кадра (w*PPU*2+8),
+        // а это уже удвоение контракта между запеккой и игрой.
+        const crop = new Uint8Array(bw * bh);
+        for (let y = 0; y < bh; y += 1) {
+            const src = (e.bbox.y0 + y) * e.w + e.bbox.x0;
+            crop.set(e.q.index.subarray(src, src + bw), y * bw);
+        }
         const bytes = [];
-        for (let i = 0; i < e.q.index.length; i += 1) {
-            const value = e.q.index[i];
+        for (let i = 0; i < crop.length; i += 1) {
+            const value = crop[i];
             let run = 1;
-            while (i + run < e.q.index.length && e.q.index[i + run] === value && run < 255) run += 1;
+            while (i + run < crop.length && crop[i + run] === value && run < 255) run += 1;
             bytes.push(run, value);
             i += run - 1;
         }
-        const bw = e.bbox.x1 - e.bbox.x0 + 1, bh = e.bbox.y1 - e.bbox.y0 + 1;
         kinds[e.kind] = {
+            pack: e.pack, source: e.file,
             x0: e.bbox.x0, y0: e.bbox.y0, w: bw, h: bh,
             // смещение центра основания кадра к точке пропа, в единицах мира
             anchorX: +(-(e.bbox.x0 + bw / 2) / PX_PER_UNIT).toFixed(3),
@@ -311,12 +451,15 @@ if (EMIT) {
         };
     }
     const body = `/**
- * js/render/propsprites.js — ПРОПЫ, запечённые из CC0-моделей (Kenney Nature Kit).
- * Генерирует \`node tools/prop-bake.js --emit\`. Формат кадра тот же, что у героя:
- * RLE-пары (длина, индекс палитры), 0 = пусто. Не править руками.
+ * js/render/propsprites.js — ПРОПЫ, запечённые из CC0-моделей (Kenney Nature Kit
+ * и Quaternius «Medieval Village MegaKit»). Генерирует \`node tools/prop-bake.js
+ * --emit\`. Формат кадра тот же, что у героя: RLE-пары (длина, индекс палитры),
+ * 0 = пусто, поток покрывает именно габоит (w×h), не кадр растеризатора.
+ * Поля pack/source говорят, откуда модель, — чтобы перепечь можно было без\n * угадывания.
+ * Не править руками.
  */
 export const PROP_SPRITES = ${JSON.stringify(kinds)};
-export const PROP_META = { pxPerUnit: ${PX_PER_UNIT}, pitch: ${PITCH}, yaw: ${YAW}, baked: "${new Date().toISOString().slice(0, 10)}", source: "dev/character-style-lab/assets/kenney (CC0)" };
+export const PROP_META = { pxPerUnit: ${PX_PER_UNIT}, pitch: ${PITCH}, yaw: ${YAW}, baked: "${new Date().toISOString().slice(0, 10)}", source: ${JSON.stringify(PACKS)} };
 `;
     fs.mkdirSync(path.dirname(path.resolve(EMIT)), { recursive: true });
     fs.writeFileSync(EMIT, body);
