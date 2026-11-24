@@ -1638,9 +1638,9 @@ export const PROP_HEIGHT = {
     pine: 50, spruce: 50,
     oak: 46, birch: 46, willow: 46, ancient_oak: 46, palm: 46,
     burnt_tree: 38, dead_tree: 34,
-    // 30 = cap из tools/prop-bake.js: кадр обломка обязан совпасть с высотой,
-    // на которой renderer режет тень и окклюзию.
-    hearth_ruin: 34, tent: 30, ruin_wall: 30,
+    // Обязано совпадать с cap из tools/prop-bake.js: на этом числе renderer
+    // режет тень и окклюзию.
+    hearth_ruin: 34, tent: 30, ruin_wall: 12,
     rock: 14, ore_rock: 14, beach_pebbles: 2.5, scree: 4, bush: 12, chest_old: 11,
     // Пень выше, чем был в векторной графике: cap запекки 16 px — на 13 он
     // превращался в «лепёшку», и игрок не читал в пепелище пень вообще.
@@ -1650,7 +1650,7 @@ export const PROP_HEIGHT = {
     // tools/prop-bake.js теми же числами — тест проверяет, что они не разъехались.
     // Стена выше тайла: на этом числе держится и lift крыши в worldgen, и
     // длина падающей тени. Обязано совпадать с cap в tools/prop-bake.js.
-    hut_wall: 46, hut_roof: 52, chimney: 30, fence: 22, crate: 16, wagon: 40
+    hut_wall: 50, hut_roof: 52, chimney: 30, fence: 21, crate: 16, wagon: 40
 };
 /** These grow with the prop's own `size`; the rest are built, not grown. */
 const HEIGHT_SCALES = new Set([

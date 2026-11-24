@@ -491,8 +491,12 @@ test("размер кадра = propHeight: сетка коллизий и си�
     for (const kind of ["pine", "spruce", "rock", "ore_rock", "hut_wall", "hut_roof", "ruin_wall", "burnt_stump", "chimney", "fence", "crate", "wagon"]) {
         const e = PROP_SPRITES[kind];
         assert.ok(e, `в листе нет кадра «${kind}»`);
+        // Подгонка по вертикали («y», «max») резервирует ровно ту высоту, что и
+        // рисуется. У fit:"x" номинал — ШИРИНА следа (стена обязана дотянуться до
+        // соседнего тайла), поэтому там с игрой сверяется фактическая высота кадра.
         const want = propHeight(kind, 1);
-        assert.ok(Math.abs(e.height - want) <= 1.5, `${kind}: кадр ${e.height} px против propHeight ${want}`);
+        const got = e.fit === "x" ? e.h : e.height;
+        assert.ok(Math.abs(got - want) <= 1.5, `${kind}: кадр ${got} px против propHeight ${want}`);
     }
     for (const kind of ["hut_wall", "hut_roof", "chimney", "fence", "crate", "wagon"]) {
         assert.ok(PROP_HEIGHT[kind] !== undefined, `«${kind}» нет в PROP_HEIGHT — тень и окклюзия считают его по умолчанию`);

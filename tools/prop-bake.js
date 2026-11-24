@@ -106,19 +106,27 @@ const PROP_MODEL = {
     // Одиночная панель Wall_Plaster_Straight на тайле looked обелиском: у неё
     // аспект 1:2.7. Long-версия (модуль на два тайла) даёт ширину порядка тайла,
     // и «стена + крыша» начинают читаться как сарай, а не как щит на палке.
-    hut_wall: { file: "Wall_Plaster_Straight_L.gltf", pack: "village", fit: "max", px: 46 },
+    hut_wall: { file: "Wall_Plaster_Straight_L.gltf", pack: "village", fit: "x", px: 44 },
     // Обломок стены в руинах — неровный кирпич: у пака есть деталь, которая
     // выглядит разваленой, значит не надо врать масштабом.
-    // «Long» у неровного кирпича в паке нет — берём обычный модуль и режем
-    // высоту: обломок и должен быть ниже стены, а не шире.
-    ruin_wall: { file: "Wall_UnevenBrick_Straight.gltf", pack: "village", fit: "max", px: 30 },
+    // Обломок = неровный кирпич (у модуля рваный верх — это и есть «развалено»,
+    // врать масштабом не надо). Wall_BottomCover пробовали: это дощатая опалубка
+    // 20×6, на тайле она читается доской, а не остатком стены. По высоте режем
+    // до 24 px: цоколь тонет в контактной тени, сверху остаётся рваная кладка.
+    // Две попытки уже были: длинный кирпич (56×34) расползался по кадру в
+    // «бордюр», а Wall_BottomCover — дощатая опалубка 20×6. Осталась нижняя
+    // часть стены с проёмом: у неё аспект близок к 1, и обломок читается
+    // остатком комнаты, а не дорогой.
+    ruin_wall: { file: "Wall_BottomCover.gltf", pack: "village", fit: "x", px: 44 },
     // Крыша садится НА стену, поэтому её cap меньше высоты стены (70): иначе
     // кадр залезает за карниз и снова читается как навес в воздухе.
     // 6x6 из пака — это крыща сарая на шесть тайлов: на одном тайле она
     // выглядела красным зонтом. Roof_RoundTiles_2x1 ровно по размеру хижины.
     hut_roof: { file: "Roof_RoundTile_2x1.gltf", pack: "village", fit: "max", px: 52 },
     chimney: { file: "Prop_Chimney.gltf", pack: "village", fit: "y", px: 30 },
-    fence: { file: "Prop_WoodenFence_Single.gltf", pack: "village", fit: "max", px: 22 },
+    // Забор — тот же случай: секция обязана дотягиваться до соседа, иначе
+    // «плетень» превращается в гребёнку колышков.
+    fence: { file: "Prop_WoodenFence_Single.gltf", pack: "village", fit: "x", px: 40 },
     crate: { file: "Prop_Crate.gltf", pack: "village", fit: "max", px: 16 },
     wagon: { file: "Prop_Wagon.gltf", pack: "village", fit: "max", px: 40 }
 };
@@ -270,7 +278,12 @@ function bakeKind(kind) {
             minZ = Math.min(minZ, positions[i + 2]); maxZ = Math.max(maxZ, positions[i + 2]);
         }
         const spanY = Math.max(1e-4, maxY - minY);
-        const span = fit === "max" ? Math.max(spanY, maxX - minX, maxZ - minZ) : spanY;
+        const spanFoot = Math.max(1e-4, maxX - minX, maxZ - minZ);
+        // fit:"x" — подгонка по ШИРИНЕ следа. Нужна для того, что стоит рядом:
+        // у стены, забора и фундамента важна непрерывность вдоль тайла, а не
+        // высота. Подогнанный по вертикали модуль даёт 20 px при тайле 44 — и
+        // «ряд одинаковых pillars» вместо стены (это и был обвал в руинах).
+        const span = fit === "max" ? Math.max(spanY, spanFoot) : fit === "x" ? spanFoot : spanY;
         const scale = height / span;
         const pos = new Float32Array(used * 3);
         for (let i = 0; i < used; i += 1) {
