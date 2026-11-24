@@ -21,6 +21,7 @@ import { PROP_SPRITES, PROP_META } from "../js/render/propsprites.js";
 import { META as GRADED_META } from "../js/render/heroframes.js";
 const GRADED_CELL = GRADED_META.cell;
 import { paintProp3D, prop3dStatus, PROPS3D } from "../js/render/props3d.js";
+import * as propSun from "../js/render/props3d.js";
 import { PROP_HEIGHT, propHeight } from "../js/render/tilesart.js";
 import { unsupportedBy } from "../js/world/debris.js";
 import { ITEMS } from "../js/sandbox/items.js";
@@ -621,5 +622,93 @@ test("запечённый лист уходит на экран блитом 1:
     ctx.scale(4, 4);                                         // крупный зум: 1.6 экранных px на единицу мира
     assert.eq(fitSheet(ctx, src, 101, 113).canvas, src, "когда лист уходит 1:1 или крупнее, подменять его нечем");
 });
+
+/* ------------------- причёски, пол и падающая тень пропа ------------------- */
+
+/** Силуэт героя в векторном режиме (лист выключен), три ракурса сразу. */
+function heroMask(look, dir) {
+    const cv = new ShimCanvas(88, 128), ctx = cv.getContext("2d");
+    ctx.translate(44, 118); ctx.scale(2.2, 2.2);
+    drawCharacter(ctx, { dir, look: { ...DEFAULT_LOOK, ...look }, idleTime: 1, sprite: false });
+    const mask = new Uint8Array(88 * 128);
+    for (let i = 3; i < cv.data.length; i += 4) mask[i >> 2] = cv.data[i] > 8 ? 1 : 0;
+    return mask;
+}
+function maskDiff(a, b) {
+    let d = 0;
+    for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) d += 1;
+    return d;
+}
+
+test("выбранная причёска меняет силуэт, а не только подпись в меню", () => {
+    if (!globalThis.document) globalThis.document = { createElement: () => new ShimCanvas(1, 1) };
+    const styles = ["short", "long", "braid", "ponytail", "bun", "buzz"];
+    // Со спины — единственный ракурс, где коса/хвост/пучок вообще существуют.
+    const back = styles.map((hairStyle) => heroMask({ hairStyle, gender: "female" }, "up"));
+    for (let i = 0; i < styles.length; i += 1) {
+        for (let j = i + 1; j < styles.length; j += 1) {
+            assert.gt(maskDiff(back[i], back[j]), 4,
+                `причёски «${styles[i]}» и «${styles[j]}» нарисованы одинаково`);
+        }
+    }
+    // И спереди хотя бы половина вариантов должна быть различима, иначе
+    // редактор обещает то, что видно только с затылка.
+    const front = styles.map((hairStyle) => heroMask({ hairStyle, gender: "female" }, "down"));
+    let distinct = 0;
+    for (const [i, mask] of front.entries()) {
+        if (front.some((o, j) => j !== i && maskDiff(mask, o) > 4)) distinct += 1;
+    }
+    assert.ok(distinct >= 3, `спереди различаются только ${distinct} причёски из ${styles.length}`);
+});
+
+test("пол меняет фигуру: плечи уже, талия уже бёдер, подол длиннее", () => {
+    const m = heroMask({ gender: "male", hairStyle: "short" }, "down");
+    const f = heroMask({ gender: "female", hairStyle: "long" }, "down");
+    const rowWidth = (mask, y) => {
+        let lo = -1, hi = -1;
+        for (let x = 0; x < 88; x += 1) {
+            if (!mask[y * 88 + x]) continue;
+            if (lo < 0) lo = x;
+            hi = x;
+        }
+        return hi - lo;
+    };
+    // ряды в тех же координатах, что и при отрисовке: плечи = torsoY+2, подол = низ torso + 4
+    const shoulder = Math.round(118 + (BODY.torsoY + 2) * 2.2);
+    const hem = Math.round(118 + (BODY.torsoY + BODY.torsoH + 4) * 2.2);
+    assert.gt(rowWidth(m, shoulder), rowWidth(f, shoulder), "плечи женщины обязаны быть уже");
+    assert.gt(rowWidth(f, hem), rowWidth(m, hem), "бёдра/подол женщины — шире");
+    assert.ok(m.some((v, i) => v !== f[i]), "силуэты обязаны различаться пикселями, а не словами");
+});
+
+test("вечером проп отбрасывает падающую тень, в полдень и ночью — нет", () => {
+    if (!globalThis.document) globalThis.document = { createElement: () => new ShimCanvas(1, 1) };
+    PROPS3D.enabled = true;
+    const { setPropSun, defaultSun } = propSun;
+    // Мера — покрытие кадра: тень обязана ДОБАВЛЯТЬ пиксели вокруг пропа. Смотреть
+    // на «тёмные пиксели в окне слева» нельзя: направление зависит от азимута, а
+    // цвет тени — от подложки, и тест ловил бы не тень, а случайность.
+    const coverage = (sun) => {
+        setPropSun(sun);
+        const cv = new ShimCanvas(160, 120), ctx = cv.getContext("2d");
+        ctx.translate(60, 104);
+        const shadows = PROPS3D.stats.shadows || 0;
+        // Сосна, а не чурка: тень широкого низкого пропа почти целиком
+        // прячется под ним самим, и на ней мерить нечего.
+        paintProp3D(ctx, { kind: "pine", tx: 3, ty: 6, size: 1 }, { season: "spring" });
+        let lit = 0;
+        for (let i = 3; i < cv.data.length; i += 4) if (cv.data[i] > 8) lit += 1;
+        return [lit, (PROPS3D.stats.shadows || 0) - shadows];
+    };
+    const [evening, eveningCalls] = coverage({ dir: 1, elev: 0.12, amp: 1, amb: 1, rough: 0 });
+    const [noon, noonCalls] = coverage({ dir: 0, elev: 1, amp: 1, amb: 1, rough: 0 });
+    const [night, nightCalls] = coverage({ dir: 0, elev: 0.4, amp: 0, amb: 0.3, rough: 0 });
+    setPropSun(defaultSun());
+    assert.gt(eveningCalls, 0, "на косом свету castShadow обязан вызываться");
+    assert.gt(evening - noon, 60, `длинная тень должна ложиться вокруг пропа: ${evening} против ${noon} пикселей`);
+    assert.eq(noonCalls, 0, "в полдень тени в стороны нет");
+    assert.eq(nightCalls, 0, "рассеянный свет чёткой тени не даёт");
+});
+
 
 await run("visual-world");

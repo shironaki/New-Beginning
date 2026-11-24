@@ -23,6 +23,17 @@
 export const QUANT = 0.125;
 
 /**
+ * Пол как геометрия, а не как «другая палитра». Один объект на все части:
+ * плечи, руки, талия, подол и голова обязаны меняться вместе, иначе фигура
+ * начинает выглядеть перекошенной (тонкие плечи на широком станах).
+ */
+export const SEX = {
+    male: { frame: 1, arm: 1, waist: 1, hem: 1, head: 1 },
+    female: { frame: 0.88, arm: 0.9, waist: 0.9, hem: 1.08, head: 0.93 }
+};
+export const sexOf = (look) => (look && look.gender === "female" ? SEX.female : SEX.male);
+
+/**
  * Body proportions — the travelling coat silhouette: small head, heavy shoulders, waist pulled
  * in, hips and boots wide again. The pyramid is what makes a 60 px figure
  * read as a person with gear instead of a cute doll.

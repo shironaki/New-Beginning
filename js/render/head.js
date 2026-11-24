@@ -1,12 +1,12 @@
 /** Small, authored head silhouette; adult proportions, not a rectangular mask.
  * Coordinates are normalised to head width/height. Shared by all characters. */
-import { BODY, GAIT, q } from "./charspec.js";
+import { BODY, GAIT, sexOf, q } from "./charspec.js";
 function shade(c, amount) {
     const n = parseInt(c.slice(1), 16);
     return `rgb(${[n >> 16, (n >> 8) & 255, n & 255].map((v) => Math.max(0, Math.min(255, v + amount))).join(",")})`;
 }
 export function drawHead(ctx, { x, y, dir, slant = 0, look, time }) {
-    const w = BODY.headW * (look.gender === "female" ? .93 : 1), h = BODY.headH, side = dir === "left" ? -1 : 1;
+    const w = BODY.headW * sexOf(look).head, h = BODY.headH, side = dir === "left" ? -1 : 1;
     const profile = dir === "left" || dir === "right", back = dir === "up";
     const quarter = profile ? Math.min(1, Math.abs(slant)) : 0;
     const away = profile && slant < -0.5;
@@ -64,5 +64,43 @@ export function drawHead(ctx, { x, y, dir, slant = 0, look, time }) {
         ctx.fillStyle=look.accent;ctx.fillRect(-w*.4-.8,h*.8+3.6,1.6,.8);
     }
     if(look.hairStyle === "long") polygon([[-.49,.4],[-.28,.65],[-.27,1.28],[-.57,1.21]],hair);
+    // Причёска — это силуэт, а не цвет. «Хвост», «пучок» и «ёжик» живут на
+    // затылке (-x = назад) и обязаны быть видны со спины: иначе выбор в
+    // редакторе ничего не меняет в кадре, а именно это и было претензией.
+    const style = look.hairStyle;
+    if (style === "buzz") {
+        // Сбитый в ноль волос ниже и светлее: шапка остаётся, но висок и
+        // затылок отдают кожей — на 42-пиксельной фигуре это единственный
+        // способ отличить «ёжик» от «коротких».
+        const bare = shade(look.skin, -10);
+        if (back) polygon([[-0.42, 0.46], [0.42, 0.42], [0.44, 0.92], [-0.42, 0.94]], bare);
+        else {
+            polygon([[-0.46, 0.32], [-0.3, 0.28], [-0.3, 0.64], [-0.46, 0.68]], bare);
+            if (!profile) polygon([[0.3, 0.28], [0.46, 0.32], [0.46, 0.68], [0.3, 0.64]], bare);
+        }
+    }
+    if (style === "bun") {
+        // Пучок обязан сидеть на черепе, а не висеть рядом: сзади по центру и
+        // чуть сдвинутый назад в профиль и анфас.
+        const bx = back ? 0 : -0.2, by = back ? -0.02 : -0.1;
+        ctx.fillStyle = shade(hair, -10);
+        ctx.beginPath(); ctx.ellipse(q(bx * w), q(by * h), q(w * 0.24), q(h * 0.22), 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = hair;
+        ctx.beginPath(); ctx.ellipse(q(bx * w), q(by * h - 0.4), q(w * 0.19), q(h * 0.17), 0, 0, Math.PI * 2); ctx.fill();
+    }
+    if (style === "ponytail") {
+        // Три звена с раскачкой: хвост должен жить, а не быть пятном. Частота и
+        // фаза те же, что у косы, чтобы две «живые» детали не пульсировали вразнобой.
+        for (let i = 0; i < 5; i += 1) {
+            const sway = Math.sin(time * 1.7 + i * 0.5) * 0.2;
+            ctx.fillStyle = i % 2 ? shade(hair, -14) : hair;
+            ctx.beginPath();
+            ctx.ellipse(q((back ? -0.1 - i * 0.08 : -0.44 - i * 0.07) * w + sway),
+                q((0.2 + i * 0.38) * h), q(w * (0.19 - i * 0.025)), q(h * (0.17 - i * 0.02)), 0.2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.fillStyle = look.accent;
+        ctx.fillRect(q((back ? -0.08 : -0.44) * w), q(0.1 * h), q(w * 0.16), 1);
+    }
     ctx.restore();
 }

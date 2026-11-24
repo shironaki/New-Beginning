@@ -1,16 +1,43 @@
 import {test,assert,run} from './tiny.js';
 import {installDOM,FakeElement} from './dom-harness.js';
 import {MemoryStorage} from '../js/core/save.js';
-import {normalizeLook,openAppearance} from '../js/ui/appearance.js';
+import {normalizeLook,openAppearance,APPEARANCE,randomLook,paintPreview} from '../js/ui/appearance.js';
+import {DEFAULT_LOOK} from '../js/render/character.js';
 import {Camera} from '../js/engine/camera.js';
 import {BODY} from '../js/render/charspec.js';
+import {ShimCanvas} from '../tools/canvas-shim.js';
 import {generateZone} from '../js/world/worldgen.js';
 installDOM();const{Game}=await import('../js/main.js');
 const boot=()=>{const g=new Game({canvas:new FakeElement('canvas'),hudRoot:new FakeElement(),seed:1066618561});g.save.storage=new MemoryStorage();g.hud.hideStory();return g;};
 const click=(g,text)=>{const row=g.hud._panelRows.find(r=>r.innerHTML.includes(text));assert.ok(row,text);row.dispatch('click');};
 test('appearance applies only on confirmation, cancel does not mutate the hero',()=>{
- const g=boot(),before=JSON.stringify(g.look);openAppearance(g);click(g,'Пол:');assert.eq(JSON.stringify(g.look),before);click(g,'Отмена');assert.eq(JSON.stringify(g.look),before);
- openAppearance(g);click(g,'Пол:');click(g,'Причёска:');click(g,'Применить');assert.eq(g.look.gender,'female');assert.eq(g.look.hairStyle,'long');assert.not(g.look.stubble);
+ const g=boot(),before=JSON.stringify(g.look);openAppearance(g);click(g,'Женщина');assert.eq(JSON.stringify(g.look),before);click(g,'Отмена');assert.eq(JSON.stringify(g.look),before);
+ openAppearance(g);click(g,'Женщина');click(g,'Коса');click(g,'Применить');assert.eq(g.look.gender,'female');assert.eq(g.look.hairStyle,'braid');assert.not(g.look.stubble);
+ // Чипы вместо прокрутки: вариант выбирается напрямую, а выбранный подсвечен
+ // (aria-pressed) — без этого с телефона не понять, что сейчас стоит.
+ openAppearance(g);assert.gt(g.hud._panelRows.filter(r=>r.getAttribute('aria-pressed')==='true').length,6);
+ assert.ok(g.hud._panelRows.some(r=>/apSwatch/.test(r.innerHTML)));
+});
+test('редактор покрывает всю личность героя и ничего не выдумывает',()=>{
+ // Поля внешности = всё, что игрок выбирает «про себя». Амуниция (satchel,
+ // bootCuff, …) живёт в вещах: если она попадёт сюда, редактор начнёт спорить
+ // с инвентарём. Порядок Object.keys — тот же, что в APPEARANCE.
+ assert.deep(Object.keys(APPEARANCE),['gender','hairStyle','skin','hair','coat','pants','accent']);
+ // Ни одного мёртвого значения: каждый вариант проходит нормализацию.
+ for(const [key,values] of Object.entries(APPEARANCE)) for(const [v] of values) assert.eq(normalizeLook({[key]:v})[key],v,`${key}=${v}`);
+ assert.eq(APPEARANCE.hairStyle.length,6);assert.eq(APPEARANCE.gender.length,2);
+ assert.eq(APPEARANCE.skin.length,3); // 'stubble' выводится из пола, а не выбирается
+ // Случайный образ обязан быть валидным и идемпотентным (его пишут в save).
+ const seen=new Set();
+ for(let i=0;i<40;i++){const look=randomLook(()=>i/40);assert.eq(JSON.stringify(normalizeLook(look)),JSON.stringify(look));seen.add(JSON.stringify(look));}
+ assert.ok(seen.size>3,'случайный образ обязан перебирать, а не повторять одно');
+ // Превью без канваса не роняет панель, а с канвасом рисует пиксели.
+ const g=boot();openAppearance(g);
+ const cv=new ShimCanvas(480,200);
+ assert.eq(paintPreview({querySelector:()=>cv},g.look),true,'без канваса — false, без слёз');
+ let lit=0;for(let i=3;i<cv.data.length;i+=4) if(cv.data[i]>8) lit+=1;
+ assert.gt(lit,300,`превью обязано рисовать героя в трёх ракурсах, пикселей: ${lit}`);
+ assert.eq(paintPreview({querySelector:()=>null},g.look),false);
 });
 test('character palette and silhouette survive real save/load',()=>{
  const a=boot();a.look=normalizeLook({gender:'female',hairStyle:'braid',skin:'#80553e',coat:'#785044'});a.save.write();const b=boot();b.save.storage=a.save.storage;assert.ok(b.save.loadFromStorage());assert.deep(b.look,a.look);

@@ -22,7 +22,7 @@ import { torchFlame, paintTorchFlame } from "./torch.js";
 import { SUN, castShadow } from "./tilesart.js";
 import { heroSprite, heroHandAnchor } from "./hero3d.js";
 import { ITEMS } from "../sandbox/items.js";
-import { BODY, GEAR, TONE, PALETTE, READ, SHADOW, WADE, GAIT, ACTION, ATTACH, fallPose, clamp01, easeInOutSine, q, shadeHex } from "./charspec.js";
+import { BODY, GEAR, TONE, PALETTE, READ, SHADOW, WADE, GAIT, ACTION, ATTACH, SEX, sexOf, fallPose, clamp01, easeInOutSine, q, shadeHex } from "./charspec.js";
 
 export const DEFAULT_LOOK = {
     gender: "male", coat: "#446d68",
@@ -253,7 +253,9 @@ export function armRig(p, pose = posture(p)) {
         const ex = sx + reach, ey = sy + BODY.armLen - Math.abs(reach) * 0.25 - lift;
         return { sx, sy, ex, ey, mx: (sx + ex) / 2 + reach * 0.1, my: (sy + ey) / 2 };
     };
-    const ax = BODY.shoulderW / 2 + BODY.armW / 2;
+    // Плечевой пояс вместе с руками: если у́же только стан, а локти на месте,
+    // получается не женская фигура, а «человек с оторванными плечами».
+    const ax = (BODY.shoulderW / 2 + BODY.armW / 2) * sexOf(p.look).arm;
     const behind = p.dir === "left" || back;
     const rest = Math.sin(idle * 1.3) * 0.45 * (1 - g);
     const rs = p.actionHand === "left" ? 0 : swing, ls = p.actionHand === "left" ? swing : 0;
@@ -566,9 +568,13 @@ function paintCharacter(ctx, p) {
     const waistY = top + BODY.torsoH * BODY.waistAt;
     const quarter = sideView ? Math.abs(slant) : 0;
     const narrow = sideView ? (BODY.shoulderWSide + quarter * 2) / BODY.shoulderW : 1;
-    const frame = look.gender === "female" ? .9 : 1;
-    const sw = BODY.shoulderW / 2 * narrow * frame, waist = BODY.waistW / 2 * narrow;
-    const hem = (BODY.hipW / 2 + (look.gender === "female" ? 2 : 1)) * narrow;
+    // Женская фигура — не «тот же человек, но тоньше на глазок»: плечи у́же,
+    // талия уже бёдер, подол длиннее. Пол, который ничего не меняет в кадре,
+    // хуже, чем отсутствие пола, — он обесценивает весь редактор.
+    const sex = sexOf(look);
+    const frame = sex.frame;
+    const sw = BODY.shoulderW / 2 * narrow * frame, waist = BODY.waistW / 2 * narrow * sex.waist;
+    const hem = (BODY.hipW / 2 + (sex === SEX.female ? 2.6 : 1)) * narrow * sex.hem;
     const rows = [[top,sw*.75],[top+2,sw],[waistY,waist],[bottom,hem]];
     const coat = look.coat || look.vest || shirt;
     // New silhouette: a short travelling coat, split skirts, layered linen,

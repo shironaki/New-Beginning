@@ -315,6 +315,9 @@ export function paintProp3D(ctx, obj, opts = {}) {
     // стоящей на другой детали, и есть тот самый «летающий объект»: разрыв между
     // спрайтом и тенью читается как воздух, каким бы аккуратным ни был lift.
     if (!lift) {
+        // Порядок важен: тень ложится ДО тела, иначе там, где силуэт наезжает на
+        // свою тень, по краю кадра видна светлая кайма.
+        castShadow(ctx, sprite, sc);
         ctx.fillStyle = "rgba(14,12,10,0.22)";
         ctx.beginPath();
         ctx.ellipse(0, 0, w * 0.34, w * 0.13, 0, 0, Math.PI * 2);
@@ -351,6 +354,63 @@ export function propSunFor(state = {}, sun = { dx: 0.55, dy: 0.42, alpha: 1 }) {
     };
 }
 
+/* ------------------------- падающая тень пропа ------------------------- */
+
+/**
+ * Чёрный силуэт кадра — форма, из которой строится тень. Вешается на сам
+ * спрайт: кэш спрайтов живёт столько же, сколько и она, и сбрасывается вместе
+ * с ним при смене света (CACHE.clear()), так что второй книги учёта не нужно.
+ */
+function silhouetteFor(sprite) {
+    if (sprite.silhouette) return sprite.silhouette;
+    if (typeof document === "undefined" || !document.createElement) return null;
+    const cv = document.createElement("canvas");
+    cv.width = sprite.w; cv.height = sprite.h;
+    const c = cv.getContext("2d");
+    // Силуэт собран по пикселям (альфа кадра, цвет — чёрный), а не режимом
+    // compositing: тогда node-стенд и браузер дают один и тот же растр, и кадр
+    // приёмки показывает ровно то, что увидит игрок. Кадр крошечный, цикл дешев.
+    const src = sprite.canvas.getContext("2d").getImageData(0, 0, sprite.w, sprite.h);
+    const out = c.createImageData(sprite.w, sprite.h);
+    for (let i = 0; i < src.data.length; i += 4) {
+        out.data[i + 3] = src.data[i + 3];
+    }
+    c.putImageData(out, 0, 0);
+    sprite.silhouette = cv;
+    return cv;
+}
+
+/**
+ * Падающая тень: тот же силуэт, сплющенный в плоскость земли и скошенный в
+ * сторону от света. Раньше у пропа было только пятно «под ногами»: деталь оно
+ * держит, но направление света читалось лишь по граням запечённого кадра — отсюда
+ * ощущение наклейки вечером. Теперь тень длинная при низком солнце, короткая в
+ * полдень и уходит от света, из тех же чисел, что печёт грани (SUN ставит
+ * setPropSun из applySky), поэтому свет и тень не могут разойтись.
+ *
+ * amp <= 0 — прямого света нет (ночь, пасмурно, буря): у рассеянного света
+ * чёткой тени не бывает вовсе, остаётся пятно контакта.
+ */
+export function castShadow(ctx, sprite, scale = 1) {
+    const sun = SUN;
+    const amp = Math.max(0, Math.min(1, sun.amp || 0));
+    const elev = Math.max(0, Math.min(1, sun.elev === undefined ? 0.72 : sun.elev));
+    const stretch = (1 - elev) * 1.35;
+    if (amp <= 0.05 || stretch < 0.14) return false;
+    const sil = silhouetteFor(sprite);
+    if (!sil) return false;
+    const dir = Math.max(-1, Math.min(1, sun.dir === undefined ? 0.55 : sun.dir));
+    ctx.save();
+    // Темнее у земли и на косом свету, бледнеет к полудню — та же логика, что у
+    // длины: свет скользит вдоль поверхности.
+    ctx.globalAlpha = Math.min(0.42, 0.14 + stretch * 0.22) * Math.min(1, amp + 0.35);
+    ctx.transform(1, 0, -dir * stretch * scale, 0.22 + 0.1 * elev, 0, 0);
+    ctx.drawImage(sil, Math.round(-sprite.w * scale / 2), -Math.round(sprite.h * scale));
+    ctx.restore();
+    PROPS3D.stats.shadows = (PROPS3D.stats.shadows || 0) + 1;
+    return true;
+}
+
 /**
  * Падающий обломок (world/debris.js): тот же запечённый кадр, но с подъёмом над
  * землёй, поворотом и затуханием в момент «лёг». Рисуется в том же translate,
@@ -381,6 +441,10 @@ export function paintDebris3D(ctx, body, opts = {}) {
     ctx.ellipse(0, 0, w * 0.34 * scale * spread, w * 0.13 * scale * spread, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
+    // Направление — то же, что у всего мира: осколок в полёте обязан давать
+    // тень в ту же сторону, что и стоящее рядом дерево, иначе кадр распадается
+    // на «prop-свет» и «физика-свет».
+    if (ground > 0.25) castShadow(ctx, sprite, scale * spread * 0.9);
 
     ctx.save();
     ctx.translate(0, -Math.round(lift));

@@ -262,12 +262,40 @@ export class HUD {
         this.els.panelBody.innerHTML = "";
         this._panelRows = [];
         let tabs, grid;
+        // Группы чипов (редактор внешности):nav на каждую группу, chosen
+        // подсвечивается через aria-pressed — тот же приём, что у вкладок рюкзака.
+        const chipNavs = new Map();
         for (const row of rows) {
             if (row.html !== undefined) {
                 const d = document.createElement("div");
                 d.className = "panelInfo";
                 d.innerHTML = row.html;
                 this.els.panelBody.appendChild(d);
+                continue;
+            }
+            if (row.caption !== undefined) {
+                const s = document.createElement("div");
+                s.className = "apLabel";
+                s.textContent = row.caption;
+                this.els.panelBody.appendChild(s);
+                continue;
+            }
+            if (row.chip) {
+                let nav = chipNavs.get(row.chip);
+                if (!nav) {
+                    nav = document.createElement("nav");
+                    nav.className = "apTabs";
+                    nav.setAttribute("aria-label", row.chip);
+                    this.els.panelBody.appendChild(nav);
+                    chipNavs.set(row.chip, nav);
+                }
+                const b = document.createElement("button");
+                b.className = "panelRow bagTab";
+                b.innerHTML = `<span class="rowLabel">${row.label}</span>`;
+                b.setAttribute("aria-pressed", String(!!row.selected));
+                b.addEventListener("click", () => { row.action && row.action(); });
+                this._panelRows.push(b);
+                nav.appendChild(b);
                 continue;
             }
             const b = document.createElement("button");
