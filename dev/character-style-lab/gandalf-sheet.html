@@ -35,6 +35,7 @@
         <a href="./index.html">Слойная студия</a>
         <a href="./comparison.html">Старая галерея вариантов ↗</a>
         <a href="./hero3d.html">3D-риг Quaternius ↗</a>
+        <a href="./gandalf-pack.html">Оригинальный пак из zip ↗</a>
       </nav>
     </div>
   </header>
@@ -64,13 +65,11 @@
     </div>
 
     <div class="howto">
-      <b>Как показать оригинальный пак:</b> скачайте бесплатный пак
-      <i>«FREE — 2D Pixel Art Male and Female Character»</i> с itch.io
-      (gandalfhardcore.itch.io) и положите распакированные листы в
-      <code>dev/character-style-lab/gandalf-refs/male.png</code> и
-      <code>female.png</code>. Папка добавлена в <code>.gitignore</code>:
-      лицензия пака запрещает перераспространение, поэтому бинарники
-      ассетов в репозиторий не попадают — стенд читает их локально.
+      <b>Откуда листы.</b> Скачанный <code>GandalfHardcore Character Asset Pack.zip</code> лежит в ветке (коммит «Add files via upload»),
+      а в стенде он распакован в <code>dev/character-style-lab/gandalf-refs/pack/</code> — каждый лист 800×448 = сетка 10×7 ячеек 80×64
+      (Idle 5 · Walk 8 · Run 8 · Jump 4 · Fall 4 · Use/Attack 6 · Death 10). Если песочница потеряет распаковку, верните её одной командой:
+      <code>git cat-file blob $(git rev-list --objects --all | awk '/\.zip$/{print $1}' | head -1) &gt; /tmp/pack.zip &amp;&amp; node dev/character-style-lab/tools/unpack-gandalf.mjs /tmp/pack.zip</code>.
+      Послойную сборку (тело + одежда + причёска + меч) смотрите на <a href="./gandalf-pack.html">/gandalf-pack.html</a>, а вариант с настоящим 3D-ригом — на <a href="./hero3d.html">/hero3d.html</a>.
     </div>
 
     <section aria-label="Официальные превью пака">

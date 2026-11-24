@@ -60,7 +60,12 @@ let sourceName = 'demo';
 async function pickSource() {
   sourceTag.textContent = 'загрузка…';
   const wanted = new URLSearchParams(location.search).get('sheet');
-  const candidates = wanted ? [wanted] : ['./gandalf-refs/male.png', './gandalf-refs/female.png'];
+  const candidates = wanted ? [wanted] : [
+    './gandalf-refs/pack/base/male/male-skin1.png',
+    './gandalf-refs/pack/base/female/female-skin1.png',
+    './gandalf-refs/male.png',
+    './gandalf-refs/female.png'
+  ];
   for (const url of candidates) {
     const img = await loadImage(url);
     if (img && img.width > 160) {
@@ -79,7 +84,7 @@ async function pickSource() {
   sheet = buildDemoSheet();
   sourceName = 'демо-лист (пиксель-риг лаборатории)';
   applyRowAvailability();
-  sourceTag.textContent = `${sourceName} · male.png/female.png не найдены`;
+  sourceTag.textContent = `${sourceName} · листы пака не найдены (распакуйте: node dev/character-style-lab/tools/unpack-gandalf.mjs <zip>)`;
 }
 
 function applyRowAvailability() {

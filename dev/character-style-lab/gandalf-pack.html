@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Оригинальный пак GandalfHardcore · послойный плеер</title>
+  <link rel="stylesheet" href="./sprite-lab.css">
+  <style>
+    .pack-grid { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(260px, 320px); gap: 16px; align-items: start; }
+    @media (max-width: 940px) { .pack-grid { grid-template-columns: 1fr; } }
+    .pane { background: #10190f; border: 1px solid #2c4030; border-radius: 14px; padding: 14px; display: grid; gap: 12px; }
+    .pane h2 { margin: 0; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: #9fb98f; }
+    .frame-stage { display: grid; justify-items: center; background: #0b1410; border-radius: 10px; padding: 12px; }
+    #frameCanvas, #stripCanvas { image-rendering: pixelated; max-width: 100%; height: auto; }
+    #stripCanvas { border-radius: 8px; }
+    .rows { display: flex; flex-wrap: wrap; gap: 6px; }
+    .rows button, .layers button { background: #1b2a1a; color: #b9c7b3; border: 1px solid #33482f; border-radius: 7px; padding: 5px 9px; font: inherit; font-size: 12px; cursor: pointer; }
+    .rows button[aria-pressed=true] { background: #3c5c2e; color: #f2f8e8; border-color: #6b8f52; }
+    .layers { display: grid; gap: 10px; }
+    .layer-group { display: grid; gap: 5px; }
+    .layer-group > span { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #7f9276; }
+    .layer-group .opts { display: flex; flex-wrap: wrap; gap: 5px; }
+    .layers button[aria-pressed=true] { background: #35502c; color: #f0f7e6; border-color: #6b8f52; }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+    .row label { display: grid; gap: 4px; font-size: 12px; color: #b9c7b3; }
+    .row select, .row input[type=range] { accent-color: #8fb169; }
+    .swatches { display: flex; flex-wrap: wrap; gap: 4px; }
+    .swatches i { width: 22px; height: 22px; border-radius: 4px; border: 1px solid #0006; display: block; }
+    .note { font-size: 12px; color: #97a88e; }
+    .status { font-size: 12px; color: #97a88e; min-height: 16px; }
+    .status.err { color: #e88f7a; }
+    kbd { background: #1d2c1b; border: 1px solid #33482f; border-radius: 4px; padding: 0 4px; font-size: 11px; }
+  </style>
+</head>
+<body>
+<main class="lab-shell">
+  <header class="lab-header">
+    <div class="header-copy">
+      <p class="eyebrow">ИЗОЛИРОВАННЫЙ СТЕНД · ОРИГИНАЛЬНЫЕ ЛИСТЫ ИЗ ZIP ВЕТКИ</p>
+      <h1>Пак GandalfHardcore<br><span>послойная сборка персонажа 80×64</span></h1>
+      <p class="intro">Это уже не имитация: листы взяты из <code>GandalfHardcore Character Asset Pack.zip</code>, который вы положили в ветку. Каждый файл — сетка 10×7 по 80×64 (строки: Idle 5, Walk 8, Run 8, Jump 4, Fall 4, Use/Attack 6, Death 10 кадров). Тело, одежда, причёска и предмет в руке — отдельные листы, они совпадают по кадрам, поэтому здесь собираются в один спрайт в реальном времени.</p>
+      <nav class="nav-links" aria-label="Другие стенды">
+        <a href="./">← Sprite Lab</a>
+        <a href="./hero3d.html">3D-риг Quaternius ↗</a>
+        <a href="./gandalf-sheet.html">Наш листовой плеер ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="pack-grid">
+    <div class="pane">
+      <h2>Текущий кадр</h2>
+      <div class="frame-stage"><canvas id="frameCanvas" width="320" height="256" aria-label="Собранный спрайт, текущий кадр"></canvas></div>
+      <h2>Ряд целиком</h2>
+      <div class="frame-stage"><canvas id="stripCanvas" width="640" height="128"></canvas></div>
+      <div class="row">
+        <label>Ряд <select id="rowPick"></select></label>
+        <label>Кадр <input id="framePick" type="range" min="0" max="4" value="0" step="1"></label>
+        <label>FPS <input id="fpsPick" type="range" min="2" max="20" value="6"></label>
+        <label>Зум <select id="zoomPick"><option value="2">2×</option><option value="3">3×</option><option value="4" selected>4×</option><option value="6">6×</option></select></label>
+        <label><button id="playBtn" type="button" class="rows">Играть ▸</button></label>
+        <label><button id="mirrorBtn" type="button" class="rows" aria-pressed="false">Зеркало</button></label>
+        <label><button id="gridBtn" type="button" class="rows" aria-pressed="false">Сетка 1px</button></label>
+      </div>
+      <p class="note">Клавиши: <kbd>←</kbd> <kbd>→</kbd> кадр, <kbd>1</kbd>…<kbd>7</kbd> ряд, <kbd>пробел</kbd> play/pause. Оригинальный пак рисуется в сторону «вправо» — <kbd>Зеркало</kbd> разворачивает влево.</p>
+      <p class="status" id="status">инициализация…</p>
+    </div>
+
+    <div class="pane">
+      <h2>Слои</h2>
+      <div class="layers">
+        <div class="layer-group"><span>Тело (skin)</span><div class="opts" id="basePick"></div></div>
+        <div class="layer-group"><span>Причёска</span><div class="opts" id="hairPick"></div></div>
+        <div class="layer-group"><span>Одежда</span><div class="opts" id="clothingPick"></div></div>
+        <div class="layer-group"><span>В руке</span><div class="opts" id="handPick"></div></div>
+      </div>
+      <h2>Палитра листа</h2>
+      <div class="swatches" id="swatches"></div>
+      <p class="note" id="paletteInfo">—</p>
+      <p class="note">Бинарники пака в git не попадают (лицензия запрещает перераспространение) — они лежат в <code>gandalf-refs/pack/</code>, и если песочница их потеряет, распакуйте заново:
+      <code>node dev/character-style-lab/tools/unpack-gandalf.mjs &lt;zip&gt;</code>.</p>
+    </div>
+  </section>
+</main>
+<script type="module" src="./gandalf-pack.js"></script>
+</body>
+</html>
