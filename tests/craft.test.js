@@ -216,6 +216,20 @@ test("fire-only recipes wait for a lit campfire", () => {
     assert.gte(g.inventory.count("torch"), 2, "факелы не появились");
 });
 
+test("the world tells you where the missing tool comes from", () => {
+    const g = boot();
+    const gated = g.zone.objects.find((o) => requiredTool(o.kind) === "axe" && !o.depleted && !o.removed);
+    assert.ok(gated, "в пепелище нет ни одного дерева под топор");
+    const label = g.interactLabel(gated);
+    assert.ok(/топор/.test(label) && label.length < 40, `подпись цели слишком длинная для HUD: ${label}`);
+    g.player.x = gated.x; g.player.y = gated.y + 16;
+    g.interact = gated; g.doInteract();
+    const pile = g.hud.els.toasts.children;
+    const said = pile.length ? (pile[pile.length - 1].innerHTML || "") : "";
+    assert.ok(/Ремесл/.test(said) || /крафт/.test(said), `тост не объясняет, где брать топор: ${said}`);
+    assert.ok(/2× Камень|камень/i.test(said), "в тосте нет состава рецепта");
+});
+
 test("the panel lists reasons, not dead buttons", () => {
     const g = boot();
     openCraft(g);

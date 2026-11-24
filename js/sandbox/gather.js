@@ -8,6 +8,7 @@
  * prologue is playable with nothing in your pockets.
  */
 
+import { craftSourceHint } from "./craft.js";
 /**
  * `block` is the radius of the prop's footprint IN PIXELS, measured at the
  * base — the trunk, not the canopy. TILE_SIZE is 32 and the player's radius is
@@ -105,9 +106,14 @@ export function rollDrops(obj, rng) {
 }
 
 /** Human-readable reason when the player lacks the tool. */
-export function toolHint(kind) {
+export function toolHint(kind, { how = false } = {}) {
     const tool = requiredTool(kind);
     if (!tool) return null;
     const names = { axe: "🪓 топор", pick: "⛏️ кирка", knife: "🔪 нож", hoe: "🌾 мотыга", rod: "🎣 удочка" };
-    return `Нужен ${names[tool] || tool}`;
+    const line = `Нужен ${names[tool] || tool}`;
+    // Подсказка «где взять» — только в тосте: в подписи цели под ногами каждая
+    // лишняя строка двигает камеру, а прочитать её всё равно некогда.
+    if (!how) return line;
+    const src = craftSourceHint(tool);
+    return src ? `${line} — ${src}` : line;
 }

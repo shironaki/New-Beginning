@@ -30,6 +30,7 @@
  *   --fallen           freeze a fallen pose after simulation
  *   --light-fire       light the closest campfire with a log
  *   --torch            put a lit torch in the hero's hand
+ *   --tool <id>        equip any item in a hand (--hand left|right)
  *   --hud              keep the interaction prompt visible
  *   --out <path>       output file (default .artifacts/scene.png)
  */
@@ -163,6 +164,18 @@ game.weather.groundWet = Math.max(0, Math.min(1, num("wet", 0)));
 if (flag("torch", false)) {
     game.inventory.add("torch", 1);
     game.inventory.setActive(game.inventory.list().findIndex((s) => s.id === "torch"));
+}
+/**
+ * --tool <itemId> — положить предмет в руку (и взять его): так видно хват,
+ * наклон клинка и то, не прячется ли предмет за телом. --hand left|right.
+ */
+const toolArg = flag("tool", null);
+if (toolArg && toolArg !== true) {
+    const id = String(toolArg), hand = String(flag("hand", "right"));
+    game.inventory.add(id, 1);
+    const i = game.inventory.slots.findIndex((sl) => sl?.id === id);
+    if (i >= 0 && !game.inventory.equipHand(hand, i)) console.error(`рука ${hand} не приняла ${id}`);
+    else if (i < 0) console.error(`нет предмета ${id} в рюкзаке`);
 }
 if (flag("light-fire", false)) {
     const fires = game.zone.objects.filter((o) => o.kind === "campfire" && !o.removed);

@@ -440,7 +440,7 @@ export class Game {
         const def = propDef(obj.kind);
         const tool = requiredTool(obj.kind);
         if (tool && !this.inventory.findTool(tool)) {
-            this.hud.toast(toolHint(obj.kind), "✋");
+            this.hud.toast(toolHint(obj.kind, { how: true }), "✋");
             return;
         }
         if (this.inventory.handAction) return;

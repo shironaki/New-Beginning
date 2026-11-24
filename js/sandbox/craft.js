@@ -194,6 +194,27 @@ export function craftTime(recipe, tier = 1) {
     return Math.max(0.6, (recipe.time || 3) * (1 - Math.min(0.5, (Math.max(1, tier) - 1) * 0.2)));
 }
 
+/**
+ * Рецепт, который даёт орудие нужного вида. Нужен он для одного: подсказка в
+ * мире («нужен топор») не должна вести в никуда. Пока крафта не было, игрок
+ * читал это как «иди поищи ещё», и шёл искать. Теперь он видит, из чего топор
+ * делается, и идёт собирать.
+ */
+export function toolRecipe(kind) {
+    return RECIPES.find((r) => (r.out || []).some(([id]) => itemDef(id)?.tool === kind)) || null;
+}
+
+/** Короткая строка «из чего и где»: её печатает тост, когда действие не вышло. */
+export function craftSourceHint(kind) {
+    const r = toolRecipe(kind);
+    if (!r) return null;
+    const need = r.needs.map((n) => `${n.n}× ${needLabel(n)}`).join(", ");
+    const gate = r.at === "fire" ? " у костра" : r.tool ? ` нужен ${TOOL_GATES[r.tool] || r.tool}` : "";
+    return `собери ${need}${gate} — крафт: B или рюкзак → Ремесло`;
+}
+
+const TOOL_GATES = { axe: "топор", pick: "кирка", knife: "нож" };
+
 /** Теги, по которым панель собирает подсказку «что это даёт». */
 export function outputHint(id) {
     const d = itemDef(id);
