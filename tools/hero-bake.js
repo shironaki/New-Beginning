@@ -64,7 +64,9 @@ const OUT = path.resolve(opt("out", ".artifacts/hero-bake"));
 // иначе герой в игре никак не связан с тем, что выбран в панели внешности.
 const LOOK = {
     skin: opt("skin", "#e0b594"),
-    hair: opt("hair", "#302b29"),
+    // Тот же ключ --hair задаёт и имя мешка, и цвет — отсюда путаница в пробах.
+    // haircolor перебивает только цвет.
+    hair: opt("haircolor", opt("hair", "#302b29")),
     coat: opt("coat", "#446d68"),
     pants: opt("pants", "#48473e")
 };
@@ -467,9 +469,20 @@ function gradeFrame(frame) {
 /**
  * Для каждого пикселя спрайта смотрим, каким материалом он получился в 3D-кадре,
  * и заменяем цвет на ближайший по яркости тон дорожки. Голосуем по всем SS×SS
- * сэммплам ячейки: если материал не набрал большинства, пиксель остаётся в общей
+ * сэмплам ячейки: если материал не набрал большинства, пиксель остаётся в общей
  * палитре — так граница одежды и кожи не превращается в рябых призраков.
+ *
+ * Второй проход (растяжка) важнее, чем кажется. Яркость пикселя приходит из
+ * исходной текстуры, а у неё своё освещение и свой контраст: светлые волосы
+ * запечены яркими и легли бы в верхний тон дорожки целиком — то есть седыми,
+ * каким бы цветом их ни выбрал игрок. Поэтому диапазон яркости каждой дорожки
+ * measured по перцентилям 2/98 и растягивается на диапазон самих тонов:
+ * света и тени остаются как есть, но средний пиксель попадает в базовый цвет.
+ * Плоскую дорожку (разбег меньше 18 единиц) не трогаем — растягивать нечего,
+ * только шум усилить.
  */
+const HIST = 64;
+const STRETCH_KEYS = ["hair"];
 function applyRamps(sprite, frame) {
     const lums = {}, rgb = {};
     for (const key of RAMP_KEYS) {
@@ -478,6 +491,10 @@ function applyRamps(sprite, frame) {
         lums[key] = hexes.map(hex => { const c = hexRgb(hex); return lum(c[0], c[1], c[2]); });
     }
     const total = SS * SS;
+    const winOf = new Uint8Array(CELL.w * CELL.h);
+    const lOf = new Float32Array(CELL.w * CELL.h);
+    const hist = TRACK_NAME.map(() => new Int32Array(HIST));
+
     for (let y = 0; y < CELL.h; y += 1) {
         for (let x = 0; x < CELL.w; x += 1) {
             const votes = TRACK_NAME.map(() => 0);
@@ -498,18 +515,53 @@ function applyRamps(sprite, frame) {
             let win = 0;
             for (let t = 1; t < TRACK_NAME.length; t += 1) if (votes[t] > total * 0.3 && votes[t] > votes[win]) win = t;
             if (!win) continue;
+            const at = y * CELL.w + x;
+            const L = lsum[win] / Math.max(1, votes[win]);
+            winOf[at] = win;
+            lOf[at] = L;
+            hist[win][Math.min(HIST - 1, (L / 256 * HIST) | 0)] += 1;
+        }
+    }
+
+    const range = {};
+    for (let t = 1; t < TRACK_NAME.length; t += 1) {
+        // Растягиваем не все дорожки: у куртки и кожи собственный мягкий свет и так
+        // попадает в середину веера, а лишний контраст стоит байтов (RLE хуже
+        // сжимает шашлык тонов). Волосы — другое дело: они запечены почти плоским
+        // светлым пятном, и без растяжки любой выбранный цвет становится седым.
+        if (!STRETCH_KEYS.includes(TRACK_NAME[t])) continue;
+        const h = hist[t];
+        let n = 0;
+        for (let i = 0; i < HIST; i += 1) n += h[i];
+        if (n < 12) continue;
+        const cut = Math.max(1, Math.round(n * 0.02));
+        let lo = 0, acc = 0;
+        while (lo < HIST - 1 && (acc += h[lo]) < cut) lo += 1;
+        let hi = HIST - 1; acc = 0;
+        while (hi > 0 && (acc += h[hi]) < cut) hi -= 1;
+        const span = (hi + 1 - lo) * 256 / HIST;
+        if (span < 18) continue;                       // дорожка и так плоская
+        range[TRACK_NAME[t]] = [lo * 256 / HIST, span];
+    }
+
+    for (let y = 0; y < CELL.h; y += 1) {
+        for (let x = 0; x < CELL.w; x += 1) {
+            const at = y * CELL.w + x;
+            const win = winOf[at];
+            if (!win) continue;
             const key = TRACK_NAME[win];
             const steps = lums[key];
+            let L = lOf[at];
+            const r = range[key];
+            if (r) L = steps[0] + ((L - r[0]) / r[1]) * (steps[steps.length - 1] - steps[0]);
             // Дизеринг между тонами: без него кожа на предплечье ложится полосами.
-            const jitter = (BAYER2[y & 1][x & 1] / 4 - 0.5) * (255 / steps.length) * 0.9;
-            const L = lsum[win] / Math.max(1, votes[win]) + jitter;
+            L += (BAYER2[y & 1][x & 1] / 4 - 0.5) * (255 / steps.length) * 0.9;
             let bin = 0;
             let best = Infinity;
             for (let i = 0; i < steps.length; i += 1) {
                 const d = Math.abs(steps[i] - L);
                 if (d < best) { best = d; bin = i; }
             }
-            const at = y * CELL.w + x;
             sprite.index[at] = RAMP_AT[key] + bin;
             const c = rgb[key][bin];
             const px = at * 4;

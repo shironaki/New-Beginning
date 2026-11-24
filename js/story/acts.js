@@ -1,3 +1,4 @@
+import { hasTag } from "../sandbox/items.js";
 /**
  * story — the campaign spine.
  *
@@ -59,6 +60,17 @@ export const STORY_STEPS = [
         on: "fire:lit"
     },
     {
+        id: "first_tool",
+        act: 1,
+        title: "Камень, палка, волокно",
+        text: "Нож режет, но дерево не валит. Камень, привязанный к плотной палке, — " +
+              "это уже топор, и с ним пепелище начинает отдавать брёвна и доски." +
+              " Уголь, доски, верёвка — всё это делается руками, а не находится.",
+        objective: "Изготовить каменный топор (B)",
+        on: "craft:done",
+        when: (p) => p.id === "axe_stone"
+    },
+    {
         id: "cook",
         act: 1,
         title: "Первая горячая еда",
@@ -73,8 +85,8 @@ export const STORY_STEPS = [
         title: "Сытость",
         text: "Впервые за неделю ты поел досыта.",
         objective: "Съесть приготовленную еду",
-        on: "needs:consume",
-        when: (p) => p.food >= 10
+        on: "player:ate",
+        when: (p) => hasTag(p.id, "cooked")
     },
     {
         id: "survive_night",
@@ -103,6 +115,7 @@ export class StoryEngine {
         this.index = 0;
         this.completed = [];
         this.flags = new Set();
+        this.facts = {};
         this.entries = [];       // journal entries, newest last
         this.act = 1;
         this._bind();
@@ -116,14 +129,46 @@ export class StoryEngine {
         this.bus.on("*", (payload, type) => this._onEvent(type, payload));
     }
 
-    _onEvent(type, payload) {
-        const step = this.current;
-        if (!step || step.on !== type) return;
-        if (step.when && !step.when(payload || {}, this.game)) return;
-        this.complete(step);
+    _onEvent(type, payload = {}) {
+        const p = payload || {};
+        if (type === "story:flag") this.flags.add(p.flag);
+        else if (type === "inv:add" && (!p.owner || p.owner === "player") && p.id === "firewood") this.facts.wood = (this.facts.wood || 0) + (p.n || 0);
+        else if (type === "fire:lit") this.facts.light_fire = true;
+        else if ((type === "cook:take" && p.state === "done") || type === "cook:pot_take") this.facts.cook = true;
+        else if (type === "player:ate" && hasTag(p.id, "cooked")) this.facts.eat = true;
+        // Первый инструмент — это уже не выживание, а развитие: с топором в
+        // долине открываются брёвна, а с брёвнами — доски, кирка и постройки.
+        else if (type === "craft:done" && p.id === "axe_stone") this.facts.first_tool = true;
+        else if (type === "player:slept") this.facts.survive_night = true;
+        else if (type === "zone:enter" && p.zone === "meadow") this.facts.find_smoke = true;
+        else return;
+        this.reconcile();
     }
 
-    complete(step) {
+    /** Facts outlive events: visiting an object early never consumes a future objective. */
+    reconcile(silent = false) {
+        if (this.reconciling) return;
+        this.reconciling = true;
+        const g = this.game;
+        if (g?.inventory?.has("diary_burnt")) this.flags.add("own_diary");
+        const satisfied = (id) => id === "wake" ? this.hasFlag("home_hearth")
+            : id === "diary" ? this.hasFlag("own_diary")
+            : id === "firewood" ? Math.max(this.facts.wood || 0, g?.inventory?.count("firewood") || 0) >= 5
+            : !!this.facts[id];
+        try { while (this.current && satisfied(this.current.id)) this.complete(this.current, silent); }
+        finally { this.reconciling = false; }
+    }
+
+    /** Upgrade legacy saves only from evidence, never invent an unseen action. */
+    recover() {
+        const g = this.game;
+        if (g?.cookJournal?.count) this.facts.cook = true;
+        if ([...(g?.fires?.values() || [])].some((f) => f.lit)) this.facts.light_fire = true;
+        if (g?.inventory?.has("axe_stone") || g?.inventory?.has("pick_stone")) this.facts.first_tool = true;
+        this.reconcile(true);
+    }
+
+    complete(step, silent = false) {
         this.completed.push(step.id);
         this.entries.push({ id: step.id, title: step.title, text: step.text, act: step.act });
         this.index++;
@@ -133,7 +178,7 @@ export class StoryEngine {
             this.act = nextAct;
             this.bus.emit("story:act", { act: this.act, name: (ACTS[this.act - 1] || {}).name });
         }
-        this.bus.emit("story:step", {
+        if (!silent) this.bus.emit("story:step", {
             id: step.id, title: step.title, text: step.text,
             next: this.current ? this.current.objective : null
         });
@@ -150,13 +195,15 @@ export class StoryEngine {
 
     hasFlag(flag) { return this.flags.has(flag); }
 
-    toJSON() { return { index: this.index, completed: this.completed, flags: Array.from(this.flags), entries: this.entries, act: this.act }; }
+    toJSON() { return { index: this.index, completed: this.completed, flags: Array.from(this.flags), facts: { ...this.facts }, entries: this.entries, act: this.act }; }
     load(d) {
         if (!d) return this;
         this.index = d.index || 0;
-        this.completed = d.completed || [];
+        this.completed = [...(d.completed || [])];
         this.flags = new Set(d.flags || []);
-        this.entries = d.entries || [];
+        this.facts = { ...(d.facts || {}) };
+        for (const id of this.completed) this.facts[id] = true;
+        this.entries = (d.entries || []).map(e => ({ ...e }));
         this.act = d.act || 1;
         return this;
     }

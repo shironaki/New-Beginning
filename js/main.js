@@ -1,6 +1,6 @@
 import { normalizeLook, openAppearance } from "./ui/appearance.js";
 import { handCapacity } from "./sandbox/carry.js";
-import { startMeal, tickHands, handRender, useHand, openBag, startPickup } from "./ui/hands.js";
+import { startMeal, tickHands, handRender, useHand, openBag, startPickup, openCraft } from "./ui/hands.js";
 import { canReceive, startPotFromInventory } from "./survival/cooking-actions.js";
 /**
  * «Новое начало». Bootstrap and orchestration.
@@ -605,6 +605,48 @@ export class Game {
 
     openBackpack() { openBag(this); }
 
+    /** Панель ремесла — «B» на клавиатуре и вкладка в рюкзаке на телефоне. */
+    openCraft() { openCraft(this); }
+
+    /**
+     * Горящий костёр в пределах вытянутой руки. Нужен не для красоты: у
+     * pot and torch recipes the fire is the tool, и «разожечь потом» здесь
+     * не работает — смолу и медь греют сейчас.
+     */
+    nearLitFire() {
+        for (const o of this.zone.objects) {
+            if (o.kind !== "campfire" || o.removed) continue;
+            const dx = o.x - this.player.x, dy = (o.y - this.player.y) * 1.4;
+            if (dx * dx + dy * dy > 58 * 58) continue;
+            const fire = this.fires.get(this.fireKey(this.zone, o));
+            if (fire && fire.lit) return { obj: o, fire };
+        }
+        return null;
+    }
+
+    /**
+     * Поставить построенный объект перед героем. Возвращает null, а не бросает:
+     * материалы уже списаны, и решение (вернуть или нет) принимает вызывающий.
+     * Тайл проверяется руками того же `fitsAt`, что и герой, — иначе шалаш
+     * встал бы в воду, а столик из камней остался бы невредим.
+     */
+    buildProp(kind) {
+        const def = propDef(kind);
+        if (!def) return null;
+        const at = this.player.facingPoint(22);
+        const tx = Math.floor(at.x / TILE_SIZE), ty = Math.floor(at.y / TILE_SIZE);
+        if (this.zone.isBlockedTile(tx, ty)) return null;
+        if (this.zone.propSolidAt(at.x, at.y)) return null;
+        if (this.zone.objects.some((o) => !o.removed && o.tx === tx && o.ty === ty && (propDef(o.kind)?.solid || propDef(o.kind)?.interact)))
+            return null;
+        const obj = { kind, tx, ty, x: at.x, y: at.y, built: true };
+        this.zone.objects.push(obj);
+        if (def.block) this.zone.addSolid(obj, def.block);
+        if (def.interact === "fire") this.fires.set(this.fireKey(this.zone, obj), new Campfire({ bus: this.bus }));
+        this.bus.emit("world:built", { kind, tx, ty });
+        return obj;
+    }
+
     eat(id) { return startMeal(this, id); }
 
     readDiary() {
@@ -804,6 +846,9 @@ export class Game {
         }
         if (this.input.justPressed("inventory")) {
             this.hud.isPanelOpen ? this.hud.closePanel() : this.openBackpack();
+        }
+        if (this.input.justPressed("build")) {
+            this.hud.isPanelOpen ? this.hud.closePanel() : this.openCraft();
         }
         if (this.input.justPressed("journal")) {
             this.hud.isPanelOpen ? this.hud.closePanel() : this.openJournal();

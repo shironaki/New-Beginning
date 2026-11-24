@@ -132,6 +132,13 @@ test("full Act I playthrough: ashes → fire → food → morning", () => {
     g.inventory.remove("firewood", 3);
     fire.addFuel("firewood"); fire.addFuel("firewood"); fire.addFuel("firewood");
     assert.ok(fire.light({ hasFlint: g.inventory.has("flint") }));
+    assert.eq(g.story.current.id, "first_tool", "после костра идёт первый инструмент, а не еда");
+
+    // 3.5 Каменный топор — петля пролога: без него в долине нет ни брёвен, ни
+    // досок, ни кирки. Здесь событие отдаётся руками, как и остальные действия
+    // этой лёгкой сборки; настоящий путь (материалы → time → руки) проверяется
+    // в tests/craft.test.js.
+    g.bus.emit("craft:done", { id: "axe_stone" });
     assert.eq(g.story.current.id, "cook");
 
     // 4. Cook a fish on the spit — and do not forget it.
@@ -150,6 +157,7 @@ test("full Act I playthrough: ashes → fire → food → morning", () => {
     const before = g.needs.food;
     g.inventory.remove("fish_grill", 1);
     g.needs.consume(foodValue("fish_grill"));
+    g.bus.emit("player:ate", { id: "fish_grill" });
     assert.gt(g.needs.food, before);
     assert.eq(g.story.current.id, "survive_night");
 
@@ -164,7 +172,7 @@ test("full Act I playthrough: ashes → fire → food → morning", () => {
     assert.eq(g.clock.day, 2, "a night has passed");
     assert.eq(g.story.current.id, "find_smoke");
     assert.eq(g.story.act, 2);
-    assert.eq(steps.length, 7);
+    assert.eq(steps.length, 8);
 });
 
 test("a night WITHOUT a fire is genuinely dangerous", () => {

@@ -58,8 +58,9 @@ test("the whole prologue can be completed and reaches act 2", () => {
     story.setFlag("own_diary");
     game.inventory.add("firewood", 5);
     bus.emit("fire:lit", {});
+    bus.emit("craft:done", { id: "axe_stone" });   // шаг first_tool: без топора пролог не идёт
     bus.emit("cook:take", { state: "done", id: "meat_roast" });
-    bus.emit("needs:consume", { food: 34 });
+    bus.emit("player:ate", { id: "meat_roast" });
     bus.emit("player:slept", { day: 2 });
     assert.eq(story.current.id, "find_smoke");
     assert.eq(story.act, 2);

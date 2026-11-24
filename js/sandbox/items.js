@@ -15,6 +15,10 @@ export const ITEMS = {
     stone:     { name: "Камень",       emoji: "🪨", stack: 50, tags: ["build"], weight: 2 },
     flint:     { name: "Кремень",      emoji: "🔥", stack: 20, tags: ["tool_part", "firestarter"], weight: 0.2 },
     fiber:     { name: "Волокно",      emoji: "🌾", stack: 50, tags: ["craft"], weight: 0.1 },
+    // Верёвка — связующее почти всех каменных орудий: без неё топор просто
+    // палка с камнем. Держим её предметом, а не флагом рецепта, чтобы можно
+    // было положить в котелок, повесить на стену и потерять в реке.
+    rope:      { name: "Верёвка",      emoji: "🪢", stack: 30, tags: ["craft", "bind"], weight: 0.4 },
     hay:       { name: "Сено",         emoji: "🌾", stack: 50, tags: ["fuel", "feed"], burn: 420, weight: 0.3 },
     resin:     { name: "Смола",        emoji: "🟤", stack: 20, tags: ["craft", "fuel"], burn: 2600, weight: 0.3 },
     copper:    { name: "Медная руда",  emoji: "🟠", stack: 30, tags: ["ore"], weight: 2.5 },
