@@ -34,6 +34,7 @@ import { Inventory } from "./sandbox/inventory.js";
 import { itemDef, itemEmoji, itemName, foodValue } from "./sandbox/items.js";
 import { propDef, rollDrops, requiredTool, toolHint } from "./sandbox/gather.js";
 import { Needs } from "./survival/needs.js";
+import { DebrisField, shardFan } from "./world/debris.js";
 import { ambientTemperature } from "./survival/temperature.js";
 import { Campfire } from "./survival/campfire.js";
 import { CookingJournal, isCookable } from "./survival/cooking.js";
@@ -80,6 +81,9 @@ export class Game {
         this.inventory = new Inventory({ bus: this.bus });
         this.cookJournal = new CookingJournal({ bus: this.bus });
         this.particles = new Particles();
+        // Тела, у которых есть последствия: поваленное бревно, осыпь, кусок
+        // стены. Секунды жизни, в сейв не пишутся — world/debris.js.
+        this.debris = new DebrisField();
         this.tracks = new Tracks();
         this.fires = new Map();          // `${zoneId}:${tx},${ty}` -> Campfire
         this.look = normalizeLook();
@@ -481,10 +485,123 @@ export class Game {
                                                             mat.leaf || "#7fa24f", Math.round(6 + heft * 8));
             this.camera.shake(FX.shake.fell * heft, FX.shake.fellTime);
         }
+        // Развал. Куда падать, решает рельеф: ствол валится под уклон, а если
+        // площадка ровная — от героя наружу (он стоял со той стороны, с которой
+        // бил). Осколки идут веером по той же оси и ложатся там, где упали.
+        this.breakIntoDebris(obj, def, tall);
         obj.depleted = true;
         this.zone.removeSolid(obj);              // its footprint goes with it
         this.bus.emit("world:harvest", { kind: obj.kind, drops });
         startPickup(this, obj);
+    }
+
+    /**
+     * Уклон в точке, как направление «вниз по склону» в экранных координатах.
+     * Берётся из того же playableRelief, по которому renderer сортирует кадр и
+     * по которому герой съезжает с горы: второй модели рельефа здесь не нужно.
+     * На ровном месте возвращает null — тогда направление задаёт удар.
+     */
+    downhillAt(x, y) {
+        const relief = this.zone?.playableRelief;
+        if (!relief || !relief.heightAt) return null;
+        const e = 10;
+        const gx = relief.heightAt(x + e, y) - relief.heightAt(x - e, y);
+        const gy = relief.heightAt(x, y + e) - relief.heightAt(x, y - e);
+        const len = Math.hypot(gx, gy);
+        if (len < 0.5) return null;                      // площадка, не склон
+        return { x: -gx / len, y: -gy / len, steep: Math.min(1, len / (2 * e)) };
+    }
+
+    /**
+     * Проп рассыпается на тела. `tall` — высота в пикселях: она задаёт, откуда
+     * летят куски (сверху ствола) и насколько они тяжёлые.
+     */
+    breakIntoDebris(obj, def, tall, opts = {}) {
+        if (!this.debris) return 0;
+        const drops = (def.drops || []).map((d) => d[0]);
+        // Камень рассыпается в осыпь — это то, ради чего физика вообще что-то
+        // меняет в мире: у разбитого валуна остаётся то, что можно подобрать
+        // руками. Дерево не оставляет ничего: лежачего бревна в PROPS нет, а
+        // «бревно-проп» без kind либо не имел бы коллизии, либо стал бы
+        // бесконечным источником брёвен. Дырка в каталоге, а не в физике.
+        const stone = drops.includes("stone");
+        const wood = drops.includes("log") || drops.includes("plank") || drops.includes("hay");
+        const slope = this.downhillAt(obj.x, obj.y);
+        // Направление падения: склон важнее удара — так дерево, поваленное на
+        // косогоре, честно уходит вниз, а не висит над обрывом.
+        let dx, dy;
+        if (slope) { dx = slope.x; dy = slope.y; }
+        else {
+            // Удар: от героя прочь. Иначе поваленное дерево каждый раз падает
+            // тому на ноги, кто его валит, а это не физика, а наказание.
+            const ax = obj.x - this.player.x, ay = (obj.y - this.player.y) * 0.6;
+            const al = Math.hypot(ax, ay) || 1;
+            dx = ax / al; dy = ay / al;
+        }
+        const len = Math.hypot(dx, dy) || 1;
+        dx /= len; dy /= len;
+        const mass = Math.max(0.4, Math.min(4, tall / 30));
+        const shards = shardFan([], obj.x, obj.y - tall * 0.62, {
+            // Кусков немного, но каждый — крупный: четыре щепки от сосны читаются
+            // как конфетти, два полена — как распад ствола.
+            count: wood ? 3 : 3,
+            dir: Math.atan2(dy, dx),
+            spread: slope ? 0.5 : 0.9,
+            power: 90 + mass * 55,
+            lift: 70 + tall * 1.4,
+            scale: Math.max(0.5, Math.min(1.15, tall / 46)),
+            mass,
+            kind: wood ? "log" : "scree",
+            becomes: stone && obj.kind !== "beach_pebbles" ? "scree" : null,
+            hit: tall >= 34 && wood ? { radius: 30, damage: 5 + mass * 4 } : null,
+            rng: this.rng
+        });
+        for (const s of shards) this.debris.spawn(s.x, s.y, s);
+        this.bus.emit("world:collapse", { kind: obj.kind, x: obj.x, y: obj.y, shards: shards.length });
+        return shards.length;
+    }
+
+    /**
+     * Тело легло: тяжёлое остаётся в мире пропом, лёгкое поднимает пыль и
+     * исчезает. Отдельный метод — потому что «что оставляет после себя обломок»
+     * это правило мира, а не физики.
+     */
+    settleDebris(body) {
+        const kind = body.becomes;
+        body.becomes = null;
+        this.particles.dust(body.x, body.y, 3, "rgba(150,138,116,0.7)");
+        if (!kind || !this.zone) return;
+        const tx = Math.floor(body.x / TILE_SIZE), ty = Math.floor(body.y / TILE_SIZE);
+        if (this.zone.objects.some((o) => !o.removed && o.tx === tx && o.ty === ty)) return;
+        const def = propDef(kind);
+        const obj = { kind, tx, ty, x: body.x, y: body.y, variant: 0, fallen: true, lift: 0 };
+        this.zone.objects.push(obj);
+        if (def && def.block) this.zone.addSolid(obj, Math.max(6, def.block * 0.6));
+        this.bus.emit("world:debris-rested", { kind, x: body.x, y: body.y });
+    }
+
+    /**
+     * Шаг физики. На паузе (панель, сон, фон вкладки) тела не падают: иначе
+     * открытая сумка превращает спил дерева в «бревно прилетело, пока ты
+     * выбирал верёвку», и это было бы уже не игра, а лотерея.
+     */
+    stepDebris(dt, paused = false) {
+        if (paused || !this.debris || this.debris.count === 0) return;
+        const map = this.zone && this.zone.map;
+        this.debris.step(dt, {
+            relief: this.zone && this.zone.playableRelief ? this.zone.playableRelief : null,
+            isWater: map ? (x, y) => tileInfo(map.at(x, y)).liquid : null,
+            player: this.player,
+            splash: (x, y) => this.particles.chips(x, y, "rgba(196,222,238,0.85)", 6),
+            onHitPlayer: (body, dmg) => {
+                const took = this.needs.hurt(dmg, "debris");
+                if (took <= 0) return;
+                this.particles.emote(this.player.x, this.player.y - 26, "💢");
+                this.hud.toast(`Тебя задел обломок (−${Math.round(took)})`, "🪵");
+                this.camera.shake(FX.shake.hit, FX.shake.hitTime);
+            },
+            onRest: (body) => this.settleDebris(body)
+        });
     }
 
     lootChest(obj) {
@@ -789,6 +906,8 @@ export class Game {
             }
         }
 
+        this.stepDebris(dt, worldPaused);
+
         // A foot planted: kick up dust the colour of the ground it landed on.
         // Driven by the leg phase, so the puff is always under the boot.
         if (this.player.stepEvent) {
@@ -1033,6 +1152,7 @@ export class Game {
             windAngle: this.weather.windAngle,
             windStrength: this.windStrength === undefined ? WIND_BY_WEATHER.clear : this.windStrength,
             particles: this.particles,
+            debris: this.debris,
             tracks: this.tracks,
             fires: this.localFires,
             look: this.look,
@@ -1123,17 +1243,23 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
         // Стиль пропов мира включается так же, как стиль героя: ?props3d=off
         // возвращает процедурные кривые, ?props3d=on заставляет 3D-спрайты даже
         // если среда их не потянула (причина видна в prop3dStatus()).
-        const propsMode = new URLSearchParams(window.location.search).get("props3d");
+        // ?props3dTone=winter|autumn|wet|snowwet|plain — кадр в другом тоне, чем
+        // диктует сезон: сравнивать погоду удобно на одном и том же дереве.
+        
         const props3d = await import("./render/props3d.js");
-        if (propsMode === "off" || propsMode === "vector") props3d.PROPS3D.enabled = false;
-        if (propsMode === "on") props3d.PROPS3D.enabled = true;
+        // Флаги читает props3d.readFlags — тот же разбор, что видит dev-панель,
+        // чтобы «что включено» не пришлось описывать в двух местах.
+        const flags = props3d.readFlags(window.location.search);
+        if (flags.enabled !== undefined) props3d.PROPS3D.enabled = flags.enabled;
+        if (flags.tone) props3d.setPropTone(flags.tone);
         // Штамп сборки: без него «правки не доехали» и «правки не видно»
         // выглядят одинаково. Здесь ровно то, что реально загрузилось.
         try {
             const st = props3d.prop3dStatus();
             const stamp = document.createElement("div");
             stamp.id = "buildStamp";
-            stamp.textContent = `сборка 71 · 3D-пропы: ${st.enabled ? st.kinds : 0} (${st.reason || "ок"})`;
+            stamp.textContent = `сборка 72 · 3D-пропы: ${st.enabled ? st.kinds : 0} (${st.reason || "ок"})`
+                + ` · свет ${st.sun ? `×${st.sun.amp.toFixed(2)}/${st.sun.amb.toFixed(2)}` : "—"} · тон ${st.tone || "авто"}`;
             (document.body || document.documentElement).appendChild(stamp);
         } catch { /* штамп — не игра */ }
         window.GAME = game;

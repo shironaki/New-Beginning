@@ -274,9 +274,11 @@ function bakeKind(kind) {
                 kn[i * 3] = normals[v * 3]; kn[i * 3 + 1] = normals[v * 3 + 1]; kn[i * 3 + 2] = normals[v * 3 + 2];
                 if (ku) { ku[i * 2] = uv[v * 2]; ku[i * 2 + 1] = uv[v * 2 + 1]; }
             });
-            return { positions: kp, normals: kn, uv: ku, count: keep.length, indices: null, factor, texture, doubleSided: true };
+            return { positions: kp, normals: kn, uv: ku, count: keep.length, indices: null, factor, texture,
+                 doubleSided: true };
         }
-        return { positions: pos, normals, uv: texture ? uv : null, count: used, indices: null, factor, texture, doubleSided: true };
+        return { positions: pos, normals, uv: texture ? uv : null, count: used, indices: null, factor, texture,
+                 doubleSided: true };
     });
     const w = Math.ceil(height * PX_PER_UNIT * 2) + 8;            // ширина с запасом на тень и уклон
     const h = Math.ceil(height * PX_PER_UNIT) + 10;
@@ -296,7 +298,40 @@ function bakeKind(kind) {
         if (y < y0) y0 = y; if (y > y1) y1 = y;
     }
     if (x1 < x0) throw new Error(`${file}: модель не попала в кадр — проверьте distance/pxPerUnit`);
-    return { kind, file, height, frame, w: frame.width, h: frame.height, bbox: { x0, y0, x1, y1 } };
+    const bbox = { x0, y0, x1, y1 };
+    if (flag("debug")) {
+        // Доля пикселей по сторонам света: если «верх» (3) почти не набрал, кадр
+        // смотрит на модель ребром и солнце на пропе будет не видно.
+        const fs = faceStats(frame, bbox), tot = fs.reduce((a, c) => a + c, 0) || 1;
+        console.log(`   [dbg] ${kind} face ` + fs.slice(1)
+            .map((c, i) => `${FACE_LABEL[i]}:${Math.round((c / tot) * 100)}%`).join(" "));
+    }
+    return { kind, file, height, frame, w: frame.width, h: frame.height, bbox };
+}
+
+/* ----------------------------- стороны света ----------------------------- */
+
+/**
+ * Куда смотрит грань в этом пикселе: 1..6 = +X,-X,+Y,-Y,+Z,-Z (0 = пусто).
+ * Код пишет растеризатор (frame.face в tools/raster3d.js), а мы несём его во
+ * второй RLE-поток. Рантайму хватает шести значений, чтобы пересчитать яркость
+ * палитры под текущее солнце и погоду: нормалей в растре нет, а «эта часть
+ * кроны смотрит на восток» — есть. Наслоение по 3 слоя (side/rough/ao/wear),
+ * как в RAMPS героя, сюда не переносится: у пропа 10 тонов на весь лист, и
+ * вторая дорожка тона просто съела бы бюджет спрайтов.
+ */
+const FACE_LABEL = ["east", "west", "up", "down", "back", "front"];
+
+function faceStats(frame, bbox) {
+    const seen = new Array(7).fill(0);
+    for (let y = bbox.y0; y <= bbox.y1; y += 1) {
+        for (let x = bbox.x0; x <= bbox.x1; x += 1) {
+            const i = y * frame.width + x;
+            if (frame.data[i * 4 + 3] < 40) continue;
+            seen[frame.face[i]] += 1;
+        }
+    }
+    return seen;
 }
 
 /* ------------------------------ квантизация ------------------------------ */
@@ -424,6 +459,23 @@ if (EMIT) {
     const kinds = {};
     for (const e of entries) {
         const bw = e.bbox.x1 - e.bbox.x0 + 1, bh = e.bbox.y1 - e.bbox.y0 + 1;
+        // Дорожка граней: та же вырезка по габоиту и те же RLE-пары, что и у
+        // цвета — рантайм идёт по двум потокам параллельно и не должен разъехаться.
+        const faces = [];
+        {
+            const arr = new Uint8Array(bw * bh);
+            for (let y = 0; y < bh; y += 1) {
+                const src = (e.bbox.y0 + y) * e.w + e.bbox.x0;
+                for (let x = 0; x < bw; x += 1) arr[y * bw + x] = e.frame.face[src + x];
+            }
+            for (let i = 0; i < arr.length; i += 1) {
+                const value = arr[i];
+                let run = 1;
+                while (i + run < arr.length && arr[i + run] === value && run < 255) run += 1;
+                faces.push(run, value);
+                i += run - 1;
+            }
+        }
         // Поток режем по габоиту, а не по кадру: в файле должно жить ровно то, что
         // рисуется. Иначе рантайму пришлось бы знать размеры кадра (w*PPU*2+8),
         // а это уже удвоение контракта между запеккой и игрой.
@@ -447,7 +499,8 @@ if (EMIT) {
             anchorX: +(-(e.bbox.x0 + bw / 2) / PX_PER_UNIT).toFixed(3),
             anchorY: 0, foot: 0, height: +e.height.toFixed(2),
             palette: e.q.pal.map(c => `#${c.map(v => v.toString(16).padStart(2, "0")).join("")}`),
-            stream: Buffer.from(bytes).toString("base64")
+            stream: Buffer.from(bytes).toString("base64"),
+            faces: Buffer.from(faces).toString("base64")
         };
     }
     const body = `/**

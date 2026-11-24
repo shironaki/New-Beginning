@@ -28,6 +28,8 @@
  *   --dir <direction>  face down|up|left|right for attachment review
  *   --hero3d off       векторный герой вместо запечённых 3D-кадров (для сравнения)
  *   --fallen           freeze a fallen pose after simulation
+ *   --chop [kind]      сломать ближайший проп и снять кадр, когда обломки ещё
+ *                      в воздухе (без kind — ближайшее дерево)
  *   --light-fire       light the closest campfire with a log
  *   --torch            put a lit torch in the hero's hand
  *   --tool <id>        equip any item in a hand (--hand left|right)
@@ -39,6 +41,7 @@ import path from "node:path";
 import { ShimCanvas, encodePNG } from "./canvas-shim.js";
 import { installDOM } from "../tests/dom-harness.js";
 import { ZONES } from "../js/world/regions.js";
+import { propDef } from "../js/sandbox/gather.js";
 
 const args = process.argv.slice(2);
 const flag = (name, dflt = null) => {
@@ -218,6 +221,39 @@ if (flag("look", null) !== null) {
         if (k && v) look[k] = v;
     }
     game.look = look;
+}
+// --chop: разрушение в кадре. Берём ближайший проп нужного вида, выдаём
+// инструмент, добиваем одним ударом и прогоняем несколько кадров — так видно и
+// направление падения, и то, где обломки лягут.
+const chop = flag("chop", null);
+if (chop) {
+    const want = typeof chop === "string" ? chop : null;
+    const near = (o) => Math.hypot(o.x - game.player.x, o.y - game.player.y);
+    const cands = (game.zone.objects || []).filter((o) => {
+        if (o.removed || o.depleted) return false;
+        const def = propDef(o.kind);
+        if (!def) return false;
+        // Без аргумента — любое дерево; с аргументом — любой проп, даже тот,
+        // для которого инструмент не нужен (осыпь, куст).
+        return want ? o.kind === want : def.tool === "axe";
+    });
+    cands.sort((a, b) => near(a) - near(b));
+    const target = cands[0];
+    if (target) {
+        // Инструмент — это предмет с тегом инструмента: «axe» в сумке нет и не
+        // будет, ищется axe_stone. Кадр не должен молча показывать «ничего».
+        const tool = propDef(target.kind).tool;
+        if (tool) game.inventory.add(`${tool}_stone`, 1);
+        target.hits = 0.01;
+        game.harvest(target);
+        if (!target.depleted) console.log("⚠️  --chop: проп не сломался — проверьте инструмент");
+        const shot = num("chop-frames", 22);
+        for (let i = 0; i < shot; i += 1) { game.update(1 / 60); game.render(); }
+        game.camera.snapTo(game.player.x, game.player.y - 8);
+        console.log(`🪓 ${target.kind}: обломков в воздухе ${game.debris ? game.debris.count : "?"}`);
+    } else {
+        console.log("⚠️  --chop: рядом нет подходящего пропа");
+    }
 }
 game.camera.zoom = num("zoom", 2.6);
 game.camera.snapTo(game.player.x, game.player.y - 8);

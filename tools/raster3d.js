@@ -32,13 +32,18 @@ export function makeFrame(width, height) {
         // Чей это материал (0 = не дорожка). По этой маске запекка раскладывает пиксели
         // по цветовым дорожкам образа: куртка/кожа/волосы красятся в рантайме, а не
         // в пекарне, — см. RAMP_* в tools/hero-bake.js.
-        track: new Uint8Array(width * height)
+        track: new Uint8Array(width * height),
+        // Куда смотрит грань в этой точке (0 = не задано, 1..6 = +X,-X,+Y,-Y,+Z,-Z
+        // в системе взгляда). 3D-проп — это растр, нормалей в нём нет, а рантайму
+        // нужно что-то, по чему пересчитывать светотень под солнце и погоду.
+        face: new Uint8Array(width * height)
     };
 }
 
 export function clearFrame(frame, rgba = null) {
     frame.depth.fill(-Infinity);
     frame.track.fill(0);
+    frame.face.fill(0);
     if (rgba) {
         for (let i = 0; i < frame.data.length; i += 4) {
             frame.data[i] = rgba[0]; frame.data[i + 1] = rgba[1];
@@ -221,6 +226,12 @@ function rasterTriangle(frame, view, viewN, uv, tex, factor, L, light, i0, i1, i
             let nz = w0 * viewN[i0 * 3 + 2] + w1 * viewN[i1 * 3 + 2] + w2 * viewN[i2 * 3 + 2];
             const nl = Math.hypot(nx, ny, nz) || 1;
             nx /= nl; ny /= nl; nz /= nl;
+            // Код стороны света по интерполированной нормали. Считается здесь, а не
+            // в пекарне, потому что только здесь есть нормаль каждого пикселя.
+            const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+            if (ay >= ax && ay >= az) frame.face[idx] = ny > 0 ? 3 : 4;
+            else if (ax >= az) frame.face[idx] = nx > 0 ? 1 : 2;
+            else frame.face[idx] = nz > 0 ? 5 : 6;
             const ndl = Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]);
             const hemi = 0.5 + 0.5 * ny;
             const ambR = light.ambient + light.sky[0] * hemi + light.ground[0] * (1 - hemi);

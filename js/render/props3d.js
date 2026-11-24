@@ -16,7 +16,10 @@
  * Что здесь СОЗНАТЕЛЬНО не сделано:
  *   • один ракурс на проп (не четыре, как у героя): билборду хватает, а лист
  *     вырастает вчетверо;
- *   • следы солнца по сторонам света — свет «на камеру» зашит в запекку;
+ *   • свет по сторонам света есть (faceFactors + дорожка граней в листе), но это
+ *     перекраска палитры, а не пересъёмка: длинной тени от пропа на проп здесь
+ *     нет, как нет и self-shadowing — для этого пришлось бы печь кадр на каждый
+ *     час суток, и лист перестал бы быть листом;
  *   • `hits` (проп оббит наполовину) — геометрии для «подрезанного» дерева в
  *     паке нет, остаёмся на процедурной отрисовке для побитых пропов.
  */
@@ -39,8 +42,99 @@ const SWAY = new Set(["pine", "spruce", "tree_pine", "dead_tree", "ancient_oak",
 export const PROPS3D = {
     enabled: true,
     reason: null,
-    stats: { sprites: 0, drawn: 0, skipped: 0 }
+    // Принудительный тон кадра для сравнения стилей: ?props3dTone=winter.
+    tone: null,
+    stats: { sprites: 0, drawn: 0, skipped: 0, lit: 0 }
 };
+
+/**
+ * Свет. Запечённый кадр несёт в себе один раз выбранный источник света, и на
+ * этом его возможности кончаются — но у каждого пикселя есть код грани, куда
+ * она смотрит (1..6 = восток, запад, верх, низ, тыл, перед; см. faceStats в
+ * tools/prop-bake.js). Этого хватает, чтобы проп честно реагировал на время
+ * суток и погоду: перекраска палитры по коду грани, без новых тонов и без
+ * дизеринга.
+ */
+const FACE_N = [
+    [0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]
+];
+
+/** Свет по умолчанию = тот, что уже запечён: поправок нет (amp=0 → все 1). */
+export function defaultSun() { return { dir: 0.55, elev: 0.72, amp: 0, amb: 1, rough: 0 }; }
+
+/**
+ * Коэффициент яркости для каждой грани при данном солнце. Чистая функция: её
+ * можно гонять в node, где канваса нет, — и тестовый файл гоняет именно её.
+ * `x,y` нужны только для шероховатости (рассеянный свет бури кладёт на пиксель
+ * стабильный шум, а не случайный, иначе проп кипит).
+ */
+export function faceFactors(sun, x = 0, y = 0, out = [1, 1, 1, 1, 1, 1, 1]) {
+    const amp = Math.max(0, Math.min(1, sun.amp || 0));
+    if (amp <= 0 && !sun.rough && sun.amb === 1) {
+        for (let b = 1; b <= 6; b += 1) out[b] = sun.amb;
+        return out;
+    }
+    const az = Math.max(-1, Math.min(1, sun.dir)) * Math.PI / 2;
+    const el = Math.max(0, Math.min(1, sun.elev)) * Math.PI / 2;
+    const sx = Math.sin(az) * Math.cos(el), sy = Math.sin(el), sz = Math.cos(az) * Math.cos(el);
+    // Буря и дождь: свет рассеянный, тени нет, но мокрая кора бликует пятнами.
+    const jitter = sun.rough ? (hash2(x, y, 91) - 0.5) * sun.rough * 0.5 : 0;
+    // Свет перераспределяется, а не добавляется: 0.42 — уровень, при котором
+    // коэффициент равен 1. Без этой привязки полдень «съедал» половину яркости
+    // всего кадра (боковые грани при вертикальном солнце не освещены вовсе), и
+    // ночной лес оказывался светлее дневного.
+    for (let b = 1; b <= 6; b += 1) {
+        const n = FACE_N[b];
+        const ndl = Math.max(0, n[0] * sx + n[1] * sy + n[2] * sz);
+        const raw = Math.max(0.34, Math.min(1.9, 1 + amp * (ndl - 0.42) * 1.15));
+        out[b] = Math.max(0.12, sun.amb * raw * (1 + jitter));
+    }
+    return out;
+}
+
+/** Квант солнца: слишком мелкое изменение не стоит пересборки кадра. */
+function sunKey(sun) {
+    const q = (v, k) => Math.round((v || 0) * k);
+    return `${q(sun.dir, 8)}:${q(sun.elev, 8)}:${q(sun.amp, 8)}:${q(sun.amb, 16)}:${q(sun.rough, 4)}`;
+}
+
+let SUN = defaultSun();
+let SUN_KEY = sunKey(SUN);
+
+/**
+ * Играть светом: игра вызывает это из applySky, когда солнце встало/село или
+ * погода сменилась. true — свет изменился достаточно, чтобы кадры перепеклись.
+ */
+export function setPropSun(next) {
+    const sun = { ...SUN, ...next };
+    const key = sunKey(sun);
+    if (key === SUN_KEY) return false;
+    SUN = sun; SUN_KEY = key;
+    CACHE.clear();               // иначе на экране останутся кадры прошлого света
+    PROPS3D.stats.lit = 0;
+    return true;
+}
+export function propSun() { return SUN; }
+
+/** Ручной тон для сравнения стилей: ?props3dTone=winter / setPropTone(null). */
+export function setPropTone(tone) {
+    if (PROPS3D.tone === (tone || null)) return false;
+    PROPS3D.tone = tone || null;
+    return true;
+}
+
+/** Тон и свет из адресной строки — чтобы владелец сравнивал их без пересборки. */
+export function readFlags(search = "") {
+    let p = null;
+    try { p = new URLSearchParams(search); } catch { return {}; }
+    const mode = p.get("props3d");
+    const out = {};
+    if (mode === "off" || mode === "vector") out.enabled = false;
+    else if (mode === "on" || mode === "model") out.enabled = true;
+    const tone = p.get("props3dTone") || p.get("propsTone");
+    if (tone) out.tone = tone;
+    return out;
+}
 
 const CACHE = new Map();
 
@@ -89,6 +183,22 @@ function tintPal(pal, tone) {
     return out;
 }
 
+/** Второй поток того же RLE — коды граней. null, если лист ещё старый. */
+function decodeFaces(entry) {
+    if (!entry.faces) return null;
+    const total = entry.w * entry.h;
+    const raw = typeof entry.faces === "string" ? base64Bytes(entry.faces) : entry.faces;
+    const face = new Uint8Array(total);
+    let p = 0;
+    for (let i = 0; i + 1 < raw.length && p < total; i += 2) {
+        const run = raw[i], value = raw[i + 1];
+        const end = Math.min(total, p + run);
+        face.fill(value, p, end);
+        p = end;
+    }
+    return p >= total || p > 0 ? face : null;
+}
+
 function makeCanvas(w, h) {
     if (typeof document !== "undefined" && document.createElement) {
         const cv = document.createElement("canvas");
@@ -98,9 +208,19 @@ function makeCanvas(w, h) {
     return null;
 }
 
+/** Тон кадра из погоды/сезона; PROPS3D.tone перекрывает всё (?props3dTone). */
+function resolveTone(opts = {}) {
+    if (PROPS3D.tone) return PROPS3D.tone;
+    const season = opts.season || "spring";
+    const wet = opts.weather === "rain" || opts.weather === "storm" || (opts.groundWet || 0) > 0.4;
+    const snowy = season === "winter" || opts.weather === "snow";
+    return snowy ? (wet ? "snowwet" : "winter")
+        : (season === "autumn" ? "autumn" : (wet ? "wet" : "plain"));
+}
+
 /** Кадр kind×тон: decode → RGBA → офскрин-канвас. null, если среды для канваса нет. */
 function spriteFor(kind, tone) {
-    const key = `${kind}|${tone}`;
+    const key = `${kind}|${tone}|${SUN_KEY}`;
     if (CACHE.has(key)) return CACHE.get(key);
     const entry = PROP_SPRITES[kind];
     if (!entry) return null;
@@ -109,14 +229,31 @@ function spriteFor(kind, tone) {
     const ctx = cv.getContext("2d");
     const pal = tintPal(entry.palette, tone);
     const index = decodeStream(entry);
+    // Свет по коду грани: при запечённом солнце (amp=0) поправок нет и кадр
+    // идёт ровно так, как запечён. Шероховатость добавляется уже по пикселям —
+    // иначе два соседних пикселя кроны светятся одинаково и «буря» не видна.
+    const sun0 = defaultSun();
+    const shade = SUN.amp > 0 || SUN.amb !== 1 || SUN.rough > 0
+        ? (SUN.amp === 0 && SUN.rough === 0 ? null : faceFactors({ ...SUN, rough: 0 }))
+        : null;
+    const face = shade ? decodeFaces(entry) : (sun0 && null);
     const img = ctx.createImageData ? ctx.createImageData(entry.w, entry.h) : { data: new Uint8ClampedArray(entry.w * entry.h * 4), width: entry.w, height: entry.h };
     for (let i = 0; i < index.length; i += 1) {
         const v = index[i];
         if (!v) continue;
         const c = pal[v - 1] || [255, 0, 255];
         const o = i * 4;
-        img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
+        let k = 1;
+        if (shade && face) {
+            const b = face[i];
+            if (b) {
+                k = shade[b];
+                if (SUN.rough) k *= 1 + (hash2(i % entry.w, (i / entry.w) | 0, 91) - 0.5) * SUN.rough * 0.5;
+            }
+        }
+        img.data[o] = c[0] * k; img.data[o + 1] = c[1] * k; img.data[o + 2] = c[2] * k; img.data[o + 3] = 255;
     }
+    if (shade && face) PROPS3D.stats.lit += 1;
     // Снег лежит сверху: в каждой колонке первые сплошные пиксели получают шапку.
     if (tone === "winter" || tone === "snowwet") {
         for (let x = 0; x < entry.w; x += 1) {
@@ -157,9 +294,7 @@ export function paintProp3D(ctx, obj, opts = {}) {
     if (!PROP_SPRITES[kind]) return false;
     if (obj.hits) { PROPS3D.stats.skipped += 1; return false; }
     const season = opts.season || "spring";
-    const wet = opts.weather === "rain" || opts.weather === "storm" || (opts.groundWet || 0) > 0.4;
-    const snowy = season === "winter" || opts.weather === "snow";
-    const tone = snowy ? (wet ? "snowwet" : "winter") : (season === "autumn" ? "autumn" : (wet ? "wet" : "plain"));
+    const tone = resolveTone(opts);
     const sprite = spriteFor(kind, tone) || spriteFor(kind, "plain");
     if (!sprite) return false;
 
@@ -196,6 +331,82 @@ export function paintProp3D(ctx, obj, opts = {}) {
     return true;
 }
 
+/**
+ * Свет пропов из игрового состояния. Направление берётся у того же SUN, что
+ * читает процедурная отрисовка (tilesart.setSun кладёт тень «от солнца», а нам
+ * нужен сам источник — это тот же вектор с обратным знаком), поэтому кривые и
+ * запечённые кадры никогда не разойдутся по сторонам света. Высота солнца
+ * восстанавливается из dy: setSun считает её как 0.30 + (1−elev)·0.36.
+ */
+export function propSunFor(state = {}, sun = { dx: 0.55, dy: 0.42, alpha: 1 }) {
+    const elev = Math.max(0, Math.min(1, 1 - (sun.dy - 0.30) / 0.36));
+    const day = Math.max(0, Math.min(1, sun.alpha === undefined ? 1 : sun.alpha));
+    const weather = state.weather || "clear";
+    // Пасмурно и дождь: свет рассеянный — контраст граней падает, зато мокрая
+    // кора ловит блики (rough). Гроза — максимум рассеивания и максимум блеска.
+    const diffuse = { clear: 1, wind: 0.86, cloudy: 0.7, rain: 0.5, storm: 0.34, fog: 0.28, snow: 0.55 }[weather];
+    const amp = (0.34 + 0.66 * elev) * (diffuse === undefined ? 0.8 : diffuse) * (0.35 + 0.65 * day);
+    const wet = weather === "rain" || weather === "storm" || (state.groundWet || 0) > 0.4;
+    return {
+        dir: Math.max(-1, Math.min(1, -sun.dx)),
+        elev,
+        amp,
+        amb: 0.62 + 0.38 * day,
+        rough: (wet ? 0.34 : 0) + (weather === "storm" ? 0.3 : 0) + (weather === "snow" ? 0.12 : 0)
+    };
+}
+
+/**
+ * Падающий обломок (world/debris.js): тот же запечённый кадр, но с подъёмом над
+ * землёй, поворотом и затуханием в момент «лёг». Рисуется в том же translate,
+ * что и пропы: x,y уже приведены к ноге объекта, z — пиксели над ней.
+ */
+export function paintDebris3D(ctx, body, opts = {}) {
+    if (!PROPS3D.enabled) return false;
+    const kind = PROP_SPRITES[body.kind] ? body.kind : "log";
+    if (!PROP_SPRITES[kind]) return false;
+    const tone = resolveTone(opts);
+    const sprite = spriteFor(kind, tone) || spriteFor(kind, "plain");
+    if (!sprite) return false;
+    const scale = (body.scale || 1) * (body.size || 1);
+    const settle = body.settling > 0 ? Math.max(0, body.settling / (opts.settle || 0.18)) : 1;
+    ctx.save();
+    ctx.translate(0, -Math.round(body.z));
+    ctx.globalAlpha = Math.min(1, 0.25 + settle * 0.75) * (body.sinking > 0 ? 0.55 : 1);
+    if (body.ang) ctx.rotate(body.ang);
+    // Тело в полёте чуть разворачивается по вертикали: иначе квадратный кадр
+    // выглядит наклейкой, а не куском дерева.
+    ctx.scale(scale, scale * (1 - Math.abs(Math.sin(body.ang || 0)) * 0.08));
+    const w = sprite.w, h = sprite.h;
+    // Тень под телом — по земле, не по телу: при подъёме она остаётся внизу.
+    ctx.save();
+    ctx.rotate(-(body.ang || 0));
+    ctx.scale(1, 1);
+    ctx.fillStyle = `rgba(14,12,10,${(0.20 - Math.min(0.14, body.z / 900)).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, w * 0.32 * scale, w * 0.12 * scale, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    ctx.drawImage(sprite.canvas, Math.round(-w / 2), Math.round(-h / 2) + Math.round(h * 0.18));
+    ctx.restore();
+    PROPS3D.stats.drawn += 1;
+    return true;
+}
+
+/**
+ * Пиксели кадра так, как они лягут на экран: для dev-панели и для тестов,
+ * которым важно, что свет меняет растр, а не только числа в конфиге.
+ * null — если канвасов в среде нет (node без shim-документа).
+ */
+export function propSpritePixels(kind, tone = resolveTone({})) {
+    const sprite = spriteFor(kind, tone);
+    if (!sprite) return null;
+    const ctx = sprite.canvas.getContext("2d");
+    if (!ctx || !ctx.getImageData) return null;
+    const img = ctx.getImageData(0, 0, sprite.w, sprite.h);
+    return { w: sprite.w, h: sprite.h, tone, data: img.data };
+}
+
 /** Сколько пропов вообще умеют в 3D — для dev-панели и тестов. */
 export function prop3dKinds() { return Object.keys(PROP_SPRITES); }
 export function prop3dHas(kind) { return !!PROP_SPRITES[kind]; }
@@ -205,6 +416,9 @@ export function prop3dStatus() {
         enabled: PROPS3D.enabled && typeof document !== "undefined" && !!document.createElement,
         reason: PROPS3D.reason,
         kinds: prop3dKinds().length,
+        tone: PROPS3D.tone,
+        sun: { ...SUN },
+        sunKey: SUN_KEY,
         sprites: CACHE.size,
         pxPerUnit: PPU
     };

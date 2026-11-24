@@ -16,9 +16,9 @@ import { projectGround } from "./projected-ground.js";
 import { syncWaterState, waterIce } from "../world/water-state.js";
 import { CHUNK } from "../world/tilemap.js";
 import { TILE_SIZE, TILES } from "../world/tiles.js";
-import { paintTile, paintSnowGround, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, setWalker, setBreeze, propHeight, propTone, puddleScreenPath, coastReach } from "./tilesart.js";
+import { paintTile, paintSnowGround, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, setWalker, setBreeze, propHeight, propTone, puddleScreenPath, coastReach, SUN } from "./tilesart.js";
 import { drawCharacter, drawSleeping, toolAttachment } from "./character.js";
-import { paintProp3D } from "./props3d.js";
+import { paintProp3D, paintDebris3D, propSunFor, setPropSun } from "./props3d.js";
 import { LightMap, LIGHT } from "./lighting.js";
 import { bakeTerrain, drawTerrainWater } from "./terrain.js";
 import { drawWetGround } from "./surface.js";
@@ -656,6 +656,12 @@ export class Renderer {
             if (!cam.isVisible(obj.x, obj.y, 100)) continue;
             drawables.push({ y: obj.y, x: obj.x, ord: drawables.length, kind: "prop", obj });
         }
+        // Падающие обломки идут в ту же сортировку, что и пропы: бревно, летящее
+        // перед героем, обязано закрыть его, а не висеть поверх всего кадра.
+        for (const body of (state.debris && state.debris.list) || []) {
+            if (!cam.isVisible(body.x, body.y - body.z, 90)) continue;
+            drawables.push({ y: body.y, x: body.x, ord: drawables.length, kind: "debris", obj: body });
+        }
         for (const ent of (state.entities || [])) {
             if (!cam.isVisible(ent.x, ent.y, 70)) continue;
             drawables.push({ y: ent.y, x: ent.x, ord: drawables.length, kind: "entity", obj: ent });
@@ -674,6 +680,21 @@ export class Renderer {
 
         for (const d of drawables) {
             const o = d.obj;
+            if (d.kind === "debris") {
+                // Тело летит над землёй, поэтому нога — это y, а рисунок — на z
+                // выше; окклюзия ему не нужна, он и так на виду у всего кадра.
+                const s = cam.worldToScreen(o.x, o.y);
+                ctx.save();
+                ctx.translate(s.x, s.y);
+                ctx.scale(cam.zoom, cam.zoom);
+                paintDebris3D(ctx, o, {
+                    time: this.time, season: this.season,
+                    weather: state.weather, groundWet: state.groundWet,
+                    settle: state.debris.cfg ? state.debris.cfg.settle : 0.18
+                });
+                ctx.restore();
+                continue;
+            }
             if (d.kind === "prop" && !o.depleted) this._occlude(o, player, dt);
             const s = cam.worldToScreen(o.x, o.y);
             ctx.save();
@@ -1059,6 +1080,10 @@ export class Renderer {
         const season = state.underground ? "spring" : state.clock ? state.clock.season.key : "spring";
         if (season !== this.season) { this.season = season; this.invalidate(); }
         setSun(state.clock ? state.clock.minute / 60 : 12, state.clock ? state.clock.daylight : 1);
+        // Тот же свет уходит в запечённые кадры пропов: перекос светотени по
+        // граням и блик на мокром. setPropSun сама решает, насколько сильно
+        // сдвинулось солнце, чтобы перепечь кадры, — вызов каждый кадр бесплатен.
+        setPropSun(propSunFor(state, SUN));
         const ctx = this.ctx;
         ctx.fillStyle = "#0a0c10";
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);

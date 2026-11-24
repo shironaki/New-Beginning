@@ -140,6 +140,20 @@ export class Needs {
         return this;
     }
 
+    /**
+     * Урон извне: упавшее дерево, камень из осыпи, удар зверя. Единственная
+     * дверь, через которую здоровье убывает быстро — остальное идёт через
+     * healthEffects() и_rate_ на минуту.
+     */
+    hurt(amount = 0, cause = "") {
+        const before = this.health;
+        this.health = clamp(this.health - Math.max(0, amount), 0, 100);
+        if (this.bus && this.health < before) {
+            this.bus.emit("needs:hurt", { amount: before - this.health, cause });
+        }
+        return before - this.health;
+    }
+
     rest(minutes) { this.fatigue = clamp(this.fatigue - 0.25 * minutes, 0, 100); return this; }
 
     /** Revive after a collapse: alive again, but weakened. */
