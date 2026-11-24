@@ -11,7 +11,7 @@
  *     (that was the grid artefact in the first pass).
  *   • Props are silhouettes first: dark base, mid body, one bright rim light.
  */
-import { T, tileInfo } from "../world/tiles.js";
+import { T, tileInfo, isLiquid } from "../world/tiles.js";
 import { receivesSnow } from "../world/surface.js";
 
 /* ------------------------------------------------------------------ utils */
@@ -1283,7 +1283,7 @@ export function paintEdges(ctx, map, tx, ty, px, py, size, season = "spring") {
     // A pond painted tile by tile is a rectangle, and nothing in nature is.
     // Where two neighbours on the same corner are the other medium, that
     // corner gets rounded off with their ground.
-    const hereLiquid = tileInfo(here).liquid === true;
+    const hereLiquid = isLiquid(here);
     // How much water is this tile part of? A single puddle gets no coastline
     // at all — carving bays and foam into one tile draws a bright frame.
     let liquidAround = 0;
@@ -1295,7 +1295,7 @@ export function paintEdges(ctx, map, tx, ty, px, py, size, season = "spring") {
     const isPuddle = hereLiquid && liquidAround <= 1;
     const atSide = (dx, dy) => {
         const id = map.get(tx + dx, ty + dy);
-        return { id, liquid: tileInfo(id).liquid === true, void: id === T.VOID };
+        return { id, liquid: isLiquid(id), void: id === T.VOID };
     };
     for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
         const a = atSide(sx, 0), b = atSide(0, sy), d = atSide(sx, sy);

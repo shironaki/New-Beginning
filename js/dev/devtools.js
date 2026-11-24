@@ -364,13 +364,13 @@ export function installDevTools(game, win = window) {
         add("Стиль героя");
         const heroState = el("span", { className: "val" });
         const setHero = async (mode) => {
+            // Только через стиль игры: тот же путь, что у пункта меню «Вид мира».
+            // Раньше панель писала прямо в HERO3D — выбор в панели исчезал после
+            // перезагрузки, а меню показывало другое значение, чем экран.
+            if (typeof game.setStyle !== "function") { toast("панель не нашла game.setStyle — правку не применить"); return; }
+            await game.setStyle({ hero3d: mode });
             const hero3d = await import("../render/hero3d.js");
-            if (mode === "off") { hero3d.HERO3D.enabled = false; hero3d.HERO3D.quality = "off"; }
-            else {
-                hero3d.HERO3D.enabled = true;
-                const ok = await hero3d.hero3dQuality(mode);
-                if (!ok) toast(`режим «${mode}» недоступен — играет ${hero3d.HERO3D.quality}`);
-            }
+            if (hero3d.HERO3D.error) toast(`${hero3d.HERO3D.error} — играет ${hero3d.HERO3D.quality}`);
             refreshHeroState();
         };
         function refreshHeroState() {

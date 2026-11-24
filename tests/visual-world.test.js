@@ -18,6 +18,8 @@ import { DEFAULT_LOOK } from "../js/render/character.js";
 import { META as HERO_META, PALETTE_HEX as HERO_PALETTE, STREAMS as HERO_STREAMS } from "../js/render/heroframes.js";
 import { heroLookPalette } from "../js/render/hero3d.js";
 import { PROP_SPRITES, PROP_META } from "../js/render/propsprites.js";
+import { META as GRADED_META } from "../js/render/heroframes.js";
+const GRADED_CELL = GRADED_META.cell;
 import { paintProp3D, prop3dStatus, PROPS3D } from "../js/render/props3d.js";
 import { PROP_HEIGHT, propHeight } from "../js/render/tilesart.js";
 import { unsupportedBy } from "../js/world/debris.js";
@@ -468,6 +470,32 @@ test("which hand is behind the body comes from the frame's depth buffer, not the
     }
 });
 suite("props from real 3D packs");
+test("возврат с гладкого рига обратно на грейд действительно меняет источник", async () => {
+    // Пункт меню «Герой» обязан переключаться в обе стороны: hero3dQuality —
+    // единственная функция, которая ставит активный источник, и если звать её
+    // только для «smooth», обратный выбор молча оставляет игрока на гладком
+    // листе (именно так и было в первой версии setStyle).
+    const hero3d = await import("../js/render/hero3d.js");
+    const was = hero3d.HERO3D.quality;
+    assert.ok(await hero3d.hero3dQuality("smooth"), "гладкий лист обязан быть доступен");
+    assert.eq(hero3d.HERO3D.quality, "smooth");
+    assert.ok(hero3d.hero3dLinkCount() > 0, "у гладкого источника связки обязаны быть");
+    assert.ok(await hero3d.hero3dQuality("grade"), "грейд обязан вернуться тем же вызовом");
+    assert.eq(hero3d.HERO3D.quality, "grade");
+    // Сетка у обоих выходов общая — на этом держится посадка предмета в руке.
+    assert.eq(hero3d.HERO_SPRITE_CELL.w, GRADED_CELL.w);
+    assert.eq(hero3d.HERO_SPRITE_CELL.h, GRADED_CELL.h);
+    // Оба выхода обязаны предлагать один и тот же набор связок: иначе
+    // переключение «в одну сторону» работало бы, а обратно — нет.
+    let links = null;
+    for (const mode of ["grade", "smooth"]) {
+        assert.ok(await hero3d.hero3dQuality(mode), `режим «${mode}» должен быть доступен`);
+        assert.not(hero3d.HERO3D.error, `режим «${mode}» не должен оставлять ошибку: ${hero3d.HERO3D.error}`);
+        if (links === null) links = hero3d.hero3dLinkCount();
+        assert.eq(hero3d.hero3dLinkCount(), links, `набор связок в «${mode}» должен совпадать`);
+    }
+    if (was !== "grade") await hero3d.hero3dQuality(was);
+});
 test("запеченный кадр пропа рисуется, а побитый и незнакомый уходят к кривым", () => {
     // Среде нужен createElement('canvas'): в браузере он есть, в тесте — подстава.
     if (!globalThis.document) {

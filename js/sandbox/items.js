@@ -85,7 +85,6 @@ export function itemDef(id) { return ITEMS[id] || null; }
 export function itemName(id) { const d = ITEMS[id]; return d ? d.name : id; }
 export function itemEmoji(id) { const d = ITEMS[id]; return d ? d.emoji : "❔"; }
 export function hasTag(id, tag) { const d = ITEMS[id]; return !!d && d.tags.includes(tag); }
-export function itemsWithTag(tag) { return Object.keys(ITEMS).filter((id) => hasTag(id, tag)); }
 
 /** Burn time in in-game seconds a fuel item contributes to a fire. */
 export function burnValue(id) { const d = ITEMS[id]; return d && d.burn ? d.burn : 0; }

@@ -114,7 +114,6 @@ export function setPropSun(next) {
     PROPS3D.stats.lit = 0;
     return true;
 }
-export function propSun() { return SUN; }
 
 /**
  * Ручной тон для сравнения стилей: ?props3dTone=winter или пункт меню «Вид
@@ -410,9 +409,9 @@ export function propSpritePixels(kind, tone = resolveTone({})) {
     return { w: sprite.w, h: sprite.h, tone, data: img.data };
 }
 
-/** Сколько пропов вообще умеют в 3D — для dev-панели и тестов. */
-export function prop3dKinds() { return Object.keys(PROP_SPRITES); }
-export function prop3dHas(kind) { return !!PROP_SPRITES[kind]; }
+/** Сколько пропов вообще умеют в 3D — считает prop3dStatus, наружу отдаётся
+ * готовый объект статуса: панель и тесты читают одно и то же, а не два API. */
+function prop3dKinds() { return Object.keys(PROP_SPRITES); }
 /** Причина отказа, если включённый режим ничего не нарисовал. */
 export function prop3dStatus() {
     return {

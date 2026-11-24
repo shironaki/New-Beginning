@@ -33,6 +33,10 @@ const opt = (name, value) => {
 };
 
 const WHO = opt("who", "male") === "female" ? "Female" : "Male";
+// Куда писать лист. По умолчанию — игровой модуль, но женская (или любая
+// экспериментальная) пачка обязана иметь свой путь: иначе `--emit` поверх
+// js/render/heroframes.js тихо затирает то, чем играет весь мир.
+const EMIT_FILE = String(opt("emit-file", "js/render/heroframes.js"));
 const SS = Number(opt("ss", 4));              // супер-сэмплинг относительно пикселя спрайта
 const BODY_UNITS = Number(opt("bodyUnits", 42));    // рост героя в единицах мира (charspec BODY.total)
 // Пикселей спрайта на единицу мира. 2.4 — это UI.baseZoom, то есть на экране
@@ -1325,7 +1329,7 @@ function emit(baked) {
     const lines = [];
     lines.push("/**");
     lines.push(" * js/render/heroframes.js — ЗАПЕЧЕННЫЕ кадры героя. Не править руками: файл собирает");
-    lines.push(" * `node tools/hero-bake.js --emit` из 3D-рига Quaternius (CC0). Источник —");
+    lines.push(" * `node tools/hero-bake.js --emit [--emit-file <путь>]` из 3D-рига Quaternius (CC0). Источник —");
     lines.push(" * dev/character-style-lab/assets/quaternius; палитра — та же, что в лаборатории.");
     lines.push(" *");
     lines.push(" * Хранение: на кадр — RLE-пары (длина, значение); 0 = пусто, 1…N — индекс палитры,");
@@ -1343,10 +1347,11 @@ function emit(baked) {
     lines.push("/** base64-RLE на связку (направление,пока): \"down/idle\": \"…\" */");
     lines.push(`export const STREAMS = ${JSON.stringify(encodeFlat(streams), null, 0)};`);
     lines.push("");
-    fs.writeFileSync("js/render/heroframes.js", `${lines.join("\n")}\n`);
-    const bytes = fs.statSync("js/render/heroframes.js").size;
+    fs.mkdirSync(path.dirname(path.resolve(EMIT_FILE)), { recursive: true });
+    fs.writeFileSync(EMIT_FILE, `${lines.join("\n")}\n`);
+    const bytes = fs.statSync(EMIT_FILE).size;
     const shipped = DIRS.length * shipPoses.length;
-    console.log(`EMIT: js/render/heroframes.js — ${(bytes / 1024).toFixed(0)} KB, ${shipped} связок (${shipPoses.join(", ")})`);
+    console.log(`EMIT: ${EMIT_FILE} — ${(bytes / 1024).toFixed(0)} KB, ${shipped} связок (${shipPoses.join(", ")})`);
 }
 
 /** Гладкий выход — отдельный модуль: сравнивать варианты удобнее, не трогая то, что играет сейчас. */

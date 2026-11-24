@@ -806,8 +806,12 @@ export class Game {
         if (this.style.hero3d !== undefined) {
             const hero3d = await import("./render/hero3d.js");
             hero3d.HERO3D.enabled = this.style.hero3d !== "off";
-            if (this.style.hero3d !== "off" && this.style.hero3d !== "grade") {
-                await hero3d.hero3dQuality(this.style.hero3d);
+            // Любой режим, включая «grade», goes through hero3dQuality: иначе
+            // возвращение с гладкого листа обратно на грейд молча оставляло
+            // игрока на гладком (источник переключает только сама функция).
+            if (this.style.hero3d !== "off") {
+                const ok = await hero3d.hero3dQuality(this.style.hero3d);
+                if (!ok) this.hud.toast(`${hero3d.HERO3D.error || "режим недоступен"} — играет ${hero3d.HERO3D.quality}`, "⚠️");
             }
         }
         this.renderer.invalidate();

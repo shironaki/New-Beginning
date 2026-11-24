@@ -314,8 +314,6 @@ export const ACTION = {
     strikeAmp: 1.15
 };
 
-/** Animation states. hit/down are reserved for the combat phase. */
-export const STATES = ["idle", "walk", "run", "action", "hit", "down"];
 
 /* --- shared easing: one curve everywhere -------------------------------- */
 

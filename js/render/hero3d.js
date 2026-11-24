@@ -326,12 +326,6 @@ export function heroHandAnchor(p, hand = "right", extra = {}) {
     return { x: point[0], y: point[1], gripX: point[0], gripY: point[1], angle, noMirror: follow, intensity: extra.intensity ?? 1, behind: !!extra.behind, hand };
 }
 
-/** Позиция хвата в кадре отражения/подсветки — то же самое, но без предмета. */
-export function heroHandPositions(p) {
-    const right = heroHandAnchor(p, "right");
-    const left = heroHandAnchor(p, "left");
-    return { right, left };
-}
 
 // Геометрия общая у обоих выходов (одна запекка, одна сетка), поэтому константа
 // снимается с грейда и не зависит от того, какой режим включён в данный момент.
@@ -340,7 +334,5 @@ export const HERO_SPRITE_CELL = {
     pxPerUnit: SOURCES.grade.meta.pxPerUnit, footPad: SOURCES.grade.meta.footPad
 };
 
-/** Есть ли у активного выхода этот кадр — нужно инструментам сравнения. */
-export const hero3dHas = (key) => Boolean(SRC.streams[key]);
 /** Сколько связок есть у активного выхода — «ноль» означает, что модуль пуст. */
 export const hero3dLinkCount = () => Object.keys(SRC.streams).length;

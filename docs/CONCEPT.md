@@ -201,7 +201,7 @@
 ### Что меняем
 | Вместо этого | Делаем так |
 |-----------|-------------|
-| Монолитный `main.js` ~1000 строк | **ECS-lite**: сущность + компоненты + системы (`tick(dt)`), каждая система — файл |
+| Монолитный `main.js` ~1000 строк | **plain-объекты + системы-функции**: сущность — объект в `zone.objects`, система — функция над ним. Раньше здесь значился «ECS-lite» (`core/ecs.js`): каркас был написан, тестирован и никем не использовался — убран в ревизии блока 73 (`npm run deadcode`), потому что мир на hundreds of entities не требует ни архетипов, ни битсетов, а два способа описывать сущность хуже одного |
 | Один слой тайлов | **5 слоёв**: земля → детали → объекты (y-sort) → погода → свет/цвет |
 | Прямое рисование | Кэш-атласы, запечённые чанки, dirty-rect |
 | Освещение «вуаль поверх всего» | **Lightmap-буфер**: суточный градиент + точечные источники (костёр, окна, факел) с мягким затуханием и мерцанием |
@@ -232,7 +232,7 @@ ES-модульный JavaScript + Canvas 2D. Это выполнимо: всё 
   index.html
   css/
   js/
-    core/        loop.js  ecs.js  events.js  rng.js  save.js  time.js
+    core/        loop.js  events.js  rng.js  save.js  time.js
     engine/      camera.js  input.js  audio.js  atlas.js  chunkcache.js
     render/      renderer.js  tiles.js  lighting.js  weatherfx.js
                  character.js  buildings.js  furniture.js  particles.js  ui-canvas.js

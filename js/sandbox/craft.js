@@ -215,14 +215,3 @@ export function craftSourceHint(kind) {
 
 const TOOL_GATES = { axe: "топор", pick: "кирка", knife: "нож" };
 
-/** Теги, по которым панель собирает подсказку «что это даёт». */
-export function outputHint(id) {
-    const d = itemDef(id);
-    if (!d) return "";
-    if (d.tool) return `инструмент: ${d.tool}`;
-    if (d.light) return `свет ${d.light}`;
-    if (d.insulation) return `тепло +${d.insulation}°C`;
-    if (d.dmg) return `урон ${d.dmg}`;
-    if (d.tags.includes("build")) return "стройматериал";
-    return d.tags[0] || "";
-}

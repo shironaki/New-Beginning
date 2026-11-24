@@ -76,11 +76,6 @@ export const PROPS = {
 
 export function propDef(kind) { return PROPS[kind] || null; }
 
-/** Does this prop yield resources at all? */
-export function isHarvestable(kind) {
-    const d = propDef(kind);
-    return !!d && Array.isArray(d.drops);
-}
 
 /** Tool required ("axe" | "pick" | null for bare hands). */
 export function requiredTool(kind) {

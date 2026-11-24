@@ -734,9 +734,6 @@ export function fitSheet(ctx, sheet, dwWorld, dhWorld) {
     return { canvas: small, w: dw / dev, h: dh / dev, kx: dw / sheet.width, ky: dh / sheet.height };
 }
 
-/** Для тестов и превью: сколько размеров листа сейчас в кэше. */
-export const fitCacheSize = () => FIT_CACHE.size;
-export const __tintSheet = () => tintSheet;
 
 /** Ватерлиния: кольцо на поверхности, вода поверх ботинок, пена у тела. */
 function paintWaterline(ctx, idle) {
