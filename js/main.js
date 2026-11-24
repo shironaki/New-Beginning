@@ -635,10 +635,12 @@ export class Game {
         if (!def) return null;
         const at = this.player.facingPoint(22);
         const tx = Math.floor(at.x / TILE_SIZE), ty = Math.floor(at.y / TILE_SIZE);
-        if (this.zone.isBlockedTile(tx, ty)) return null;
-        if (this.zone.propSolidAt(at.x, at.y)) return null;
-        if (this.zone.objects.some((o) => !o.removed && o.tx === tx && o.ty === ty && (propDef(o.kind)?.solid || propDef(o.kind)?.interact)))
-            return null;
+        // Единственный вопрос «свободна ли клетка» в мире уже есть, и он знает
+        // про воду, обрывы и границы карты. Свои две проверки сюда добавляться
+        // не должны: они неминуемо отстают от isFree.
+        if (!this.zone.isFree(tx, ty)) return null;
+        if (this.zone.objects.some((o) => !o.removed && o.tx === tx && o.ty === ty && propDef(o.kind)?.interact))
+            return null;      // два костра в одной яме — это один костёр с двумя панелями
         const obj = { kind, tx, ty, x: at.x, y: at.y, built: true };
         this.zone.objects.push(obj);
         if (def.block) this.zone.addSolid(obj, def.block);

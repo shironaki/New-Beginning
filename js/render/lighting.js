@@ -233,12 +233,13 @@ export class LightMap {
      * `warmth` 0..1 shifts the glow from pale to firelight-orange.
      * Entries come from a pool: queueing a light allocates nothing.
      */
-    add(x, y, radius, { intensity = 1, warmth = 0.7, flicker = 0, phase = 0 } = {}) {
+    add(x, y, radius, { intensity = 1, warmth = 0.7, flicker = 0, phase = 0, glow = 1 } = {}) {
         const n = this.lights.length;
         let L = this._pool[n];
         if (!L) { L = { x: 0, y: 0, radius: 0, intensity: 1, warmth: 0.7, flicker: 0, phase: 0 }; this._pool[n] = L; }
         L.x = x; L.y = y; L.radius = radius;
         L.intensity = intensity; L.warmth = warmth; L.flicker = flicker;
+        L.glow = Math.max(0, Math.min(1, glow));
         // The phase must come from the WORLD, not from the screen: keyed off
         // L.x the flicker changed speed whenever the camera moved.
         L.phase = phase;
@@ -316,14 +317,14 @@ export class LightMap {
             const sprite = L.warmth > 0.5 ? HALO_WARM : HALO_COOL;
             if (!sprite) break;
             const rad = L.radius * LIGHT.halo.scale * this._flick(L, time, 1.3);
-            target.globalAlpha = Math.min(0.85, LIGHT.halo.alpha * L.intensity * amb.alpha * 1.45);
+            target.globalAlpha = Math.min(0.85, LIGHT.halo.alpha * L.intensity * amb.alpha * 1.45 * L.glow);
             target.drawImage(sprite, L.x - rad, L.y - rad, rad * 2, rad * 2);
         }
         // The hot core: a small bright disc over the embers themselves.
         for (const L of this.lights) {
             if (L.warmth <= 0.5 || !HALO_WARM) continue;
             const rad = L.radius * LIGHT.core.scale * this._flick(L, time, 2.1);
-            target.globalAlpha = Math.min(0.9, LIGHT.core.alpha * L.intensity * amb.alpha * 1.55);
+            target.globalAlpha = Math.min(0.9, LIGHT.core.alpha * L.intensity * amb.alpha * 1.55 * L.glow);
             target.drawImage(HALO_WARM, L.x - rad, L.y - rad, rad * 2, rad * 2);
         }
         target.globalAlpha = 1;

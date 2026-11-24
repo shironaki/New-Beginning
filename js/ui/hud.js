@@ -1,7 +1,7 @@
 /**
  * UI — HUD and panels (DOM over the canvas).
  *
- * Diegetic and quiet: four need bars in the corner, a sky card with the clock,
+ * Diegetic and quiet: five need bars in the corner, a sky card with the clock,
  * a hotbar, one line of objective, and toasts for everything else. Panels
  * (fire, backpack, journal) are built on demand from plain objects, so game
  * systems never touch the DOM themselves.
@@ -12,14 +12,15 @@ import { UI, applyTheme } from "./uispec.js";
 const NEED_DEFS = [
     { key: "food",    label: "Сытость",   icon: "🍖", color: "#d8a24a" },
     { key: "warmth",  label: "Тепло",     icon: "🔥", color: "#e07a3c" },
-    { key: "fatigue", label: "Силы",      icon: "⚡", color: "#6fb3e0", invert: true },
+    { key: "fatigue", label: "Бодрость",      icon: "⚡", color: "#6fb3e0", invert: true },
+    { key: "stamina", label: "Выносливость", icon: "🏃", color: "#8fbc78" },
     { key: "health",  label: "Здоровье",  icon: "❤️", color: "#cc4a5a" }
 ];
 
 export class HUD {
-    constructor(root, { onHotbar = () => {}, onAction = () => {} } = {}) {
+    constructor(root, { onHand = () => {}, onAction = () => {}, onBag = () => {}, onCondition = () => {} } = {}) {
         this.root = root;
-        this.onHotbar = onHotbar;
+        this.actions = { onHand, onBag, onCondition };
         this.onAction = onAction;
         this.els = {};
         this.panelOpen = null;
@@ -32,7 +33,13 @@ export class HUD {
     _build() {
         this.root.innerHTML = `
           <div class="hudTop">
-            <div class="needsCard" id="needsCard"></div>
+            <div class="needsDisclosure" id="needsDisclosure">
+              <button type="button" class="needSummary" id="needSummary" aria-expanded="false" aria-controls="needsDetails"></button>
+              <div class="needsDetails" id="needsDetails" hidden>
+                <div class="needsCard" id="needsCard"></div>
+                <button type="button" id="conditionButton" class="conditionButton">Состояние и причины</button>
+              </div>
+            </div>
             <div class="skyCard" id="skyCard"></div>
           </div>
           <div class="objectiveBar" id="objectiveBar"></div>
@@ -55,6 +62,7 @@ export class HUD {
 
         const $ = (id) => this.root.querySelector("#" + id);
         this.els = {
+            disclosure: $("needsDisclosure"), summary: $("needSummary"), details: $("needsDetails"),
             needs: $("needsCard"), sky: $("skyCard"), objective: $("objectiveBar"),
             toasts: $("toasts"), hotbar: $("hotbar"),
             panelWrap: $("panelWrap"), panel: $("panel"), panelTitle: $("panelTitle"),
@@ -78,7 +86,7 @@ export class HUD {
         this.els.needs.innerHTML = NEED_DEFS.map((n) => `
           <div class="need" data-need="${n.key}" role="meter" aria-label="${n.label}"
                aria-valuemin="0" aria-valuemax="100">
-            <span class="needIcon" aria-hidden="true">${n.icon}</span>
+            <span class="needIcon" aria-hidden="true">${n.icon}</span><span class="needLabel"><span class="needFull">${n.label}</span><span class="needShort">${n.key === "stamina" ? "Выносл." : n.label}</span></span>
             <div class="needBarOuter"><div class="needBar" style="background:${n.color}"></div></div>
             <span class="needVal"></span>
           </div>`).join("");
@@ -92,24 +100,47 @@ export class HUD {
             this.needVals[n.key] = row.querySelector(".needVal");
         });
 
-        // Hotbar slots.
-        this.els.hotbar.innerHTML = Array.from({ length: 6 }, (_, i) =>
-            `<div class="slot" data-slot="${i}"><span class="slotKey">${i + 1}</span><span class="slotIcon"></span><span class="slotN"></span></div>`
-        ).join("");
-        this.els.hotbar.querySelectorAll(".slot").forEach((el) => {
-            el.addEventListener("click", () => this.onHotbar(Number(el.dataset.slot)));
+        $("conditionButton").addEventListener("click", () => this.actions.onCondition());
+        this.els.summary.addEventListener("click", () => { this.needsPinned = !this.needsPinned; this.setNeedsExpanded(this.needsPinned); });
+        this.els.disclosure.addEventListener("pointerenter", (e) => { if (e.pointerType !== "touch") this.setNeedsExpanded(true); });
+        this.els.disclosure.addEventListener("pointerleave", () => { if (!this.needsPinned) this.setNeedsExpanded(false); });
+        this.els.disclosure.addEventListener("focusin", () => this.setNeedsExpanded(true));
+        this.els.disclosure.addEventListener("focusout", (e) => {
+            if (!this.els.disclosure.contains?.(e.relatedTarget)) { this.needsPinned = false; this.setNeedsExpanded(false); }
         });
+        this.els.disclosure.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); this.needsPinned = false; this.setNeedsExpanded(false); }
+        });
+        this.els.hotbar.setAttribute("role", "group");
+        this.els.hotbar.setAttribute("aria-label", "Предметы под рукой");
+        this.els.hotbar.innerHTML = `<button type="button" id="leftHand" class="handSlot"></button>
+            <button type="button" id="rightHand" class="handSlot"></button>
+            <button type="button" id="quickBag" class="quickIcon" aria-label="Рюкзак">🎒</button>`;
+        for (const side of ["left", "right"]) {
+            const button = $(side + "Hand"); this.els[side + "Hand"] = button;
+            button.addEventListener("click", () => this.actions.onHand(side));
+        }
+        this.els.quickBag = $("quickBag");
+        this.els.quickBag.addEventListener("click", () => this.actions.onBag());
+    }
+
+    setNeedsExpanded(open) {
+        this.els.details.hidden = !open;
+        this.els.summary.setAttribute("aria-expanded", String(open));
+        if (!open) this.needsPinned = false;
     }
 
     /** Per-frame refresh. */
     update(state) {
         const { needs, clock, weather, inventory, objective, zoneName } = state;
+        let worst = null;
         for (const n of NEED_DEFS) {
-            const raw = needs[n.key];
+            const raw = n.key === "stamina" ? (state.player?.stamina ?? 100) : needs[n.key];
             const v = Math.max(0, Math.min(100, n.invert ? 100 - raw : raw));
             const bar = this.needBars[n.key];
             const row = this.needRows[n.key];
             const pct = Math.round(v);
+            if (!worst || v < worst.value) worst = { ...n, value: v, pct };
             bar.style.width = v + "%";
             // A number as well as a bar: "half full" is not a plan, "38 %" is.
             if (this.needVals[n.key].textContent !== pct + "%") {
@@ -120,6 +151,11 @@ export class HUD {
             row.classList.toggle("critical", v < UI.bar.critical);
         }
 
+        const summaryHTML = `<span class="summaryIcon" aria-hidden="true">${worst.icon}</span><span>${worst.label}</span><b>${worst.pct}%</b><span aria-hidden="true">⌄</span><i style="width:${worst.pct}%;background:${worst.color}"></i>`;
+        if (this.els.summary.innerHTML !== summaryHTML) this.els.summary.innerHTML = summaryHTML;
+        this.els.summary.setAttribute("aria-label", `${worst.label} ${worst.pct}%. Все показатели`);
+        this.els.summary.classList.toggle("critical", worst.value < UI.bar.critical);
+
         const w = weather.info;
         this.els.sky.innerHTML = `
           <div class="skyTime">${clock.clockString()}</div>
@@ -127,15 +163,18 @@ export class HUD {
           <div class="skyMeta">${w.emoji} ${w.name} · ${Math.round(state.ambient)}°C</div>
           <div class="skyZone">${zoneName || ""}</div>`;
 
-        this.els.objective.textContent = objective ? "🎯 " + objective : "";
+        // Owner requested no persistent hints/objectives over the scene. Journal retains the goal.
+        this.els.objective.textContent = state.objective || "";
 
-        inventory.hotbar.forEach((slot, i) => {
-            const el = this.els.hotbar.querySelector(`[data-slot="${i}"]`);
-            el.classList.toggle("active", inventory.activeSlot === i);
-            el.querySelector(".slotIcon").textContent = slot ? itemEmoji(slot.id) : "";
-            el.querySelector(".slotN").textContent = slot && slot.n > 1 ? slot.n : "";
-            el.title = slot ? itemName(slot.id) : "";
-        });
+        for (const side of ["left", "right"]) {
+            const h = inventory.hands?.[side], button = this.els[side + "Hand"];
+            const html = `<small class="handSide">${side === "left" ? "Л" : "П"}</small><span aria-hidden="true">${h ? itemEmoji(h.id) : "✋"}</span>${h?.n > 1 ? `<b class="handCount">${h.n}</b>` : ""}`;
+            if (button.innerHTML !== html) button.innerHTML = html;
+            button.classList.toggle("dominant", inventory.dominant === side);
+            button.classList.toggle("using", inventory.handAction?.side === side);
+            button.disabled = !!inventory.handAction;
+            button.setAttribute("aria-label", `${side === "left" ? "Левая" : "Правая"} рука: ${h ? itemName(h.id) : "свободна"}`);
+        }
         return this;
     }
 
@@ -168,7 +207,7 @@ export class HUD {
      */
     _focusables() {
         const rows = (this._panelRows || []).filter((b) => !b.disabled);
-        return rows.concat(this.els.panelClose);
+        return rows.concat(this.els.panelClose.disabled ? [] : [this.els.panelClose]);
     }
 
     _move(step) {
@@ -213,11 +252,16 @@ export class HUD {
      * @param {string} title
      * @param {Array} rows [{ label, icon, hint, disabled, action }] or { html }
      */
-    openPanel(title, rows, name = "panel") {
+    openPanel(title, rows, name = "panel", { locked = false, pauses = ["session", "handedness", "appearance"].includes(name) } = {}) {
+        this.setNeedsExpanded(false);
+        this.panelLocked = locked; this.panelPauses = pauses;
+        this.els.panelWrap.setAttribute("data-panel", name);
+        this.els.panelClose.disabled = locked;
         this.panelOpen = name;
         this.els.panelTitle.textContent = title;
         this.els.panelBody.innerHTML = "";
         this._panelRows = [];
+        let tabs, grid;
         for (const row of rows) {
             if (row.html !== undefined) {
                 const d = document.createElement("div");
@@ -227,14 +271,20 @@ export class HUD {
                 continue;
             }
             const b = document.createElement("button");
-            b.className = "panelRow" + (row.disabled ? " disabled" : "");
+            b.className = "panelRow" + (row.tab ? " bagTab" : row.item ? " bagItem" : "") + (row.disabled ? " disabled" : "");
             if (row.disabled) { b.disabled = true; b.tabIndex = -1; }
             b.innerHTML = `<span class="rowIcon">${row.icon || "•"}</span>
                            <span class="rowLabel">${row.label}</span>
                            <span class="rowHint">${row.hint || ""}</span>`;
             if (!row.disabled) b.addEventListener("click", () => { row.action && row.action(); });
             this._panelRows.push(b);
-            this.els.panelBody.appendChild(b);
+            if (row.tab) {
+                if (!tabs) { tabs = document.createElement("nav"); tabs.className = "bagTabs"; tabs.setAttribute("aria-label", "Категории"); this.els.panelBody.appendChild(tabs); }
+                b.setAttribute("aria-pressed", String(!!row.selected)); tabs.appendChild(b);
+            } else if (row.item) {
+                if (!grid) { grid = document.createElement("div"); grid.className = "bagGrid"; this.els.panelBody.appendChild(grid); }
+                grid.appendChild(b);
+            } else this.els.panelBody.appendChild(b);
         }
         this.els.panelWrap.classList.remove("hidden");
         // Hand the keyboard over, and remember where to hand it back.
@@ -245,8 +295,10 @@ export class HUD {
         return this;
     }
 
-    closePanel() {
-        this.panelOpen = null;
+    closePanel(force = false) {
+        if (this.panelLocked && !force) return this;
+        this.panelLocked = false; this.els.panelClose.disabled = false;
+        this.panelOpen = null; this.panelPauses = false;
         this.els.panelWrap.classList.add("hidden");
         // Back to the game: the canvas, or whatever opened the panel.
         const back = this._returnFocus;
@@ -284,6 +336,7 @@ export function fireRows(fire, inventory, actions) {
     const rows = [];
     rows.push({ html: `<b>${fire.lit ? "🔥 Костёр горит" : "🪵 Кострище"}</b><br>
         <small>${fire.status()}</small>` });
+    if (fire.exposure) rows.push({ html: `<small>${fire.exposure.label} · сырость ${Math.round(fire.damp * 100)}%<br>Тепло ${Math.round(fire.intensity * 100)}% · расход ×${fire.exposure.burn.toFixed(2)}</small>` });
 
     // What is physically in the pit, newest on top, with how much is left.
     if (fire.stack && fire.stack.length) {
@@ -294,7 +347,7 @@ export function fireRows(fire, inventory, actions) {
         rows.push({ html: `<small>В костре:<br>${pile}</small>` });
     }
 
-    const fuels = inventory.list().filter((s) => (itemDef(s.id) || {}).burn > 0);
+    const fuels = [...new Map(inventory.list().map(s => [s.id, { id: s.id, n: inventory.count(s.id) }])).values()].filter((s) => (itemDef(s.id) || {}).burn > 0);
     for (const f of fuels.slice(0, 4)) {
         rows.push({
             icon: itemEmoji(f.id),
@@ -314,7 +367,7 @@ export function fireRows(fire, inventory, actions) {
     }
 
     // Raw food that the fire can actually do something with.
-    const cookables = inventory.list().filter((s) => actions.canCook(s.id));
+    const cookables = [...new Map(inventory.list().map(s => [s.id, { id: s.id, n: inventory.count(s.id) }])).values()].filter((s) => actions.canCook(s.id));
     for (const c of cookables.slice(0, 5)) {
         rows.push({
             icon: itemEmoji(c.id),
@@ -332,15 +385,19 @@ export function fireRows(fire, inventory, actions) {
             : slot.state === "burnt" ? "Сгорело — выбросить"
             : `Жарится… ${pct}%`;
         rows.push({
-            icon: itemEmoji(slot.state === "raw" ? slot.itemId : slot.result),
+            icon: itemEmoji(!slot.ready ? slot.itemId : slot.result),
             label, hint: `вертел ${i + 1}`,
             action: () => actions.takeFromSpit(i)
         });
     });
 
+    if (!fire.hasPot) rows.push({ icon: "🫕", label: "Установить котелок",
+        hint: inventory.has("pot") ? "Из рюкзака" : "Нужна посуда", disabled: !inventory.has("pot"), action: () => actions.installPot?.() });
     if (fire.hasPot) {
         rows.push({ icon: "🫕", label: "Котелок", hint: fire.pot ? (fire.pot.done ? "готово" : "варится") : "пусто",
                     action: () => actions.openPot() });
     }
+    if (fire.spit.some(Boolean) || fire.pot) rows.push({ icon: "🔥", label: "Оставить готовиться",
+        action: () => actions.resume?.() });
     return rows;
 }

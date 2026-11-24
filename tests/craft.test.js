@@ -180,6 +180,26 @@ test("a refusal gives the materials back", () => {
     assert.eq(g.zone.objects.filter((o) => o.built).length, 0);
 });
 
+test("you cannot build into a wall", () => {
+    const g = boot();
+    // Не ищем конкретную воду: в этом сиде её может не быть. Берём любую
+    // клетку, которая строиться не пускает, но рядом с которой стоят, —
+    // это и есть стена (обрыв, глубокая вода, край карты).
+    let wall = null;
+    for (let ty = 1; ty < g.zone.h - 1 && !wall; ty++) for (let tx = 1; tx < g.zone.w - 1; tx++) {
+        if (g.zone.isFree(tx, ty)) continue;
+        if ([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => g.zone.isFree(tx + dx, ty + dy))) { wall = { tx, ty }; break; }
+    }
+    assert.ok(wall, "в тестовой локации нет ни одной недоступной клетки");
+    g.inventory.add("stone", 6); g.inventory.add("firewood", 4);
+    g.player.facingPoint = () => ({ x: wall.tx * TILE_SIZE + 16, y: wall.ty * TILE_SIZE + 16 });
+    assert.eq(g.buildProp("campfire"), null, "кострище влезло в стену");
+    assert.ok(startCraft(g, "campfire")); finish(g);
+    assert.eq(g.zone.objects.filter((o) => o.built).length, 0, "стройка сквозь отказ всё-таки встала");
+    assert.eq(g.inventory.count("stone"), 6, "отказ не вернул камни");
+    assert.eq(g.inventory.count("firewood"), 4, "отказ не вернул хворост");
+});
+
 test("fire-only recipes wait for a lit campfire", () => {
     const g = boot();
     g.inventory.add("firewood", 4); g.inventory.add("resin", 4);

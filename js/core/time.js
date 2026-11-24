@@ -132,6 +132,7 @@ export class GameClock {
         if (typeof data.day === "number") this.day = data.day;
         if (typeof data.scale === "number") this.scale = data.scale;
         this._lastHour = this.hour;
+        this._acc = 0;
         return this;
     }
 }
