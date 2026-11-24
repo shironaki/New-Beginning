@@ -18,63 +18,110 @@
  * Поселенцы и путники векторные: спрайты — только про героя, у них нет ни инвентаря,
  * ни отражения, ни права на 400 KB ассета на брата.
  */
-import { STREAMS, META, PALETTE_HEX } from "./heroframes.js";
+import { STREAMS as GRADED_STREAMS, META as GRADED_META, PALETTE_HEX as GRADED_PALETTE } from "./heroframes.js";
 import { RAMPS, shadeHex, spriteToolAngle, toolOutward } from "./charspec.js";
 
 const TAU = Math.PI * 2;
-const U = 1 / (META.pxPerUnit || 2);        // пиксель спрайта → единицы мира
-const CELL = META.cell;
-const TOP = -(CELL.h - META.footPad) * U;   // верх ячейки относительно линии стоп
-const W = CELL.w * U;
-const H = CELL.h * U;
-
-/** Готово ли включать спрайтовый режим. `false` у actor (`p.sprite === false`) выключает его точечно. */
-export const HERO3D = {
-    enabled: true,
-    get ready() { return typeof document !== "undefined" && Object.keys(STREAMS).length > 0; }
-};
-
-/* ------------------------------- декодирование ------------------------------ */
 
 /**
- * Палитра. Модуль приносит 72 цвета: общие (те, что в лаборатории стиля), обводку
- * и три цветовые дорожки — куртка, кожа, волосы. Дорожки в игре ПЕРЕСОБИРАЮТСЯ из
- * `look`: кадр помнит не цвет, а slot дорожки, поэтому сменить цвет куртки — это
- * заменить пять записей палитры, а не перепекать 188 кадров.
+ * Два выхода одной и той же запекки:
+ *   • «grade»  — js/render/heroframes.js: пиксельный грейд (дизеринг + обводка), то, что играет;
+ *   • «smooth» — js/render/herosmooth.js: тот же риг, тот же свет, та же сетка, но 14 тонов
+ *     на дорожку, без дизеринга и без обводки.
+ * Смысл раздвоения ровно один: сравнивать надо посадку одежды и силуэт, а не спорить
+ * о стиле вслепую. Ячейка, опора и якоря кистей у обоих выходов общие (их считает один
+ * прогон tools/hero-bake.js), поэтому переключение не сдвигает ни предмет в руке, ни
+ * тень, ни ватерлинию. Гладкий модуль весит ~300 КБ и грузится по требованию.
  */
+const SOURCES = {
+    grade: { name: "grade", streams: GRADED_STREAMS, meta: GRADED_META, paletteHex: GRADED_PALETTE, poses: new Map(), paletteKey: null },
+    smooth: null
+};
+
 const toRgb = (hex) => {
     const c = String(hex).replace("#", "");
     return [parseInt(c.slice(0, 2), 16), parseInt(c.slice(2, 4), 16), parseInt(c.slice(4, 6), 16)];
 };
-const BASE_PALETTE = PALETTE_HEX.map(toRgb);
-let paletteKey = null;
-let paletteRgb = BASE_PALETTE;
 
-function paletteFor(look) {
-    const ramps = META.ramps;
-    if (!ramps) return BASE_PALETTE;
+/** Всё, что источник выводит из своей META, считается один раз и живёт в нём же. */
+function bindSource(src) {
+    src.U = 1 / (src.meta.pxPerUnit || 2);            // пиксель спрайта → единицы мира
+    src.CELL = src.meta.cell;
+    src.TOP = -(src.meta.cell.h - src.meta.footPad) * src.U;
+    src.W = src.meta.cell.w * src.U;
+    src.H = src.meta.cell.h * src.U;
+    src.base = src.paletteHex.map(toRgb);
+    src.paletteRgb = src.base;
+    src.has = label => src.meta.poses.some(x => x.label === label);
+    src.framesOf = label => src.meta.poses.find(x => x.label === label)?.frames || 6;
+    return src;
+}
+let SRC = bindSource(SOURCES.grade);
+/** Позы, которых у гладкого выхода нет: не пропускать кадр, а честно упростить. */
+const SMOOTH_ALIAS = { run: "walk", attack: "chop", gather: "chop", torch: "idle" };
+
+/** Готово ли включать спрайтовый режим. `false` у actor (`p.sprite === false`) выключает его точечно. */
+export const HERO3D = {
+    enabled: true,
+    quality: "grade",
+    get ready() { return typeof document !== "undefined" && Object.keys(SRC.streams).length > 0; }
+};
+
+/**
+ * Сменить выход. Возвращает true, если источник доступен; при отсутствии
+ * herosmooth.js (его ещё не пропекли) тихо остаётся грейд — игра не должна
+ * падать из-за режима сравнения.
+ */
+export async function hero3dQuality(quality) {
+    if (quality === "grade") { SRC = SOURCES.grade; HERO3D.quality = "grade"; return true; }
+    if (quality !== "smooth") return false;
+    if (!SOURCES.smooth) {
+        try {
+            const mod = await import("./herosmooth.js");
+            SOURCES.smooth = bindSource({ name: "smooth", streams: mod.STREAMS, meta: mod.META, paletteHex: mod.PALETTE_HEX, poses: new Map(), paletteKey: null });
+        } catch (err) {
+            return false;
+        }
+    }
+    SRC = SOURCES.smooth;
+    HERO3D.quality = "smooth";
+    return true;
+}
+/** Поза ищется в активном источнике; чего в нём нет — упрощается, а не роняет спрайт. */
+const labelFor = (src, want) => (src.has(want) ? want : (src === SOURCES.smooth && SMOOTH_ALIAS[want]) || want);
+
+/* ------------------------------- декодирование ------------------------------ */
+
+/**
+ * Палитра. Грейд-модуль приносит 76 цветов: общие (те, что в лаборатории стиля), обводку
+ * и четыре цветовые дорожки — куртка, штаны, кожа, волосы. Дорожки в игре ПЕРЕСОБИРАЮТСЯ из
+ * `look`: кадр помнит не цвет, а slot дорожки, поэтому сменить цвет куртки — это
+ * заменить пять записей палитры, а не перепекать 188 кадров. У гладкого выхода дорожек
+ * нет: там цвет запечён сплошным веером из 14 тонов, и перекраска осознанно не работает.
+ */
+function paletteFor(look, src = SRC) {
+    const ramps = src.meta.ramps;
+    if (!ramps) return src.base;
     const names = Object.keys(ramps);
     const key = names.map(name => String((look && look[RAMPS[name] && RAMPS[name].look]) || "")).join("|");
-    if (key === paletteKey) return paletteRgb;
-    const out = BASE_PALETTE.map(rgb => rgb.slice());
+    if (key === src.paletteKey) return src.paletteRgb;
+    const out = src.base.map(rgb => rgb.slice());
     for (const name of names) {
         const meta = ramps[name];
         const spec = RAMPS[name];
         if (!spec) continue;
-        const base = (look && look[spec.look]) || PALETTE_HEX[meta.at];
+        const base = (look && look[spec.look]) || src.paletteHex[meta.at];
         const steps = Math.min(meta.steps, spec.offsets.length);
         for (let i = 0; i < steps; i += 1) out[meta.at + i] = toRgb(shadeHex(base, spec.offsets[i]));
     }
-    paletteKey = key;
-    paletteRgb = out;
-    for (const pose of poses.values()) pose.canvases.fill(null);   // канвасы собраны по старой палитре
+    src.paletteKey = key;
+    src.paletteRgb = out;
+    for (const pose of src.poses.values()) pose.canvases.fill(null);   // канвасы собраны по старой палитре
     return out;
 }
 
 /** Палитра дорожек для произвольного look — наружу ради теста и превью панели внешности. */
-export const heroLookPalette = paletteFor;
-
-const poses = new Map();                   // "down/walk" → {frames: Uint8Array[], count, fps}
+export const heroLookPalette = (look) => paletteFor(look, SOURCES.grade);
 
 function decodeBase64(b64) {
     if (typeof Buffer !== "undefined") {
@@ -92,13 +139,13 @@ function decodeBase64(b64) {
  * Поток один на всю связку (кадры идут подряд), поэтому декодируем целиком и
  * сразу режем на кадры: 96×104 на кадр, дороже строки из ~600 пар это не стоит.
  */
-function decodePose(key) {
-    const cached = poses.get(key);
+function decodePose(key, src = SRC) {
+    const cached = src.poses.get(key);
     if (cached) return cached;
-    const b64 = STREAMS[key];
+    const b64 = src.streams[key];
     if (!b64) return null;
     const bytes = decodeBase64(b64);
-    const per = CELL.w * CELL.h;
+    const per = src.CELL.w * src.CELL.h;
     let total = 0;
     for (let i = 0; i + 1 < bytes.length; i += 2) total += bytes[i];
     const indices = new Uint8Array(total);
@@ -113,27 +160,27 @@ function decodePose(key) {
     const count = Math.max(1, Math.round(total / per));
     const frames = [];
     for (let f = 0; f < count; f += 1) frames.push(indices.subarray(f * per, (f + 1) * per));
-    const pose = { key, frames, canvases: new Array(count).fill(null), count, fps: fpsFor(key) };
-    poses.set(key, pose);
+    const pose = { key, frames, canvases: new Array(count).fill(null), count, fps: fpsFor(key, src) };
+    src.poses.set(key, pose);
     return pose;
 }
 
-function fpsFor(key) {
+function fpsFor(key, src = SRC) {
     const label = key.split("/")[1];
-    const meta = META.poses.find(p => p.label === label);
+    const meta = src.meta.poses.find(p => p.label === label);
     return meta ? meta.fps : 6;
 }
 
-function frameCanvas(pose, index, palette) {
+function frameCanvas(pose, index, palette, cell) {
     const existing = pose.canvases[index];
     if (existing) return existing;
     const src = pose.frames[index];
     if (!src) return null;
     const canvas = document.createElement("canvas");
-    canvas.width = CELL.w;
-    canvas.height = CELL.h;
+    canvas.width = cell.w;
+    canvas.height = cell.h;
     const ctx = canvas.getContext("2d");
-    const img = ctx.createImageData(CELL.w, CELL.h);
+    const img = ctx.createImageData(cell.w, cell.h);
     const out = img.data;
     for (let i = 0; i < src.length; i += 1) {
         const value = src[i];
@@ -155,7 +202,7 @@ const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
  * Какую позу просит состояние актёра. Порядок — по силе признака: удар важнее бега,
  * факел в руке важнее покоя, покой важен только когда герой действительно стоит.
  */
-export function heroPose(p) {
+export function heroPose(p, src = SRC) {
     const dir = p.dir === "left" || p.dir === "right" || p.dir === "up" ? p.dir : "down";
     // Клип Idle_Torch_Loop поднимает левую руку — значит он про факел в ЛЕВОЙ
     // руке. Факел в правой — обычная походка, а предмет дорисуется к правой кисти:
@@ -168,41 +215,58 @@ export function heroPose(p) {
         // выглядят по-разному, и это тот случай, когда анимация дешевле объясняет
         // игрока, чем иконка над головой.
         const kind = { chop: "chop", mine: "mine", gather: "gather" }[p.actionKind] || "attack";
-        const label = META.poses.some(x => x.label === kind) ? kind : "attack";
-        const frames = META.poses.find(x => x.label === label)?.frames || 6;
+        const label = labelFor(src, src.has(kind) ? kind : "attack");
+        const frames = src.framesOf(label);
         return { dir, label, frame: Math.min(1, act) * frames };
     }
-    if (p.fallTimer > 0) return { dir, label: "idle", frame: 0 };
+    if (p.fallTimer > 0) return { dir, label: labelFor(src, "idle"), frame: 0 };
     const gait = clamp01(p.gait != null ? p.gait : (p.moving ? 1 : 0));
     if (gait > 0.06) {
         const run = clamp01(p.runBlend || 0);
-        const label = run > 0.55 ? "run" : "walk";
-        const frames = META.poses.find(x => x.label === label)?.frames || 6;
+        const label = labelFor(src, run > 0.55 ? "run" : "walk");
+        const frames = src.framesOf(label);
         // Фаза игрового шага (радианы) → кадр клипа; цикл клипа = один цикл фазы.
         const phase = ((p.phase || 0) % TAU + TAU) % TAU;
         return { dir, label, frame: (phase / TAU) * frames };
     }
     if (torchInLeft) {
-        const frames = META.poses.find(x => x.label === "torch")?.frames || 4;
-        return { dir, label: "torch", frame: ((p.idleTime || 0) * fpsFor(`${dir}/torch`)) % frames };
+        const label = labelFor(src, "torch");
+        return { dir, label, frame: ((p.idleTime || 0) * fpsFor(`${dir}/${label}`, src)) % src.framesOf(label) };
     }
-    const frames = META.poses.find(x => x.label === "idle")?.frames || 4;
-    return { dir, label: "idle", frame: ((p.idleTime || 0) * fpsFor(`${dir}/idle`)) % frames };
+    const label = labelFor(src, "idle");
+    return { dir, label, frame: ((p.idleTime || 0) * fpsFor(`${dir}/${label}`, src)) % src.framesOf(label) };
 }
 
 /** Спрайт для текущей позы: канвас + геометрия постановки. null — рисовать вектором. */
 export function heroSprite(p, look) {
     if (!HERO3D.enabled || !HERO3D.ready || p.sprite === false) return null;
-    const pose = heroPose(p);
-    const data = decodePose(`${pose.dir}/${pose.label}`);
+    const src = SRC;
+    const pose = heroPose(p, src);
+    const data = decodePose(`${pose.dir}/${pose.label}`, src);
     if (!data) return null;
+    const CELL = src.CELL, U = src.U, TOP = src.TOP;
     const index = ((Math.floor(pose.frame) % data.count) + data.count) % data.count;
-    const canvas = frameCanvas(data, index, paletteFor(look || p.look));
+    const canvas = frameCanvas(data, index, paletteFor(look || p.look, src), CELL);
     if (!canvas) return null;
     const pixels = data.frames[index];
     return {
         canvas, dir: pose.dir, label: pose.label, index,
-        x: -CELL.w / 2 * U, y: TOP, w: W, h: H,
+        x: -CELL.w / 2 * U, y: TOP, w: src.W, h: src.H,
+        /**
+         * Кусок спрайта вокруг кисти этого кадра — {src…, dst…} для drawImage.
+         * Рантайм возвращает его поверх предмета: пальцы лежат на рукояти, а не
+         * предмет поверх пальцев. Координаты перевода (пиксель ячейки → единицы
+         * мира) живут здесь, потому что спрайт и его геометрия — тоже здесь.
+         */
+        grip(hand = "right") {
+            const g = src.meta.grips?.[`${pose.dir}/${pose.label}`]?.[hand === "left" ? "l" : "r"]?.[index];
+            if (!g) return null;
+            return {
+                sx: g[0], sy: g[1], sw: g[2], sh: g[3],
+                dx: (-CELL.w / 2 + g[0]) * U, dy: TOP + g[1] * U,
+                dw: g[2] * U, dh: g[3] * U
+            };
+        },
         /**
          * Заполнен ли в этом кадре пиксель под мировой точкой (x, y от линии стоп).
          * Спрайт — плоская фигура, поэтому «рука за телом» превращается в «факел
@@ -210,7 +274,7 @@ export function heroSprite(p, look) {
          * свободен. Проверяем по индексу палитры — картинка уже собрана, данных больше нет.
          */
         covers(x, y) {
-            const px = Math.round(x / U + CELL.w / 2), py = Math.round(y / U + (CELL.h - META.footPad));
+            const px = Math.round(x / U + CELL.w / 2), py = Math.round(y / U + (CELL.h - src.meta.footPad));
             if (px < 0 || py < 0 || px >= CELL.w || py >= CELL.h) return false;
             return pixels[py * CELL.w + px] !== 0;
         }
@@ -227,16 +291,17 @@ export function heroHandAnchor(p, hand = "right", extra = {}) {
     // координаты из одного источника, иначе огонёк уезжает с ладони (это ловит
     // tests/visual-world.test.js на четырёх ракурсах и в падении).
     if (!HERO3D.enabled || !HERO3D.ready || p.sprite === false) return null;
-    const pose = heroPose(p);
-    const anchors = META.anchors?.[`${pose.dir}/${pose.label}`];
+    const src = SRC;
+    const pose = heroPose(p, src);
+    const anchors = src.meta.anchors?.[`${pose.dir}/${pose.label}`];
     if (!anchors) return null;
-    const data = decodePose(`${pose.dir}/${pose.label}`);
+    const data = decodePose(`${pose.dir}/${pose.label}`, src);
     const count = data ? data.count : anchors.r.length;
     const index = ((Math.floor(pose.frame) % count) + count) % count;
     const side = hand === "left" ? "l" : "r";
     const point = anchors[side]?.[index];
     if (!point) return null;
-    // Третий номер в бake — экранное направление предплечья. Если просят `follow`,
+    // Третий номер в bake — экранное направление предплечья. Если просят `follow`,
     // предмет поворачивается по нему и не зеркалится: ракурс уже учтён запеккой.
     const baked = point.length > 2 ? point[2] : undefined;
     const follow = !!extra.follow && baked !== undefined;
@@ -251,4 +316,12 @@ export function heroHandPositions(p) {
     return { right, left };
 }
 
-export const HERO_SPRITE_CELL = { w: CELL.w, h: CELL.h, pxPerUnit: META.pxPerUnit, footPad: META.footPad };
+// Геометрия общая у обоих выходов (одна запекка, одна сетка), поэтому константа
+// снимается с грейда и не зависит от того, какой режим включён в данный момент.
+export const HERO_SPRITE_CELL = {
+    w: SOURCES.grade.CELL.w, h: SOURCES.grade.CELL.h,
+    pxPerUnit: SOURCES.grade.meta.pxPerUnit, footPad: SOURCES.grade.meta.footPad
+};
+
+/** Есть ли у активного выхода этот кадр — нужно инструментам сравнения. */
+export const hero3dHas = (key) => Boolean(SRC.streams[key]);

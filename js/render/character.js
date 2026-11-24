@@ -421,6 +421,18 @@ function paintCharacter(ctx, p) {
             ctx.translate(-anchor.gripX, -anchor.gripY);
             drawHeldToolAt(ctx, tool, dir, side, anchor, p, hand);
             ctx.restore();
+            // …и сразу возвращаем на место кулак. Предмет рисуется поверх
+            // спрайта, поэтому без этого куска он выглядит наклеенным на
+            // тыльную сторону ладони — глаз это замечает мгновенно.
+            const grip = (sprite.grip && !far) ? sprite.grip(hand) : null;
+            // `far` — предмет нарисован ДО спрайта, то есть тело его перекроет
+            // целиком: возвращать под него кисть нечего, только работа лишняя.
+            if (grip) {
+                ctx.imageSmoothingEnabled = false;             // пиксели, не размытие
+                ctx.drawImage(sprite.canvas, grip.sx, grip.sy, grip.sw, grip.sh,
+                              grip.dx, grip.dy, grip.dw, grip.dh);
+                ctx.imageSmoothingEnabled = true;
+            }
         };
         const farHand = rig.behind ? "right" : "left";
         const nearHand = farHand === "right" ? "left" : "right";
@@ -681,9 +693,13 @@ function drawHeldTool(ctx, tool, dir, side, swing, arm, behind, pose = {}, hand 
             }
             ctx.fillStyle = "#574b34"; ctx.fillRect(-1, -4 - Math.min(5,tool.n || 1)*1.5, 2, 10); break;
         case "food":
+            // Еда — тот же принцип: если у предмета есть своя форма в руке, она
+            // и рисуется (рыба, ломоть, гриб); эллипс остаётся для «неопознанного».
+            if (typeof tool === "object" && tool.hold) { drawCarried(ctx, tool.hold, tool.tint, tool.n || 1); break; }
             ctx.fillStyle = itemId === "berry" ? "#555984" : itemId.includes("tea") ? "#b3aa88" : "#b18b54";
             ctx.beginPath(); ctx.ellipse(0, -2, itemId === "berry" ? 1.4 : 2.6, itemId === "berry" ? 1.2 : 2.2, 0, 0, Math.PI * 2); ctx.fill(); break;
-        default: drawGeneric(ctx); break;
+        default: drawCarried(ctx, typeof tool === "string" ? null : tool.hold,
+                             typeof tool === "string" ? null : tool.tint, tool.n || 1); break;
     }
 
     // No hand here: the fist is part of the arm and is painted by the caller
@@ -793,11 +809,228 @@ function drawTorch(ctx, pose) {
     paintTorchFlame(ctx, pose.idleTime || 0, pose.torchWind || 0, pose.gait || 0);
 }
 
-function drawGeneric(ctx) {
-    ctx.fillStyle = "#6a5a44";
-    ctx.fillRect(-1.2, -8, 2.4, 10);
-    ctx.fillStyle = "#8a7a60";
-    ctx.fillRect(-2.4, -10.5, 4.8, 3);
+/**
+ * Предмет в руке, у которого нет собственного орудия: кремень, моток, связка
+ * травы. Прежний drawGeneric рисовал палку с шишкой для всех сорока id, и по
+ * руке было невозможно понять, что именно принёс герой, — а рука и есть
+ * единственный экран «в руках у меня вот это». Форма берётся из `hold`
+ * (ITEMS), цвет — из `tint`: рендерер знает девять форм, а не сорок предметов.
+ * Все они держатся за низ (0,0) и растут вверх, как топор и нож, поэтому
+ * хват, поворот замаха и патч кулака работают для них бесплатно.
+ */
+const CARRY_SCALE = {
+    rock: 0.75, crystal: 0.82, sheaf: 0.92, coil: 0.9, board: 0.95,
+    roll: 0.92, vessel: 0.9, trinket: 0.52, lump: 0.7
+};
+const CARRY_INK = "rgba(16,14,12,0.62)";    // обводка силуэта: без неё уголь тонет в штанах
+/** Словарь форм руки: у items.js нет права на выдуманный `hold`, он проверяется тестом. */
+export const CARRY_SHAPES = Object.keys({
+    rock: 1, crystal: 1, sheaf: 1, coil: 1, board: 1, roll: 1, vessel: 1,
+    trinket: 1, lump: 1, haunch: 1, fillet: 1, fungal: 1, root: 1, dish: 1, jar: 1
+});
+
+function drawCarried(ctx, shape, tint, n = 1) {
+    const base = tint || "#8a7a60";
+    const dark = shadeHex(base, -34), lite = shadeHex(base, 26), glint = shadeHex(base, 58);
+    const fat = n >= 5 ? 1.18 : n >= 2 ? 1.08 : 1;   // охапка чуть крупнее одного камня
+    // Натуральный размер. Камень размером с голову читается как булыжник-орудие,
+    // но герой с ним выглядит карликом, поэтому у каждой формы свой коэффициент:
+    // безделушку видно только когда она почти с ладонь, доску — когда она косая.
+    const k = CARRY_SCALE[shape] || 0.78;
+    ctx.scale(k, k);
+    ctx.lineJoin = "round";
+    switch (shape) {
+        case "rock": {                                 // сколотый кусок: грань + блик
+            ctx.fillStyle = dark;
+            ctx.beginPath();
+            ctx.moveTo(-3.4 * fat, 0.4); ctx.lineTo(-3.9 * fat, -3.6 * fat); ctx.lineTo(-1.2 * fat, -6.6 * fat);
+            ctx.lineTo(2.6 * fat, -6.1 * fat); ctx.lineTo(3.9 * fat, -2.2 * fat); ctx.lineTo(1.9 * fat, 0.6);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.55; ctx.stroke();   // силуэт держится на фоне одежды
+            ctx.fillStyle = base;
+            ctx.beginPath();
+            ctx.moveTo(-1.2 * fat, -6.6 * fat); ctx.lineTo(2.6 * fat, -6.1 * fat); ctx.lineTo(1.1 * fat, -2.4 * fat);
+            ctx.lineTo(-2.3 * fat, -3.1 * fat);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = glint; ctx.lineWidth = 0.5;
+            ctx.beginPath(); ctx.moveTo(-0.6 * fat, -6.1 * fat); ctx.lineTo(1.6 * fat, -4.1 * fat); ctx.stroke();
+            break;
+        }
+        case "crystal": {                               // огранка: два треугольника разной яркости
+            ctx.fillStyle = base;
+            ctx.beginPath();
+            ctx.moveTo(0, -9.4 * fat); ctx.lineTo(2.7 * fat, -4.2 * fat); ctx.lineTo(1.1 * fat, 0.4);
+            ctx.lineTo(-1.4 * fat, 0.2); ctx.lineTo(-2.6 * fat, -4.8 * fat);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.5; ctx.stroke();
+            ctx.fillStyle = glint; ctx.globalAlpha = 0.75;
+            ctx.beginPath(); ctx.moveTo(0, -9.4 * fat); ctx.lineTo(2.7 * fat, -4.2 * fat); ctx.lineTo(0.2, -3.4 * fat);
+            ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+            ctx.strokeStyle = dark; ctx.lineWidth = 0.4;
+            ctx.beginPath(); ctx.moveTo(0, -9.4 * fat); ctx.lineTo(0.2, -3.4 * fat); ctx.stroke();
+            break;
+        }
+        case "sheaf": {                                 // связка стеблей с метёлками
+            const stalks = 4;
+            ctx.strokeStyle = dark; ctx.lineWidth = 1.3;
+            for (let i = 0; i < stalks; i += 1) {
+                const dx = (i - (stalks - 1) / 2) * 1.5 * fat;
+                ctx.beginPath(); ctx.moveTo(dx * 0.35, 0.4); ctx.lineTo(dx, -7.6 * fat); ctx.stroke();
+            }
+            ctx.fillStyle = lite;
+            for (let i = 0; i < stalks; i += 1) {
+                const dx = (i - (stalks - 1) / 2) * 1.5 * fat;
+                ctx.beginPath(); ctx.ellipse(dx, -8.4 * fat, 0.85, 1.7, dx * 0.08, 0, Math.PI * 2); ctx.fill();
+            }
+            ctx.fillStyle = "#5c4a30";                   // перевязка
+            ctx.fillRect(-3.1 * fat, -2.9, 6.2 * fat, 1.3);
+            break;
+        }
+        case "coil": {                                   // моток: витки + хвост
+            ctx.fillStyle = "rgba(20,17,14,0.5)";        // подложка: витки иначе сливаются с курткой
+            ctx.beginPath(); ctx.ellipse(0, -5, 4.2 * fat, 3.4 * fat, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = base; ctx.lineWidth = 1.6;
+            for (let i = 0; i < 3; i += 1) {
+                ctx.beginPath();
+                ctx.ellipse(0, -4 - i * 0.7, (3.6 - i * 0.7) * fat, (2.5 - i * 0.5) * fat, 0, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            ctx.strokeStyle = dark; ctx.lineWidth = 0.8;
+            ctx.beginPath(); ctx.moveTo(2.6, -2.4); ctx.lineTo(3.6, 1.4); ctx.stroke();
+            ctx.fillStyle = "#5c4a30";
+            ctx.fillRect(-0.7, -6.4, 1.4, 4.6);
+            break;
+        }
+        case "board": {                                  // доска: торцы и волокна
+            ctx.fillStyle = base;
+            ctx.beginPath();
+            ctx.moveTo(-2.6 * fat, 0.6); ctx.lineTo(-3.4 * fat, -9.4 * fat); ctx.lineTo(3.4 * fat, -10 * fat);
+            ctx.lineTo(2.6 * fat, 0);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.55; ctx.stroke();
+            ctx.fillStyle = dark;
+            ctx.fillRect(-3.4 * fat, -9.4 * fat, 6.8 * fat, 1.1);
+            ctx.strokeStyle = lite; ctx.lineWidth = 0.4;
+            for (let i = -1; i <= 1; i += 1) {
+                ctx.beginPath(); ctx.moveTo(i * 1.5, -0.4); ctx.lineTo(i * 1.6 - 0.3, -9.4 * fat); ctx.stroke();
+            }
+            break;
+        }
+        case "roll": {                                   // скатанная ткань/спальник
+            ctx.fillStyle = base;
+            ctx.beginPath(); ctx.ellipse(0, -4.6, 3.1 * fat, 4.6 * fat, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.55; ctx.stroke();
+            ctx.strokeStyle = dark; ctx.lineWidth = 0.7;
+            ctx.beginPath(); ctx.ellipse(0, -4.6, 1.8 * fat, 2.6 * fat, 0, 0.4, 5.2); ctx.stroke();
+            ctx.fillStyle = "#5c4a30";
+            ctx.fillRect(-3.4 * fat, -5.6, 6.8 * fat, 1.4);
+            ctx.fillStyle = lite;
+            ctx.beginPath(); ctx.ellipse(-1.1, -7.8, 1.2, 0.7, -0.3, 0, Math.PI * 2); ctx.fill();
+            break;
+        }
+        case "vessel": {                                 // бурдюк: горло + пробка + ремень
+            ctx.fillStyle = base;
+            ctx.beginPath(); ctx.ellipse(0, -3.8, 3.2 * fat, 4 * fat, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.55; ctx.stroke();
+            ctx.fillStyle = dark;
+            ctx.fillRect(-1, -9.2 * fat, 2, 2.6);
+            ctx.fillStyle = "#6a5236";
+            ctx.fillRect(-1.4, -10.2 * fat, 2.8, 1.3);
+            ctx.strokeStyle = dark; ctx.lineWidth = 0.6;
+            ctx.beginPath(); ctx.moveTo(-3.1, -5.4); ctx.quadraticCurveTo(0, -3.2, 3.1, -5.4); ctx.stroke();
+            break;
+        }
+        case "trinket": {                                // кольцо с биркой (ключ, монета)
+            ctx.strokeStyle = base; ctx.lineWidth = 1.1;
+            ctx.beginPath(); ctx.arc(0, -7.4 * fat, 2, 0, Math.PI * 2); ctx.stroke();
+            ctx.fillStyle = lite;
+            ctx.fillRect(-1.1, -5.8 * fat, 2.2, 5.4 * fat);
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.45;
+            ctx.strokeRect(-1.1, -5.8 * fat, 2.2, 5.4 * fat);
+            ctx.fillStyle = dark;
+            ctx.fillRect(0.4, -2.2, 1.6, 0.9);
+            break;
+        }
+        case "haunch": {                                 // кусок мяса на кости
+            ctx.fillStyle = base;
+            ctx.beginPath(); ctx.ellipse(-0.4, -4.2, 3.3 * fat, 2.8 * fat, -0.2, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.5; ctx.stroke();
+            ctx.fillStyle = "#e7dccb";                    // кость
+            ctx.beginPath(); ctx.ellipse(2.7, -6.4, 1.5, 1, 0.6, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = lite;                         // жир
+            ctx.beginPath(); ctx.ellipse(-1.6, -5.4, 1.5, 0.7, -0.4, 0, Math.PI * 2); ctx.fill();
+            break;
+        }
+        case "fillet": {                                 // рыба: тело, плавник, хвост
+            ctx.fillStyle = base;
+            ctx.beginPath();
+            ctx.moveTo(-3.6 * fat, -4.2); ctx.quadraticCurveTo(0.4, -8.4, 3.4 * fat, -4.6);
+            ctx.quadraticCurveTo(0.4, -1.2, -3.6 * fat, -4.2);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.5; ctx.stroke();
+            ctx.fillStyle = dark;                          // хвост
+            ctx.beginPath(); ctx.moveTo(-3.4 * fat, -4.2); ctx.lineTo(-5.6 * fat, -6.4); ctx.lineTo(-5.4 * fat, -2.2);
+            ctx.closePath(); ctx.fill();
+            ctx.fillStyle = glint;                         // бок
+            ctx.beginPath(); ctx.ellipse(0.6, -5.2, 1.6, 0.7, -0.2, 0, Math.PI * 2); ctx.fill();
+            break;
+        }
+        case "fungal": {                                 // гриб: шляпка + ножка
+            ctx.fillStyle = lite;
+            ctx.fillRect(-0.9, -4.4, 1.8, 4.6);
+            ctx.fillStyle = base;
+            ctx.beginPath(); ctx.ellipse(0, -4.8, 3.2 * fat, 2.3 * fat, 0, Math.PI, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(0, -4.8, 3.2 * fat, 1.1 * fat, 0, 0, Math.PI); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.5;
+            ctx.beginPath(); ctx.ellipse(0, -4.8, 3.2 * fat, 2.3 * fat, 0, Math.PI, Math.PI * 2); ctx.stroke();
+            ctx.fillStyle = "rgba(255,250,240,0.5)";
+            ctx.beginPath(); ctx.ellipse(-1.2, -5.8, 0.8, 0.5, 0, 0, Math.PI * 2); ctx.fill();
+            break;
+        }
+        case "root": {                                   // корнеплод: репка с ботвой
+            ctx.fillStyle = base;
+            ctx.beginPath(); ctx.ellipse(0, -3.6, 2.6 * fat, 3.2 * fat, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.5; ctx.stroke();
+            ctx.fillStyle = dark;
+            ctx.beginPath(); ctx.moveTo(-0.7, -0.8); ctx.lineTo(0.7, -0.8); ctx.lineTo(0, 1.8); ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = "#6d8a4a"; ctx.lineWidth = 0.8;
+            for (let i = -1; i <= 1; i += 1) {
+                ctx.beginPath(); ctx.moveTo(0, -6.2); ctx.quadraticCurveTo(i * 1.6, -8, i * 2.4, -9.4); ctx.stroke();
+            }
+            break;
+        }
+        case "dish": {                                   // миска (или лепёшка на ладони)
+            ctx.fillStyle = base;
+            ctx.beginPath(); ctx.ellipse(0, -3.4, 3.8 * fat, 2.4 * fat, 0, Math.PI, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = dark;
+            ctx.beginPath(); ctx.ellipse(0, -3.4, 3.8 * fat, 1.4 * fat, 0, 0, Math.PI); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.5;
+            ctx.beginPath(); ctx.ellipse(0, -3.4, 3.8 * fat, 2.4 * fat, 0, Math.PI, Math.PI * 2); ctx.stroke();
+            ctx.fillStyle = lite;                          // содержимое
+            ctx.beginPath(); ctx.ellipse(0, -3.6, 2.5 * fat, 0.9, 0, 0, Math.PI * 2); ctx.fill();
+            break;
+        }
+        case "jar": {                                    // банка с крышкой (варенье, отвар)
+            ctx.fillStyle = base;
+            ctx.beginPath(); ctx.ellipse(0, -4.4, 2.6 * fat, 3.4 * fat, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.5; ctx.stroke();
+            ctx.fillStyle = "#6a5236";
+            ctx.fillRect(-2.1, -8.4 * fat, 4.2, 1.4);
+            ctx.fillStyle = "rgba(255,250,240,0.42)";
+            ctx.fillRect(-1.4, -6.6, 1, 3.4);
+            break;
+        }
+        default: {                                       // комок в ладони (смола, зола)
+            ctx.fillStyle = base;
+            ctx.beginPath(); ctx.ellipse(0, -3.4, 3.2 * fat, 2.9 * fat, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.55; ctx.stroke();
+            ctx.fillStyle = dark;
+            ctx.beginPath(); ctx.ellipse(0.9, -2.4, 2.1, 1.4, 0.3, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = glint; ctx.globalAlpha = 0.6;
+            ctx.beginPath(); ctx.ellipse(-1.1, -4.6, 1, 0.6, -0.4, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+    }
 }
 
 /** Sleeping hero: a bedroll lump with zzz, drawn inside the tent. */

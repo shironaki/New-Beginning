@@ -209,6 +209,35 @@ test("baked hand anchors are real numbers, inside the cell, and they animate", (
     }
 });
 
+test("every baked frame has a fist patch that covers its grip point", () => {
+    // Патч кулака — единственное, что отличает «держит в руке» от «приклеено
+    // поверх ладони»: рантайм возвращает этот кусок спрайта после предмета.
+    const { cell, pxPerUnit = 2, footPad = 0, anchors, grips } = HERO_META;
+    const ppu = pxPerUnit;
+    assert.ok(grips && Object.keys(grips).length === Object.keys(anchors).length,
+        "запекка отдала якоря без патчей — нужен перепуск --emit");
+    for (const [key, set] of Object.entries(anchors)) {
+        const g = grips[key] || {};
+        for (const side of ["r", "l"]) {
+            const name = side === "r" ? "right" : "left";
+            const pts = set[side], patches = g[side];
+            assert.eq(patches?.length, pts.length, `${key}/${name}: патчей не по числу кадров`);
+            pts.forEach(([x, y], i) => {
+                const rect = patches[i];
+                assert.ok(rect, `${key}/${name}#${i}: нет патча`);
+                const [gx, gy, gw, gh] = rect;
+                assert.gte(gw, 3, `${key}/${name}#${i}: патч уже кулака`);
+                assert.gte(gh, 3, `${key}/${name}#${i}: патч уже кулака`);
+                assert.ok(gx >= 0 && gy >= 0 && gx + gw <= cell.w && gy + gh <= cell.h,
+                    `${key}/${name}#${i}: патч вылез за ячейку`);
+                const fx = x * ppu + cell.w / 2, fy = y * ppu + (cell.h - footPad);
+                assert.ok(fx >= gx - 1.5 && fx <= gx + gw + 0.5 && fy >= gy - 1.5 && fy <= gy + gh + 0.5,
+                    `${key}/${name}#${i}: предмет и пальцы в разных местах (${fx.toFixed(1)},${fy.toFixed(1)} против ${rect})`);
+            });
+        }
+    }
+});
+
 test("every baked stream actually addresses its ramp slots", () => {
     const owner = new Map();
     for (const [name, meta] of Object.entries(HERO_META.ramps)) {
@@ -225,6 +254,82 @@ test("every baked stream actually addresses its ramp slots", () => {
         // и тогда этот цвет в панели внешности ни на что не влияет.
         for (const name of Object.keys(HERO_META.ramps)) assert.gt(hits[name] || 0, 150, `${key}: пикселей дорожки ${name}`);
     }
+});
+
+test("the fist patch is painted back after the held item, not before", async () => {
+    // Порядок слоёв — единственное, что отличает «держит в руке» от «наклейка на
+    // ладони», и он легко ломается: кто-нибудь перенесёт paintItem выше спрайта.
+    // Поэтому ловим реальные вызовы ctx.drawImage, а не читаем код глазами.
+    const { installDOM } = await import("./dom-harness.js");
+    const saved = Object.fromEntries(["document", "window", "requestAnimationFrame", "localStorage"].map(k => [k, globalThis[k]]));
+    const dom = installDOM();
+    try {
+        const { heroSprite } = await import("../js/render/hero3d.js");
+        const p = {
+            dir: "right", phase: 0, gait: 0, moving: false, idleTime: 0.4,
+            look: DEFAULT_LOOK, rightTool: { id: "knife", tool: "knife", n: 1, hold: null },
+            leftTool: { id: "rope", tool: "rope", n: 2, hold: "coil", tint: "#a8895a" },
+            actionTimer: 0
+        };
+        assert.ok(heroSprite(p), "спрайтовый герой должен быть готов (иначе тест ничего не проверяет)");
+        const canvas = new ShimCanvas(240, 240);
+        const ctx = canvas.getContext("2d");
+        const calls = [];
+        const real = ctx.drawImage.bind(ctx);
+        ctx.drawImage = (...args) => { calls.push(args.length); return real(...args); };
+        ctx.save(); ctx.translate(120, 200);
+        drawCharacter(ctx, p);
+        ctx.restore();
+        const sprite = calls.indexOf(5);
+        assert.gt(sprite, -1, "спрайт нарисован");
+        assert.ok(calls.slice(sprite).filter(n => n === 9).length >= 1,
+            `после спрайта должен вернуться патч кулака, вызовы: ${calls.join(",")}`);
+        // Дальняя рука рисуется до спрайта — и её патч не нужен (всё равно перекроется).
+        assert.eq(calls.slice(0, sprite).filter(n => n === 9).length, 0, "до спрайта ничего возвращать не надо");
+    } finally {
+        for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; }
+    }
+});
+
+test("the smooth (un-graded) hero is the same body: shared grid, shared hand anchors", async () => {
+    // Сравнение стилей имеет смысл только если двигается только квантизация. Ячейка,
+    // опора, якоря кистей и патчи обязаны совпасть кадр в кадр — иначе «гладкий»
+    // герой встал бы в другой точке, и сравнивать было бы нечего.
+    let mod;
+    try { mod = await import("../js/render/herosmooth.js"); } catch (err) { return; }
+    const { META, PALETTE_HEX, STREAMS } = mod;
+    assert.eq(JSON.stringify(META.cell), JSON.stringify(HERO_META.cell), "размер ячейки");
+    assert.eq(META.footPad, HERO_META.footPad, "подножие");
+    assert.eq(META.pxPerUnit, HERO_META.pxPerUnit, "масштаб запекки");
+    assert.ok(META.ramps === undefined, "у гладкого выхода нет дорожек — цвет запечён");
+    assert.eq(PALETTE_HEX.length, new Set(PALETTE_HEX).size, "палитра без повторов");
+    for (const key of Object.keys(STREAMS)) {
+        const bytes = Uint8Array.from(Buffer.from(STREAMS[key], "base64"));
+        let total = 0;
+        for (let i = 0; i + 1 < bytes.length; i += 2) total += bytes[i];
+        assert.eq(total, META.cell.w * META.cell.h * (total / (META.cell.w * META.cell.h)), `${key}: кадр кратен ячейке`);
+        for (const side of ["r", "l"]) {
+            assert.eq(JSON.stringify(META.anchors[key]?.[side]), JSON.stringify(HERO_META.anchors[key]?.[side]), `${key}/${side}: якорь руки уехал`);
+            assert.eq(JSON.stringify(META.grips[key]?.[side]), JSON.stringify(HERO_META.grips[key]?.[side]), `${key}/${side}: патч кулака уехал`);
+        }
+    }
+});
+
+test("every item that can end up in a hand names a carry shape", async () => {
+    // items.js не имеет права выдумать форму: словарь держит рендерер, и новый
+    // предмет без `hold` молча превратился бы в бесформенный комок.
+    const { ITEMS } = await import("../js/sandbox/items.js");
+    const { CARRY_SHAPES } = await import("../js/render/character.js");
+    const shapes = new Set(CARRY_SHAPES);
+    const own = ["pot", "diary_burnt", "log", "firewood"];   // у них свои кейсы в switch
+    let held = 0;
+    for (const [id, d] of Object.entries(ITEMS)) {
+        if (d.tool || d.light || own.includes(id)) continue;
+        held += 1;
+        assert.ok(shapes.has(d.hold), `${id}: hold="${d.hold}" нет в словаре ${[...shapes].join("/")}`);
+        assert.ok(/^#[0-9a-f]{6}$/i.test(String(d.tint)), `${id}: tint для hold`);
+    }
+    assert.gt(held, 20, "тест должен покрывать весь сырьевой список");
 });
 
 test("the real game passes elapsed frame time to flames at 30/60/120 Hz", async () => {

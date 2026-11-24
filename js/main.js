@@ -1104,6 +1104,16 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
             hint.textContent = "Пилот · меню: день/ночь/дождь/зима, факел · основное сохранение не меняется. Пробный прогресс сбросится после перезагрузки.";
             banner.append(link, game.trialStatus, hint); hudRoot.append(banner);
         }
+        // Сравнение стилей героя без пересборки: ?hero3d=smooth — тот же 3D-риг, но
+        // без пиксельного грейда (14 тонов на дорожку, ни дизеринга, ни обводки);
+        // ?hero3d=off — прежняя векторная фигура. Гладкий модуль весит 291 КБ и
+        // приходит только по этому запросу, поэтому обычный игрок его не качает.
+        const heroMode = new URLSearchParams(window.location.search).get("hero3d");
+        if (heroMode) {
+            const hero3d = await import("./render/hero3d.js");
+            if (heroMode === "off") hero3d.HERO3D.enabled = false;
+            else await hero3d.hero3dQuality(heroMode);
+        }
         window.GAME = game;
         // The owner's control room. Loaded lazily and locked behind a
         // password, so an ordinary player never sees it and the module costs

@@ -49,7 +49,8 @@ export function tickHands(game, dt) {
 export function handTool(slot) {
     if (!slot) return null;
     const d = itemDef(slot.id);
-    return { id: slot.id, n: slot.n, tool: d?.tool || (d?.light ? "torch" : foodValue(slot.id) ? "food" : slot.id === "pot" ? "pot" : slot.id === "diary_burnt" ? "book" : ["log", "firewood"].includes(slot.id) ? "bundle" : "item") };
+    return { id: slot.id, n: slot.n, hold: d?.hold || null, tint: d?.tint || null,
+        tool: d?.tool || (d?.light ? "torch" : foodValue(slot.id) ? "food" : slot.id === "pot" ? "pot" : slot.id === "diary_burnt" ? "book" : ["log", "firewood"].includes(slot.id) ? "bundle" : "item") };
 }
 export function handRender(inv) {
     return { leftTool: handTool(inv.hands?.left), rightTool: handTool(inv.hands?.right),

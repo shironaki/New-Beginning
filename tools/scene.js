@@ -88,6 +88,13 @@ game.paused = false;
 // запечённого 3D-героя с прежним и видеть, что именно далла запекка.
 const hero3d = flag("hero3d", null);
 if (hero3d === "off") (await import("../js/render/hero3d.js")).HERO3D.enabled = false;
+// --hero3d smooth снимает пиксельный грейд: тот же риг, та же сетка и те же якоря
+// кистей, но 14 тонов на дорожку, ни дизеринга, ни обводки. Сравнивают именно так —
+// на одной сцене, тем же кадром.
+else if (hero3d) {
+    const ok = await (await import("../js/render/hero3d.js")).hero3dQuality(String(hero3d));
+    if (!ok) console.log(`   (герой: режим «${hero3d}» недоступен — играет то, что есть)`);
+}
 
 const zone = flag("zone", null);
 if (zone && zone !== true) {

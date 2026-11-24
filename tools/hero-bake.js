@@ -70,6 +70,13 @@ const LOOK = {
     coat: opt("coat", "#446d68"),
     pants: opt("pants", "#48473e")
 };
+// «Без пиксельного грейда»: тот же рендер, но квантованный в 20 тонов на дорожку,
+// без дизеринга и без обводки. Нужен, чтобы честно сравнить 3D-риг с пиксельной
+// сборкой — silhouette, свет и одежда те же, меняется только шаг квантизации.
+const SMOOTH = flag("smooth");
+const SMOOTH_STEPS = Number(opt("steps", 20));
+const SMOOTH_POSES = String(opt("smoothposes", "idle,walk,run,chop,mine,gather,attack,torch")).split(",");
+const SMOOTH_FILE = String(opt("emit-smooth", ""));
 const OUTFIT = flag("no-outfit") ? null : String(opt("outfit", "Male_Peasant"));
 const HAIR = flag("no-hair") ? null : String(opt("hair", "Hair_Long"));
 
@@ -447,6 +454,32 @@ function toUnits(px, py) {
     return { x: (px - CELL.w / 2) / PX_PER_UNIT, y: (py - (CELL.h - FOOT)) / PX_PER_UNIT };
 }
 
+/**
+ * Кулак поверх рукояти. Патч — это прямоугольник в пикселях ячейки: всё, что
+ * спрайт имеет вокруг кисти. Рантайм возвращает этот кусок на место ПОСЛЕ того,
+ * как нарисовал предмет, и тогда пальцы лежат на рукояти, а не предмет поверх
+ * пальцев (именно так нож годами выглядел наклеенным на тыльную сторону ладони).
+ * Берём только непрозрачные пиксели: в фон патч не должен тянуть ничего.
+ */
+const GRIP_R = 4;
+function gripPatch(sprite, cell) {
+    if (!cell) return null;
+    // handPoint уже привёл координаты к пикселям ячейки (снял BOX и SS).
+    const cx = Math.round(cell.x), cy = Math.round(cell.y);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let y = Math.max(0, cy - GRIP_R); y <= Math.min(CELL.h - 1, cy + GRIP_R); y += 1) {
+        for (let x = Math.max(0, cx - GRIP_R); x <= Math.min(CELL.w - 1, cx + GRIP_R); x += 1) {
+            if (!sprite.index[y * CELL.w + x]) continue;
+            if (x < x0) x0 = x;
+            if (x > x1) x1 = x;
+            if (y < y0) y0 = y;
+            if (y > y1) y1 = y;
+        }
+    }
+    if (x1 < x0 || y1 < y0) return null;
+    return [x0, y0, x1 - x0 + 1, y1 - y0 + 1];
+}
+
 function gradeFrame(frame) {
     const { sat, mul, lift, cool } = GRADE;
     const d = frame.data;
@@ -571,6 +604,111 @@ function applyRamps(sprite, frame) {
     return sprite;
 }
 
+/* --------------------------- «гладкий» выход (без грейда) --------------------------- */
+
+/**
+ * Плавная дорожка: те же концы веера, что и у пиксельного режима, но 20 шагов
+ * вместо 3–5. shadeHex двигает яркость аддитивно, поэтому люма тона = люма базы +
+ * offset, и выбор шага сводится к делению отрезка — никакого поиска минимума.
+ */
+const SMOOTH_OFFS = {};
+const SMOOTH_HEX = {};
+const SMOOTH_LUM = {};
+const SMOOTH_AT = {};
+{
+    let at = PALETTE.length;
+    for (const key of RAMP_KEYS) {
+        const offs = RAMPS[key].offsets;
+        const lo = Math.min(...offs), hi = Math.max(...offs);
+        const list = [];
+        for (let i = 0; i < SMOOTH_STEPS; i += 1) list.push(lo + (hi - lo) * (i / (SMOOTH_STEPS - 1)));
+        SMOOTH_OFFS[key] = list;
+        const base = LOOK[RAMPS[key].look];
+        SMOOTH_HEX[key] = list.map(off => shadeHex(base, off));
+        SMOOTH_LUM[key] = SMOOTH_HEX[key].map(hex => { const c = hexRgb(hex); return lum(c[0], c[1], c[2]); });
+        SMOOTH_AT[key] = at;
+        at += SMOOTH_STEPS;
+    }
+}
+/** Палитра гладкого выхода: общая палитра игры + плавные дорожки сверху. */
+const SMOOTH_PALETTE_HEX = [
+    ...Object.entries(labPalette).filter(([, v]) => typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v)).map(([, v]) => v),
+    ...RAMP_KEYS.flatMap(key => SMOOTH_HEX[key])
+];
+
+/**
+ * Как applyRamps, но иначе: во-первых, percentile-растяжка по ВСЕМ дорожкам (на
+ * 20 шагах полосование видно, и без растяжки куртка остаётся плоским пятном),
+ * во-вторых — ни BAYER2, ни обводки. Пиксели вне дорожек (глаза, пряжка)
+ * остаются в общей палитре: их цвет про одежду не рассказывает.
+ */
+function applySmooth(sprite, frame) {
+    const total = SS * SS;
+    const winOf = new Uint8Array(CELL.w * CELL.h);
+    const lOf = new Float32Array(CELL.w * CELL.h);
+    const hist = TRACK_NAME.map(() => new Int32Array(HIST));
+    for (let y = 0; y < CELL.h; y += 1) {
+        for (let x = 0; x < CELL.w; x += 1) {
+            const votes = TRACK_NAME.map(() => 0);
+            const lsum = TRACK_NAME.map(() => 0);
+            for (let dy = 0; dy < SS; dy += 1) {
+                for (let dx = 0; dx < SS; dx += 1) {
+                    const fi = (BOX.y + y * SS + dy) * frame.width + (BOX.x + x * SS + dx);
+                    const t = frame.track[fi];
+                    if (!t) continue;
+                    votes[t] += 1;
+                    const o = fi * 4;
+                    lsum[t] += lum(frame.data[o], frame.data[o + 1], frame.data[o + 2]);
+                }
+            }
+            let win = 0;
+            for (let t = 1; t < TRACK_NAME.length; t += 1) if (votes[t] > total * 0.3 && votes[t] > votes[win]) win = t;
+            if (!win) continue;
+            const at = y * CELL.w + x;
+            const L = lsum[win] / Math.max(1, votes[win]);
+            winOf[at] = win;
+            lOf[at] = L;
+            hist[win][Math.min(HIST - 1, (L / 256 * HIST) | 0)] += 1;
+        }
+    }
+    const range = {};
+    for (let t = 1; t < TRACK_NAME.length; t += 1) {
+        const h = hist[t];
+        let n = 0;
+        for (let i = 0; i < HIST; i += 1) n += h[i];
+        if (n < 12) continue;
+        const cut = Math.max(1, Math.round(n * 0.01));
+        let lo = 0, acc = 0;
+        while (lo < HIST - 1 && (acc += h[lo]) < cut) lo += 1;
+        let hi = HIST - 1; acc = 0;
+        while (hi > 0 && (acc += h[hi]) < cut) hi -= 1;
+        const span = (hi + 1 - lo) * 256 / HIST;
+        if (span < 10) continue;
+        range[TRACK_NAME[t]] = [lo * 256 / HIST, span];
+    }
+    for (let y = 0; y < CELL.h; y += 1) {
+        for (let x = 0; x < CELL.w; x += 1) {
+            const at = y * CELL.w + x;
+            const win = winOf[at];
+            if (!win) continue;
+            const key = TRACK_NAME[win];
+            const lums = SMOOTH_LUM[key];
+            const base = lums[0];
+            let L = lOf[at];
+            const r = range[key];
+            if (r) L = base + ((L - r[0]) / r[1]) * (lums[lums.length - 1] - base);
+            const lo = lums[0], hi = lums[lums.length - 1];
+            const t = Math.max(0, Math.min(1, (L - lo) / Math.max(1e-6, hi - lo)));
+            const bin = Math.round(t * (SMOOTH_STEPS - 1));
+            sprite.index[at] = SMOOTH_AT[key] + bin;
+            const c = hexRgb(SMOOTH_HEX[key][bin]);
+            const px = at * 4;
+            sprite.data[px] = c[0]; sprite.data[px + 1] = c[1]; sprite.data[px + 2] = c[2]; sprite.data[px + 3] = 255;
+        }
+    }
+    return sprite;
+}
+
 function bakeAll() {
     const scene = buildScene();
     const anim = loadAnimLibs();
@@ -579,21 +717,26 @@ function bakeAll() {
     const frames = {};
     const sprites = [];
     const anchorsByPose = new Map();
+    const gripsByPose = new Map();
     for (const dir of DIRS) {
         frames[dir.name] = {};
         for (const pose of POSES) {
             const duration = clipDuration(anim, pose.clip) || 1;
             const cells = [];
             const anchors = { r: [], l: [] };
+            const grips = { r: [], l: [] };
             for (let i = 0; i < pose.frames; i += 1) {
                 const t = (i / pose.frames) * duration * 0.98;
                 const raw = gradeFrame(renderRaw(scene, anim, { yaw: dir.yaw, time: t, clip: pose.clip }));
                 const sprite = spriteFromPixels(
                     { data: raw.data, w: raw.width, h: raw.height },
-                    { grid: { w: CELL.w, h: CELL.h }, mode: "palette", palette: PALETTE, ink: INK, dither: Number(opt('dither', 0.2)), outlineWidth: Number(opt('outline', 2)), outline: true, box: BOX }
+                    { grid: { w: CELL.w, h: CELL.h }, mode: "palette", palette: PALETTE, ink: INK,
+                      dither: SMOOTH ? 0 : Number(opt('dither', 0.2)),
+                      outlineWidth: SMOOTH ? 0 : Number(opt('outline', 2)),
+                      outline: !SMOOTH, box: BOX }
                 );
                 if (!sprite) throw new Error(`пустой кадр ${dir.name}/${pose.clip}#${i}`);
-                applyRamps(sprite, raw);
+                if (SMOOTH) applySmooth(sprite, raw); else applyRamps(sprite, raw);
                 cells.push(sprite);
                 for (const side of ["r", "l"]) {
                     const cell = handPoint(scene, raw, side);
@@ -601,15 +744,17 @@ function bakeAll() {
                     // x/y — в игровых единицах (их даёт toUnits), угол — экранный,
                     // он не зависит от масштаба: пиксели и единицы растянуты одинаково.
                     anchors[side].push([+a.x.toFixed(2), +a.y.toFixed(2), +cell.ang.toFixed(3)]);
+                    grips[side].push(gripPatch(sprite, cell));
                 }
                 sprites.push({ dir: dir.name, pose: pose.label, index: i, sprite });
             }
             frames[dir.name][pose.label] = cells;
             anchorsByPose.set(`${dir.name}/${pose.label}`, anchors);
+            gripsByPose.set(`${dir.name}/${pose.label}`, grips);
         }
         process.stdout.write(`  ${dir.name} ok\n`);
     }
-    return { frames, sprites, anchors: Object.fromEntries(anchorsByPose) };
+    return { frames, sprites, anchors: Object.fromEntries(anchorsByPose), grips: Object.fromEntries(gripsByPose) };
 }
 
 function contactSheet(sprites, zoom) {
@@ -704,9 +849,14 @@ function emit(baked) {
         frames[dir] = {};
         for (const label of shipPoses) frames[dir][label] = poses[label];
     }
+    const ship = (key) => shipPoses.includes(key.split("/")[1]);
     const anchors = {};
     for (const [key, value] of Object.entries(baked.anchors)) {
-        if (shipPoses.includes(key.split("/")[1])) anchors[key] = value;
+        if (ship(key)) anchors[key] = value;
+    }
+    const grips = {};
+    for (const [key, value] of Object.entries(baked.grips || {})) {
+        if (ship(key)) grips[key] = value;
     }
     const streams = encodeFrames(frames);
     const meta = {
@@ -716,6 +866,7 @@ function emit(baked) {
         bodyUnits: BODY_UNITS,
         poses: POSES.filter(p => p.ship).map(p => ({ label: p.label, clip: p.clip, frames: p.frames, fps: p.fps })),
         anchors,
+        grips,
         ramps: RAMP_KEYS.reduce((m, k) => {
             m[k] = { at: RAMP_AT[k], steps: rampSteps(k), look: RAMPS[k].look, offsets: RAMPS[k].offsets };
             return m;
@@ -751,6 +902,50 @@ function emit(baked) {
     console.log(`EMIT: js/render/heroframes.js — ${(bytes / 1024).toFixed(0)} KB, ${shipped} связок (${shipPoses.join(", ")})`);
 }
 
+/** Гладкий выход — отдельный модуль: сравнивать варианты удобнее, не трогая то, что играет сейчас. */
+function emitSmooth(baked) {
+    const file = SMOOTH_FILE;
+    const frames = {};
+    for (const [dir, poses] of Object.entries(baked.frames)) {
+        frames[dir] = {};
+        for (const label of SMOOTH_POSES) if (poses[label]) frames[dir][label] = poses[label];
+    }
+    const keep = key => SMOOTH_POSES.includes(key.split("/")[1]);
+    const anchors = {}, grips = {};
+    for (const [key, value] of Object.entries(baked.anchors)) if (keep(key)) anchors[key] = value;
+    for (const [key, value] of Object.entries(baked.grips || {})) if (keep(key)) grips[key] = value;
+    const meta = {
+        who: who(), smooth: true, steps: SMOOTH_STEPS,
+        source: "Quaternius Universal Rig (CC0), тот же запек, но без дизеринга и обводки",
+        baked: new Date().toISOString().slice(0, 10), tool: "tools/hero-bake.js --smooth --emit-smooth",
+        cell: CELL, pxPerUnit: PX_PER_UNIT, footPad: FOOT, heroPx: CELL.h, bodyUnits: BODY_UNITS,
+        poses: POSES.filter(p => SMOOTH_POSES.includes(p.label)).map(p => ({ label: p.label, clip: p.clip, frames: p.frames, fps: p.fps })),
+        anchors, grips, dirs: DIRS.map(d => d.name),
+        // Дорожек нет: цвет одежды в этом режиме запечён, панель внешности на него не влияет
+        // (и не должна — сравнивают-то силуэт и посадку, а не палитру).
+        palette: SMOOTH_PALETTE_HEX.map(hex => [hex, hex])
+    };
+    const lines = [];
+    lines.push("/**");
+    lines.push(" * js/render/herosmooth.js — тот же 3D-риг, но БЕЗ пиксельного грейда.");
+    lines.push(" * Собирает `node tools/hero-bake.js --smooth --emit-smooth`. Формат совпадает с");
+    lines.push(" * heroframes.js (те же ячейка, опора, якоря кистей и патчи кулака), поэтому");
+    lines.push(" * hero3d.js переключается между вариантами одной строкой, а сцена и предметы");
+    lines.push(" * не сдвигаются ни на пиксель — сравнивать можно в упор.");
+    lines.push(" */");
+    lines.push(`export const META = ${JSON.stringify(meta)};`);
+    lines.push("");
+    lines.push(`export const PALETTE_HEX = ${JSON.stringify(SMOOTH_PALETTE_HEX)};`);
+    lines.push(`export const INK_HEX = "${SMOOTH_PALETTE_HEX[0]}";`);
+    lines.push("");
+    lines.push(`export const STREAMS = ${JSON.stringify(encodeFlat(encodeFrames(frames)), null, 0)};`);
+    lines.push("");
+    fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
+    fs.writeFileSync(file, `${lines.join("\n")}\n`);
+    const bytes = fs.statSync(file).size;
+    console.log(`SMOOTH: ${file} — ${(bytes / 1024).toFixed(0)} KB, ${DIRS.length * SMOOTH_POSES.length} связок по ${SMOOTH_STEPS} тонов на дорожку, без обводки`);
+}
+
 function encodeFlat(streams) {
     const flat = {};
     for (const [dir, poses] of Object.entries(streams)) {
@@ -762,6 +957,10 @@ function encodeFlat(streams) {
 fs.mkdirSync(OUT, { recursive: true });
 if (flag("preview")) {
     preview();
+} else if (SMOOTH_FILE) {
+    const t0 = Date.now();
+    emitSmooth(bakeAll());
+    console.log(`     (${((Date.now() - t0) / 1000).toFixed(1)} с)`);
 } else if (flag("poses") || flag("emit")) {
     const t0 = Date.now();
     const baked = bakeAll();
