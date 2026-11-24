@@ -359,6 +359,38 @@ export function installDevTools(game, win = window) {
         const speedBtns = [1, 2, 4].map((k) => btn("скорость ×" + k, () => { setSpeed(k); refresh(); }));
         row(noclipBtn, ...speedBtns);
 
+        // ---- стиль героя: грейд / гладкий / вектор. Тот же переключатель, что и
+        // `?hero3d=`, но прямо в панели — с причиной отказа, если модуль не пришёл.
+        // Иначе «открыл ?hero3d=smooth, а там пусто» невозможно разобрать: игрок
+        // видит тишину вместо ответа.
+        add("Стиль героя");
+        const heroState = el("span", { className: "val" });
+        const setHero = async (mode) => {
+            const hero3d = await import("../render/hero3d.js");
+            if (mode === "off") { hero3d.HERO3D.enabled = false; hero3d.HERO3D.quality = "off"; }
+            else {
+                hero3d.HERO3D.enabled = true;
+                const ok = await hero3d.hero3dQuality(mode);
+                if (!ok) toast(`режим «${mode}» недоступен — играет ${hero3d.HERO3D.quality}`);
+            }
+            refreshHeroState();
+        };
+        function refreshHeroState() {
+            import("../render/hero3d.js").then((hero3d) => {
+                const q = hero3d.HERO3D.enabled ? hero3d.HERO3D.quality : "off";
+                const links = hero3d.hero3dLinkCount ? hero3d.hero3dLinkCount() : null;
+                heroState.textContent = `активен: ${q}${links === null ? "" : ` · связок ${links}`}`;
+                for (const b of heroBtns) b.classList.toggle("on", b.dataset.hero === q);
+            });
+        }
+        const heroBtns = [["grade", "Грейд 3D"], ["smooth", "Гладкий 3D"], ["off", "Вектор"]].map(([mode, name]) => {
+            const b = btn(name, () => setHero(mode));
+            b.dataset.hero = mode;
+            return b;
+        });
+        row(...heroBtns);
+        p.append(el("div", { className: "hint" }, [heroState]));
+
         // ---- items
         add("Предметы");
         row(...Object.keys(DEV.kits).map((name) => btn(name, () => {
@@ -454,6 +486,7 @@ export function installDevTools(game, win = window) {
             for (const n of needRows) {
                 n.slider.value = String(Math.round(game.needs[n.key]));
             }
+            if (state.refreshHero) state.refreshHero();
             noclipBtn.classList.toggle("on", state.noclip);
             speedBtns.forEach((b, i) => b.classList.toggle("on", state.speed === [1, 2, 4][i]));
             gridBtn.classList.toggle("on", state.grid);
@@ -472,6 +505,7 @@ export function installDevTools(game, win = window) {
             serverLabel.style.color = state.serverUp ? "#9fd08c" : "#e0a06a";
         }
         state.refresh = refresh;
+        state.refreshHero = refreshHeroState;
         refresh();
         setInterval(() => { if (state.open) refresh(); }, 500);
     }

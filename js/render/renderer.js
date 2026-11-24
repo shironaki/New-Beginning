@@ -709,7 +709,11 @@ export class Renderer {
                     actionTimer: o.actionTimer, actionKind: o.actionKind,
                     actionHand: o.actionHand, tool: state.tool, ...state.hands, idleTime: this.time,
                     torchWind: state.underground ? 0 : Math.cos(state.windAngle || 0) * (state.windStrength || 0),
-                    wading: this._inWater(state.zone, o.x, o.y)
+                    wading: this._inWater(state.zone, o.x, o.y),
+                    // Погода на герое: без этих трёх полей спрайт не знает, что
+                    // ткань должна потемнеть от дождя (см. heroWeatherTint).
+                    weather: state.weather, groundWet: state.groundWet,
+                    underground: !!state.underground, wet: o.wet
                 });
             } else {
                 setShadowOrigin(o.x, o.y);
@@ -720,7 +724,9 @@ export class Renderer {
                     dir: o.dir || "down", phase: o.anim || 0,
                     gait: o.gait != null ? o.gait : (o.moving ? 1 : 0),
                     runBlend: o.runBlend || 0,
-                    moving: !!o.moving, look: o.look, idleTime: this.time
+                    moving: !!o.moving, look: o.look, idleTime: this.time,
+                    weather: state.weather, groundWet: state.groundWet,
+                    underground: !!state.underground, wet: o.wet
                 });
             }
             ctx.restore();

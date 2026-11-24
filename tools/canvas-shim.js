@@ -496,6 +496,24 @@ export class ShimContext {
         const cw = this.canvas.width;
         const d = this.canvas.data;
         const i = (py * cw + px) * 4;
+        if (mode === "copy") {
+            // Replace the whole target — how a scratch layer is reset to exactly
+            // one frame without clearing the shared canvas twice.
+            d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = a * 255;
+            return;
+        }
+        if (mode === "source-atop") {
+            // Source lands only where the destination already has pixels, and the
+            // destination keeps its own alpha. That is what keeps the weather tint
+            // strictly inside the hero's silhouette instead of over the ground.
+            const da = d[i + 3] / 255;
+            if (da <= 0) { d[i] = d[i + 1] = d[i + 2] = d[i + 3] = 0; return; }
+            d[i] = r * a + d[i] * (1 - a);
+            d[i + 1] = g * a + d[i + 1] * (1 - a);
+            d[i + 2] = b * a + d[i + 2] * (1 - a);
+            d[i + 3] = da * 255;
+            return;
+        }
         if (mode === "destination-out") {
             d[i + 3] = d[i + 3] * (1 - a);
             return;

@@ -6,3 +6,5 @@ _preview_*.png
 dev/character-style-lab/gandalf-refs/
 image-search/
 dev/character-style-lab/.smoke/
+
+dev/character-style-lab/.bake/

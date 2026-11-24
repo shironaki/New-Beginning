@@ -1112,7 +1112,13 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
         if (heroMode) {
             const hero3d = await import("./render/hero3d.js");
             if (heroMode === "off") hero3d.HERO3D.enabled = false;
-            else await hero3d.hero3dQuality(heroMode);
+            else {
+                const ok = await hero3d.hero3dQuality(heroMode);
+                if (!ok) {
+                    console.warn(`[hero3d] режим «${heroMode}» недоступен: `
+                        + `${hero3d.HERO3D.error || "нет такого режима"} — играет «${hero3d.HERO3D.quality}»`);
+                }
+            }
         }
         window.GAME = game;
         // The owner's control room. Loaded lazily and locked behind a

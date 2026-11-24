@@ -9,7 +9,7 @@ import { seaColour } from "../js/render/terrain.js";
 import { PROPS, requiredTool, rollDrops } from "../js/sandbox/gather.js";
 import { RNG } from "../js/core/rng.js";
 import { torchFlame, paintTorchFlame } from "../js/render/torch.js";
-import { toolAttachment, drawCharacter } from "../js/render/character.js";
+import { toolAttachment, drawCharacter, heroWeatherTint, WET } from "../js/render/character.js";
 import { ShimCanvas } from "../tools/canvas-shim.js";
 import { ReliefPatch, ReliefWalker, RELIEF, RELIEF_PROPS } from "../js/world/relief.js";
 import { reliefMesh, drawRelief } from "../js/render/relief.js";
@@ -410,5 +410,56 @@ test("mesh and live objects render without NaNs or modifying the production worl
     assert.gt(c.data.filter((v) => v > 0).length, 10000);
     const z = generateZone("ashfall", 1066618561);
     assert.not(z.terrain instanceof ReliefPatch);
+});
+suite("weather-wet hero and frame-true item order");
+const rgbLum = ([r, g, b]) => r * 0.3 + g * 0.59 + b * 0.11;
+test("rain darkens the sprite hero, snow frosts it, a roof cancels both", () => {
+    assert.eq(heroWeatherTint({}), null, "сухой герой не получает слой вообще");
+    assert.eq(heroWeatherTint({ weather: "storm", groundWet: 1, underground: true }), null,
+        "под крышей дождь героя не мочит");
+    const rain = heroWeatherTint({ weather: "storm", groundWet: 1 });
+    const dry = heroWeatherTint({ weather: "clear", groundWet: 0 });
+    assert.ok(rain, "в шторм слой обязан быть");
+    assert.eq(dry, null, "в ясную погоду слоя нет");
+    assert.ok(rgbLum(rain.rgb) < 90, `мокрый слой тёмный, а не светлый (${rain.rgb})`);
+    assert.ok(rain.a > 0.2 && rain.a <= 0.46, `альфа мокрого слоя в разумных границах: ${rain.a}`);
+    const snow = heroWeatherTint({ weather: "snow", groundWet: 0.6 });
+    assert.ok(snow && rgbLum(snow.rgb) > 190, "снег — светлый холодный слой");
+    assert.ok(snow.a < rain.a, "иней легче, чем вода");
+    assert.ok(heroWeatherTint({ weather: "snow", groundWet: 1 }).a > snow.a,
+        "мокрый снег плотнее сухого");
+    assert.ok(Math.abs(heroWeatherTint({ wet: WET.fromWading }).a - WET.rainA) < 0.02,
+        "вылез из воды — слой равен «полностью мокрый»");
+});
+test("which hand is behind the body comes from the frame's depth buffer, not the view flag", () => {
+    const occl = HERO_META.occl;
+    assert.ok(occl, "heroframes обязан нести META.occl");
+    for (const dir of HERO_META.dirs) {
+        for (const pose of HERO_META.poses.map(p => p.label)) {
+            const key = `${dir}/${pose}`, o = occl[key], a = HERO_META.anchors[key];
+            assert.ok(o && a, `${key}: нет данных скрытости`);
+            for (const side of ["r", "l"]) {
+                assert.eq((o[side] || []).length, (a[side] || []).length,
+                    `${key}/${side}: кадров скрытости и якорей должно быть поровну`);
+                for (const v of o[side]) assert.ok(v === 0 || v === 1, `${key}/${side}: не 0/1`);
+            }
+        }
+        // Профиль — единственный ракурс, где руки ГАРАНТИРОВАННО разные: одна за
+        // корпусом, вторая перед. Если это снова станет одинаковым, значит порядок
+        // опять выводят из направления взгляда, а не из кадра.
+        const idle = occl[`${dir}/idle`];
+        if (dir === "left") {
+            assert.ok(idle.r.every(v => v === 1), "вид слева: правая рука за корпусом");
+            assert.ok(idle.l.every(v => v === 0), "вид слева: левая рука спереди");
+        }
+        if (dir === "right") {
+            assert.ok(idle.l.every(v => v === 1), "вид справа: левая рука за корпусом");
+            assert.ok(idle.r.every(v => v === 0), "вид справа: правая рука спереди");
+        }
+        if (dir === "down") {
+            assert.ok(idle.r.every(v => !v) && idle.l.every(v => !v),
+                "вид спереди: обе кисти открыты — предмет рисуется поверх спрайта");
+        }
+    }
 });
 await run("visual-world");

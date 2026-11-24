@@ -140,10 +140,32 @@ const POSES = [
 // штаны и ботинки (v2.0: «all models work with just the head from the Base
 // Characters»), а кожа рук его собственной текстуры теперь всё равно красится
 // дорожкой образа — прежний конфликт оттенков решает палитра в рантайме.
+// Тело базового персонажа нужно ЦЕЛИКОМ, а не только головой. Раньше от него
+// брали голову (торс и руки «шире куртки», и одежда тонула в теле) — и платой
+// были дырки: у комплекта Male_Peasant есть раскрытые швы на рукавах, а за ними
+// ничего не было, кроме неба. Теперь тело — подкладка: оно чуть утянуто к оси
+// (shrink), отодвинуто назад (отрицательный bias) и красится дорожкой кожи, так
+// что прореха в рукаве показывает руку, а не землю. Силиэт при этом не жиреет:
+// 0.93 по X/Z держит тело внутри одежды.
+const UNDERSUIT = flag("no-undersuit") ? null : {
+    shrink: Number(opt("shrink", 0.97)),
+    // Сдвиг ВДОЛЬ нормали, а не только сужение к оси: плечи и запястья тела
+    // торчали из рукавов («кожа поверх куртки»), а ось на них не работает.
+    inset: Number(opt("inset", 0.02)),
+    bias: -0.006
+};
 const PARTS = [
-    { file: () => path.join(ASSETS, "char", `Superhero_${WHO}_FullBody.gltf`), role: "body", bias: 0, headOnly: true },
+    UNDERSUIT
+        ? { file: () => path.join(ASSETS, "char", `Superhero_${WHO}_FullBody.gltf`), role: "body", bias: UNDERSUIT.bias, undersuit: UNDERSUIT }
+        : { file: () => path.join(ASSETS, "char", `Superhero_${WHO}_FullBody.gltf`), role: "body", bias: 0, headOnly: true },
     { file: () => (OUTFIT ? path.join(ASSETS, "outfits", `${OUTFIT}.glb`) : null), role: "clothes", bias: 0.002 },
-    { file: () => (HAIR ? path.join(ASSETS, "hair", `${HAIR}.glb`) : null), role: "hair", bias: 0.006 }
+    // Волосы садятся на голову НЕ как есть: пак рисует их под собственную
+    // модель головы, и без подгонки причёсда превращается в шлем, под которым
+    // лица не видно (ровно на это пожаловался владелец). HAIR_FIT подгоняет
+    // ширину по габариту головы и поднимает край над бровями; faceCut дополнительно
+    // вырезает пряди, которые всё ещё лежат ПЕРЕД лицом.
+    { file: () => (HAIR ? path.join(ASSETS, "hair", `${HAIR}.glb`) : null), role: "hair", bias: 0.006,
+      fit: flag("no-hairfit") ? null : { width: Number(opt("hairwidth", 1.06)), lift: Number(opt("hairlift", 0.012)), faceCut: !flag("no-facecut") } }
 ];
 const HEAD_BONES = /^(head|neck_01)$/i;
 // Клипы ищутся по всем подключённым библиотекам: базовый пак даёт походку,
@@ -209,6 +231,9 @@ function trackOf(role, matName, meshName) {
     const name = String(matName || "");
     const mesh = String(meshName || "");
     if (role === "hair") return TRACK_OF.hair;
+    // Подкладка: всё, что не глаза и не брови, красится кожей. Тканевый
+    // костюм супергероя из этой же модели в прорехах смотреться не должен.
+    if (role === "body" && UNDERSUIT) return /eye|brow|teeth/i.test(name) ? 0 : TRACK_OF.skin;
     if (role === "clothes") {
         if (/regular|skin/i.test(name)) return TRACK_OF.skin;
         // Обувь — не цвет одежды: её тон и так сидит в общей палитре (boot/leather),
@@ -263,8 +288,80 @@ function loadPart(spec) {
 function buildScene() {
     const parts = PARTS.map(loadPart).filter(Boolean);
     const scene = { parts, rig: parts[0].rig, skin: parts[0].skin, drawables: [] };
+    // Причёска подгоняется по голове, поэтому габарит головы нужен заранее.
+    const body = parts.find(x => x.spec.role === "body");
+    if (body) body.headBox = headBoxOf(body);
     for (const part of parts) collectDrawables(part, scene);
     return scene;
+}
+
+/**
+ * Причёска → по голове. Полоса отсечения лица: всё, что попадает в ящик лица
+ * (лоб → подбородок, от спинки носа вперёд), вырезается из волос, иначе косая
+ * прядь ложится поверх глаз и лицо исчезает.
+ */
+function fitHairToHead(prim, head, fit) {
+    let hx0 = Infinity, hx1 = -Infinity, hz0 = Infinity, hz1 = -Infinity, hy0 = Infinity, hy1 = -Infinity;
+    for (let v = 0; v < prim.count; v += 1) {
+        const x = prim.positions[v * 3], y = prim.positions[v * 3 + 1], z = prim.positions[v * 3 + 2];
+        if (x < hx0) hx0 = x; if (x > hx1) hx1 = x;
+        if (z < hz0) hz0 = z; if (z > hz1) hz1 = z;
+        if (y < hy0) hy0 = y; if (y > hy1) hy1 = y;
+    }
+    const k = Math.min(1.2, ((head.x1 - head.x0) * fit.width) / Math.max(1e-4, hx1 - hx0));
+    const cx = (hx0 + hx1) / 2, cz = (hz0 + hz1) / 2;
+    const dy = (head.y1 + fit.lift) - hy1;                      // верх волос — чуть выше макушки
+    const positions = new Float32Array(prim.count * 3);
+    for (let v = 0; v < prim.count; v += 1) {
+        positions[v * 3] = cx + (prim.positions[v * 3] - cx) * k;
+        positions[v * 3 + 1] = prim.positions[v * 3 + 1] + dy;
+        positions[v * 3 + 2] = cz + (prim.positions[v * 3 + 2] - cz) * k;
+    }
+    let normals = prim.normals ? new Float32Array(prim.normals) : null;
+    if (normals && k !== 1) {
+        for (let v = 0; v < normals.length; v += 3) { normals[v] /= k; normals[v + 2] /= k; }
+    }
+    if (!fit.faceCut) return { positions, normals, indices: prim.indices, count: prim.count, indicesDelta: 0 };
+    // Ящик лица: по ширине головы, от линии бровей вниз до подбородка, наружу.
+    const fx = (head.x1 - head.x0) * 0.62, fy0 = head.y0 + (head.y1 - head.y0) * 0.55, fy1 = head.y1 - (head.y1 - head.y0) * 0.02;
+    const fz0 = head.z0 + (head.z1 - head.z0) * 0.62;
+    const inside = (i) => {
+        const x = positions[i * 3], y = positions[i * 3 + 1], z = positions[i * 3 + 2];
+        return Math.abs(x - cx) < fx && y > fy0 && y < fy1 && z > fz0;
+    };
+    const src = prim.indices;
+    if (!src) return { positions, normals, indices: src, count: prim.count, indicesDelta: 0 };
+    const out = [];
+    let cut = 0;
+    for (let t = 0; t + 2 < src.length; t += 3) {
+        if (inside(src[t]) && inside(src[t + 1]) && inside(src[t + 2])) { cut += 1; continue; }
+        out.push(src[t], src[t + 1], src[t + 2]);
+    }
+    return { positions, normals, indices: Uint32Array.from(out), count: out.length, indicesDelta: cut };
+}
+
+/** Габарит головы по весам: вершины, у которых главная кость — Head/neck_01. */
+function headBoxOf(part) {
+    const names = part.boneNames;
+    let b = { x0: Infinity, y0: Infinity, z0: Infinity, x1: -Infinity, y1: -Infinity, z1: -Infinity };
+    for (let m = 0; m < (part.gltf.json.meshes?.length || 0); m += 1) {
+        for (const prim of readMesh(part.rig, m)) {
+            if (!prim.joints || !prim.weights) continue;
+            for (let v = 0; v < prim.count; v += 1) {
+                let best = prim.joints[v * 4], bw = -1;
+                for (let k = 0; k < 4; k += 1) {
+                    const w = prim.weights[v * 4 + k];
+                    if (w > bw) { bw = w; best = prim.joints[v * 4 + k]; }
+                }
+                if (!HEAD_BONES.test(names[best] || "")) continue;
+                const x = prim.positions[v * 3], y = prim.positions[v * 3 + 1], z = prim.positions[v * 3 + 2];
+                if (x < b.x0) b.x0 = x; if (x > b.x1) b.x1 = x;
+                if (y < b.y0) b.y0 = y; if (y > b.y1) b.y1 = y;
+                if (z < b.z0) b.z0 = z; if (z > b.z1) b.z1 = z;
+            }
+        }
+    }
+    return Number.isFinite(b.x0) ? b : null;
 }
 
 function collectDrawables(part, scene) {
@@ -281,15 +378,45 @@ function collectDrawables(part, scene) {
             // берём карту волос по имени, иначе голова выходит однотонным тёмным пятном.
             if (isHair && !textureFile) textureFile = resolveTexture(`T_Hair_${WHO === "Female" ? 2 : 1}_BaseColor.png`);
             if (isHair && !textureFile) factor = [0.28, 0.18, 0.12, 1];
+            let positions = prim.positions, normals = prim.normals;
+            if (spec.undersuit) {
+                const { shrink: k, inset } = spec.undersuit;
+                positions = new Float32Array(prim.positions);
+                const nrm = prim.normals;
+                for (let v = 0; v < positions.length; v += 3) {
+                    positions[v] *= k; positions[v + 2] *= k;
+                    if (nrm && inset) {
+                        const nx = nrm[v], ny = nrm[v + 1], nz = nrm[v + 2];
+                        const l = Math.hypot(nx, ny, nz) || 1;
+                        positions[v] -= (nx / l) * inset;
+                        positions[v + 1] -= (ny / l) * inset;
+                        positions[v + 2] -= (nz / l) * inset;
+                    }
+                }
+                if (normals && k !== 1) {
+                    normals = new Float32Array(prim.normals);
+                    for (let v = 0; v < normals.length; v += 3) { normals[v] /= k; normals[v + 2] /= k; }
+                }
+            }
+            if (spec.fit && part.headBox) {
+                const fit = fitHairToHead(prim, part.headBox, spec.fit);
+                positions = fit.positions; normals = fit.normals;
+                if (fit.indicesDelta) console.log(`   [hair] face-cut: убрано граней ${fit.indicesDelta}`);
+            }
             part.drawables.push({
                 name: `${mesh.name}#${pi}`,
-                positions: prim.positions, normals: prim.normals, uv: prim.uv,
+                positions, normals, uv: prim.uv,
                 joints: prim.joints, weights: prim.weights, indices: prim.indices, count: prim.count,
                 factor,
                 depthBias: spec.bias,
+                // Глаза и брови рисуются НЕ квантизацией, а отдельным штампом
+                // (см. stampFeatures): в источнике это 0.03 ед. высоты, т. е.
+                // меньше пикселя спрайта.
+                feature: spec.role === "body" && mesh.name === "Face.001" ? "eyes"
+                    : spec.role === "body" && mesh.name === "Face" ? "brows" : null,
                 track: trackOf(spec.role, mat.name, mesh.name),
-                texture: mat.texture?.buffer ? decodeTexture(mat.texture)
-                    : textureFile ? loadTexture(textureFile) : null
+                texture: flag("no-tex") ? null : (mat.texture?.buffer ? decodeTexture(mat.texture)
+                    : textureFile ? loadTexture(textureFile) : null)
             });
         });
     });
@@ -321,6 +448,24 @@ function clipDuration(animLibs, clipName) {
 
 const BIG = { w: Math.round((CELL.w + 40) * SS), h: Math.round((CELL.h + 40) * SS) };
 
+/**
+ * Свет для запекки — В ПРОСТРАНСТВЕ КАМЕРЫ и смотрит на персонажа (z < 0), а не
+ * от него. Дефолт растеризатора подсвечивает то, что повёрнуто ОТ наблюдателя:
+ * затылок светлый, лицо в тени, и на 100-пиксельном спрайте лицо превращается в
+ * тёмное пятно («где лицо?»). Камерный свет поворачивается вместе с ракурсом,
+ * поэтому лицо читается в каждом из четырёх, а не только в front-view.
+ * Направление света при этом косое и холодным небом сверху, чтобы складки ткани
+ * не превратились в плоскую заливку.
+ */
+const HERO_LIGHT = {
+    dir: [-0.36, 0.72, -0.58],
+    color: [1.0, 0.97, 0.9],
+    intensity: 0.86,
+    sky: [0.46, 0.52, 0.6],
+    ground: [0.34, 0.28, 0.22],
+    ambient: 0.22
+};
+
 function renderRaw(scene, anim, { yaw, time = null, clip = null }) {
     const unit = PX_PER_UNIT * (BODY_UNITS / MODEL_HEIGHT) * SS;
     const frame = makeFrame(BIG.w, BIG.h);
@@ -334,7 +479,7 @@ function renderRaw(scene, anim, { yaw, time = null, clip = null }) {
     }
     const basis = cameraBasis({ yaw, pitch: PITCH, target: [0, 0.93, 0], distance: 8 });
     clearFrame(frame);
-    renderFrame(frame, { basis }, drawables, { pxPerUnit: unit });
+    renderFrame(frame, { basis }, drawables, { pxPerUnit: unit, light: HERO_LIGHT });
     frame._basis = basis;
     frame._unit = unit;
     // Смещение кадра: макушка и стопы должны влезть, поэтому считаем box по T-позе один раз.
@@ -442,13 +587,183 @@ function handPoint(scene, frame, side) {
     const wrist = bone(`hand_${side}`), knuckle = bone(`middle_01_${side}`), elbow = bone(`lowerarm_${side}`);
     const fist = [(wrist[12] + knuckle[12]) / 2, (wrist[13] + knuckle[13]) / 2, (wrist[14] + knuckle[14]) / 2];
     const f = project(scene, frame, ...fist), e = project(scene, frame, elbow[12], elbow[13], elbow[14]);
+    // Насколько кисть ушла от камеры вдоль оси взгляда: больше = дальше. Это
+    // единственный честный ответ на вопрос «какая рука ближняя» в данном кадре:
+    // в анимации они меняются местами, а векторная имитация ракурса этого не знает.
+    const b = frame._basis;
+    const depth = (fist[0] - b.eye[0]) * b.fwd[0] + (fist[1] - b.eye[1]) * b.fwd[1] + (fist[2] - b.eye[2]) * b.fwd[2];
+    // Открыта ли кисть наблюдателю. Буфер глубины растеризатора лежит в тех же
+    // мировых единицах (view z = −глубина + depthBias), поэтому сравниваем «что
+    // видно в пикселе кулака» с «насколько далеко сама кисть»: если видимая
+    // поверхность ближе — кисть под телом, и предмет этого кадра обязан уйти ЗА
+    // спрайт. Раньше порядок решал булев флаг `far` (векторная имитация ракурса),
+    // и именно поэтому спереди предмет прятался за спиной, а сзади вылезал.
     return {
         x: (f.x - BOX.x) / SS,
         y: (f.y - BOX.y) / SS,
-        ang: Math.atan2(f.x - e.x, e.y - f.y)
+        ang: Math.atan2(f.x - e.x, e.y - f.y),
+        depth: +depth.toFixed(3),
+        hidden: handHidden(frame, f, e, depth)
     };
 }
 
+/**
+ * Проверка «кисть под телом». Пробуем два пикселя: саму кисть и точку на 14 px
+ * ближе центра тела вдоль предплечья — внутренний край предмета. Скрытой кисть
+ * считается только когда закрыты оба: тогда предмет целиком по ту сторону
+ * силуэта и рисовать его поверх спрайта нельзя. Частично прикрытая кисть
+ * остаётся «спереди»: клинок, упирающийся в грудь, всё равно виден целиком.
+ */
+function handHidden(frame, f, e, depth) {
+    const own = -depth;
+    const ux = f.x - e.x, uy = f.y - e.y;
+    const ul = Math.hypot(ux, uy) || 1;
+    const at = (sx, sy) => {
+        const x = Math.round(sx), y = Math.round(sy);
+        if (x < 0 || y < 0 || x >= frame.width || y >= frame.height) return -Infinity;
+        let best = -Infinity;
+        for (let dy = -1; dy <= 1; dy += 1) {
+            for (let dx = -1; dx <= 1; dx += 1) {
+                const q = frame.depth[(y + dy) * frame.width + x + dx];
+                if (q > best) best = q;
+            }
+        }
+        return best;
+    };
+    const fist = at(f.x, f.y);
+    const inner = at(f.x - (ux / ul) * 14, f.y - (uy / ul) * 14);
+    // Порог = половина толщины кисти (проекция даёт ЦЕНТР ладони, а видимой
+    // поверхностью всегда оказывается тыльная сторона той же ладони: 3–5 см).
+    // Меньше 0.09 — и «скрыта» становится любая рука; больше 0.15 — перестают
+    // видно прятаться кисти за спиной в боковых ракурсах.
+    const MARGIN = 0.09;
+    return (fist > own + MARGIN && inner > own + MARGIN) ? 1 : 0;
+}
+
+/**
+ * Заполняющий свет на лицо. На 100-пиксельном герое лицо — это 12 px, и если оно
+ * попадает в тень (а в этом паке брови, ноздри и теневой альбедо-слой дают почти
+ * сплошную тёмную маску), то на экране остаётся чёрное пятно вместо лица — ровно
+ * «где лицо?». Решение не косметическое, а светотехническое: пиксели кожи в радиусе
+ * головы, яркость которых ниже среднего, поднимаются к светлой середине тона.
+ * Волосы (дорожка hair) и глаза (свой материал, вне дорожек) не трогаем — иначе
+ * лицо потеряло бы брови и стало бы плоским пятном.
+ */
+function headPoint(scene, frame) {
+    const rig = scene.rig;
+    const node = rig.nameToNode.get("Head");
+    if (node === undefined) return null;
+    const m = rig.world[node];
+    const p = project(scene, frame, m[12], m[13], m[14]);
+    return { x: p.x, y: p.y, r: 0.135 * UNIT };
+}
+
+const FACE_SKIN_FLOOR = 0.92;           // доля собственного тона кожи, которую лицо обязано показать
+// Ниже этой доли яркости от цели — уже не тень, а черта лица; её не трогаем.
+const FACE_FEATURE_FLOOR = 0.3;
+function faceFill(frame, head) {
+    if (!head) return;
+    const r2 = head.r * head.r;
+    const skin = TRACK_OF.skin;
+    const base = hexRgb(LOOK.skin);
+    const target = lum(base[0], base[1], base[2]) * FACE_SKIN_FLOOR;
+    const x0 = Math.max(0, Math.floor(head.x - head.r)), x1 = Math.min(frame.width - 1, Math.ceil(head.x + head.r));
+    const y0 = Math.max(0, Math.floor(head.y - head.r)), y1 = Math.min(frame.height - 1, Math.ceil(head.y + head.r));
+    for (let y = y0; y <= y1; y += 1) {
+        for (let x = x0; x <= x1; x += 1) {
+            const dx = x - head.x, dy = (y - head.y) * 1.15;   // лицо чуть выше центра головы
+            if (dx * dx + dy * dy > r2) continue;
+            const i = y * frame.width + x;
+            if (frame.track[i] !== skin) continue;
+            const o = i * 4;
+            if (frame.data[o + 3] < 40) continue;
+            const L = frame.data[o] * 0.3 + frame.data[o + 1] * 0.59 + frame.data[o + 2] * 0.11;
+            if (L >= target) continue;
+            // Иные тёмные пиксели лица — это ЧЕРТЫ (брови, ресницы, ноздри, линия
+            // рта), а не тень. Поднимать их нельзя: проверено, лицо становится
+            // белым ovalом без глаз — то есть «лица нет», только светлого цвета.
+            if (L < target * FACE_FEATURE_FLOOR) continue;
+            // Подмешиваем тон кожи пропорционально недобору: тень на лице
+            // остаётся тенью, но не чёрной. Полного замещения нет — иначе лицо
+            // стало бы наклейкой и потеряло объём на развороте.
+            const t = Math.min(0.42, (target - L) / Math.max(1, target) * 0.75);
+            for (let c = 0; c < 3; c += 1) {
+                frame.data[o + c] = frame.data[o + c] * (1 - t) + base[c] * t;
+            }
+        }
+    }
+}
+
+/**
+ * Глаза и брови — отдельным штампом поверх готового спрайта.
+ *
+ * Почему не через обычный пайплайн: меш глаз в источнике занимает 0.03 ед. высоты при
+ * росте 1.81 ед., то есть ~1.7 px в большом кадре и меньше ОДНОГО пикселя
+ * спрайта (ячейка 101×113). boxAverage размывает их в тот же тон, что и кожа,
+ * и в игре лицо превращается в пустой овал — ровно «где лицо?». Поэтому
+ * треугольники глаз/бровей растеризуются в сетку спрайта напрямую: пиксель,
+ * которого касается черта, становится тёмным. Проверка глубины та же, что и для
+ * кисти: если в этой точке спрайта видна поверхность ЗАМЕТНО ближе глаза, черта
+ * скрыта (затылок, вид сзади) и рисовать её нельзя.
+ */
+function stampFeatures(scene, frame, sprite) {
+    const basis = frame._basis;
+    const pos = SMOOTH ? SMOOTH_AT.hair : PALETTE.length;      // черта = самый тёмный тон
+    const rgb = SMOOTH ? hexRgb(SMOOTH_HEX.hair[0]) : INK;
+    const depthOf = (x, y, z) => -((x - basis.eye[0]) * basis.fwd[0] + (y - basis.eye[1]) * basis.fwd[1] + (z - basis.eye[2]) * basis.fwd[2]);
+    const nodes = { eyes: [], brows: [] };
+    for (const d of scene.drawables) {
+        if (!d.feature || !d.jointWorld) continue;
+        const m = d.jointWorld;
+        for (let v = 0; v < d.count; v += 1) {
+            let x = 0, y = 0, z = 0;
+            for (let k = 0; k < 4; k += 1) {
+                const w = d.weights ? d.weights[v * 4 + k] : 1;
+                if (!w) continue;
+                const mm = m[d.joints ? d.joints[v * 4 + k] : 0];
+                if (!mm) continue;
+                const ox = d.positions[v * 3], oy = d.positions[v * 3 + 1], oz = d.positions[v * 3 + 2];
+                x += w * (mm[0] * ox + mm[4] * oy + mm[8] * oz + mm[12]);
+                y += w * (mm[1] * ox + mm[5] * oy + mm[9] * oz + mm[13]);
+                z += w * (mm[2] * ox + mm[6] * oy + mm[10] * oz + mm[14]);
+            }
+            const p = project(scene, frame, x, y, z);
+            const bx = Math.round(p.x), by = Math.round(p.y);
+            if (bx < 0 || by < 0 || bx >= frame.width || by >= frame.height) continue;
+            if (frame.depth[by * frame.width + bx] > depthOf(x, y, z) + 0.03) continue;   // вершина скрыта телом
+            nodes[d.feature].push({ x: (p.x - BOX.x) / SS, y: (p.y - BOX.y) / SS });
+        }
+    }
+    const stamp = (x, y) => {
+        const px = Math.round(x), py = Math.round(y);
+        if (px < 0 || py < 0 || px >= CELL.w || py >= CELL.h) return;
+        const at = py * CELL.w + px;
+        if (sprite.index[at] === 255) return;                     // в фон не рисуем
+        sprite.index[at] = pos;
+        const o = at * 4;
+        sprite.data[o] = rgb[0]; sprite.data[o + 1] = rgb[1]; sprite.data[o + 2] = rgb[2]; sprite.data[o + 3] = 255;
+    };
+    // По две точки: левая и правая сторона лица. Разделяем по центру головы — в
+    // профиль обе группы слипаются в одну, и тогда ставится одна точка (это
+    // правильно: второй глаз в профиль не виден).
+    const head = headPoint(scene, frame);
+    const cx = head ? (head.x - BOX.x) / SS : CELL.w / 2;
+    const clusters = (list) => {
+        if (!list.length) return [];
+        const left = list.filter(p => p.x < cx), right = list.filter(p => p.x >= cx);
+        return [left, right].filter(g => g.length).map(g => ({
+            x: g.reduce((a, p) => a + p.x, 0) / g.length,
+            y: g.reduce((a, p) => a + p.y, 0) / g.length
+        }));
+    };
+    const eyeC = clusters(nodes.eyes), browC = clusters(nodes.brows);
+    for (const e of eyeC) stamp(e.x, e.y);
+    // Брови — на строку ВЫШЕ своего центра, но не ниже уровня глаз: иначе в
+    // наклоне головы они сливаются с глазами в одну полосу (первая версия
+    // именно так и делала — лицо выглядело повязкой).
+    for (const b of browC) stamp(b.x, Math.min(b.y - 1, (eyeC[0] ? eyeC[0].y : b.y) - 2));
+    return eyeC.length + browC.length;
+}
 /** Пиксель ячейки → игровые единицы: 2 px спрайта = 1 единица, ноль — линия стоп. */
 function toUnits(px, py) {
     return { x: (px - CELL.w / 2) / PX_PER_UNIT, y: (py - (CELL.h - FOOT)) / PX_PER_UNIT };
@@ -709,6 +1024,125 @@ function applySmooth(sprite, frame) {
     return sprite;
 }
 
+/**
+ * Зашиваем замкнутые пустоты. Часть из — не дыры в смысле геометрии, а стыки:
+ * там, где куртка примыкает к рукаву, бокс-фильтр 4×4 видит две поверхности с
+ * антиалиасом и решает, что пиксель пустой. На экране это дырка в землю внутри
+ * тела, и никакая утяжка подкладки её не убирает. Лечение честное: пиксель,
+ * окружённый силуэтом со всех сторон, не может быть фоном — берём цвет соседа.
+ * Проходов нужно несколько: цепочки дыр закрываются итеративно.
+ */
+function closeHoles(sprite, passes = 3) {
+    const w = CELL.w, h = CELL.h;
+    for (let p = 0; p < passes; p += 1) {
+        const enclosed = new Uint8Array(w * h);
+        const seen = new Uint8Array(w * h);
+        const stack = [];
+        for (let x = 0; x < w; x += 1) stack.push(x, (h - 1) * w + x);
+        for (let y = 0; y < h; y += 1) stack.push(y * w, y * w + w - 1);
+        while (stack.length) {
+            const q = stack.pop();
+            if (q < 0 || q >= w * h || seen[q] || sprite.index[q] !== 255) continue;
+            seen[q] = 1;
+            const x = q % w;
+            if (x > 0) stack.push(q - 1);
+            if (x < w - 1) stack.push(q + 1);
+            stack.push(q - w, q + w);
+        }
+        let fixed = 0;
+        for (let i = 0; i < w * h; i += 1) {
+            if (sprite.index[i] !== 255 || seen[i]) continue;
+            const x = i % w, y = (i / w) | 0;
+            const around = [i - 1, i + 1, i - w, i + w].filter(q => q >= 0 && q < w * h && (Math.abs(q % w - x) <= 1));
+            let pick = -1;
+            for (const q of around) if (sprite.index[q] !== 255) { pick = q; break; }
+            if (pick < 0) { continue; }
+            enclosed[i] = 1;
+            sprite.index[i] = sprite.index[pick];
+            const a = i * 4, b = pick * 4;
+            sprite.data[a] = sprite.data[b]; sprite.data[a + 1] = sprite.data[b + 1];
+            sprite.data[a + 2] = sprite.data[b + 2]; sprite.data[a + 3] = 255;
+            fixed += 1;
+        }
+        if (!fixed) break;
+    }
+    return sprite;
+}
+
+/**
+ * Замкнутые пустоты кадра: пиксели, до которых flood-fill пустоты с края кадра
+ * не дошёл. Через них в игре видна земля — ровно то, что владелец назвал
+ * «просвечивающими пикселями» на одежде, спине, волосах и ботинках. Считаем и
+ * для сырого рендера, и для спрайта: если дырки уже в сырье — виноват
+ * альфа-тест текстуры или отвернутые грани, если только в спрайте — квантизация.
+ */
+function enclosedHoles(alphaAt, w, h) {
+    const empty = (i) => alphaAt(i) < 40;
+    const seen = new Uint8Array(w * h);
+    const stack = [];
+    for (let x = 0; x < w; x += 1) stack.push(x, (h - 1) * w + x);
+    for (let y = 0; y < h; y += 1) stack.push(y * w, y * w + w - 1);
+    while (stack.length) {
+        const q = stack.pop();
+        if (q < 0 || q >= w * h || seen[q] || !empty(q)) continue;
+        seen[q] = 1;
+        const x = q % w;
+        if (x > 0) stack.push(q - 1);
+        if (x < w - 1) stack.push(q + 1);
+        stack.push(q - w, q + w);
+    }
+    let n = 0;
+    const where = [];
+    for (let i = 0; i < w * h; i += 1) {
+        if (!empty(i) || seen[i]) continue;
+        n += 1;
+        if (where.length < 4) where.push(`${i % w},${(i / w) | 0}`);
+    }
+    return { n, where };
+}
+
+function measureHoles() {
+    const scene = buildScene();
+    const anim = loadAnimLibs();
+    const anchor = renderRaw(scene, anim, { yaw: 0, time: 0, clip: "A_TPose" });
+    BOX = anchorBoxFrom(anchor);
+    let totalRaw = 0, totalSprite = 0, bad = [];
+    for (const dir of DIRS) {
+        for (const pose of POSES.filter(x => x.ship)) {
+            const duration = clipDuration(anim, pose.clip) || 1;
+            for (let i = 0; i < Math.min(2, pose.frames); i += 1) {
+                const t = (i / pose.frames) * duration * 0.98;
+                const raw = gradeFrame(renderRaw(scene, anim, { yaw: dir.yaw, time: t, clip: pose.clip }));
+                const rawCut = { x: BOX.x, y: BOX.y };
+                const holeRaw = enclosedHoles((cell) => {
+                    const x = cell % CELL.w, y = (cell / CELL.w) | 0;
+                    // на уровне большого кадра: максимум альфы внутри ячейки, иначе
+                    // антиалиасованный край посчитается дыркой
+                    let a = 0;
+                    for (let dy = 0; dy < SS; dy += 1) for (let dx = 0; dx < SS; dx += 1) {
+                        const fi = (rawCut.y + y * SS + dy) * raw.width + (rawCut.x + x * SS + dx);
+                        a = Math.max(a, raw.data[fi * 4 + 3]);
+                    }
+                    return a;
+                }, CELL.w, CELL.h);
+                const sprite = spriteFromPixels(
+                    { data: raw.data, w: raw.width, h: raw.height },
+                    { grid: { w: CELL.w, h: CELL.h }, mode: "palette", palette: PALETTE, ink: INK, dither: Number(opt("dither", 0.2)), outlineWidth: Number(opt("outline", 2)), outline: true, box: BOX }
+                );
+                const holeSprite = sprite ? enclosedHoles((cell) => (sprite.index[cell] === 255 ? 0 : 255), CELL.w, CELL.h) : { n: 0, where: [] };
+                if (sprite) closeHoles(sprite);
+                const holeAfter = sprite ? enclosedHoles((cell) => (sprite.index[cell] === 255 ? 0 : 255), CELL.w, CELL.h) : { n: 0, where: [] };
+                totalRaw += holeRaw.n; totalSprite += holeSprite.n;
+                if (holeAfter.n || holeSprite.n) bad.push(`${dir.name}/${pose.label}#${i}: до зашивки ${holeSprite.n} ${holeSprite.where.join(" ")} | после ${holeAfter.n} ${holeAfter.where.join(" ")}`);
+            }
+        }
+    }
+    console.log(`HOLES: сырых дыр ${totalRaw}, спрайт до зашивки ${totalSprite}`);
+    bad.sort((a, b) => parseInt(b.split("| ")[1], 10) - parseInt(a.split("| ")[1], 10));
+    for (const line of bad.slice(0, 10)) console.log(`   ${line}`);
+    if (!bad.length) console.log("   ✅ замкнутых пустот нет");
+}
+
 function bakeAll() {
     const scene = buildScene();
     const anim = loadAnimLibs();
@@ -718,6 +1152,7 @@ function bakeAll() {
     const sprites = [];
     const anchorsByPose = new Map();
     const gripsByPose = new Map();
+    const occlByPose = new Map();
     for (const dir of DIRS) {
         frames[dir.name] = {};
         for (const pose of POSES) {
@@ -725,25 +1160,30 @@ function bakeAll() {
             const cells = [];
             const anchors = { r: [], l: [] };
             const grips = { r: [], l: [] };
+            const occl = { r: [], l: [] };
             for (let i = 0; i < pose.frames; i += 1) {
                 const t = (i / pose.frames) * duration * 0.98;
                 const raw = gradeFrame(renderRaw(scene, anim, { yaw: dir.yaw, time: t, clip: pose.clip }));
+                faceFill(raw, headPoint(scene, raw));          // свет до квантизации, иначе лицо уже не спасти
                 const sprite = spriteFromPixels(
                     { data: raw.data, w: raw.width, h: raw.height },
                     { grid: { w: CELL.w, h: CELL.h }, mode: "palette", palette: PALETTE, ink: INK,
-                      dither: SMOOTH ? 0 : Number(opt('dither', 0.2)),
+                      dither: SMOOTH ? 0 : Number(opt('dither', 0.14)),
                       outlineWidth: SMOOTH ? 0 : Number(opt('outline', 2)),
                       outline: !SMOOTH, box: BOX }
                 );
                 if (!sprite) throw new Error(`пустой кадр ${dir.name}/${pose.clip}#${i}`);
                 if (SMOOTH) applySmooth(sprite, raw); else applyRamps(sprite, raw);
+                stampFeatures(scene, raw, sprite);   // глаза и брови — поверх палитры
+                closeHoles(sprite);                // стыки и антиалиас не должны дырявить тело
                 cells.push(sprite);
                 for (const side of ["r", "l"]) {
                     const cell = handPoint(scene, raw, side);
                     const a = toUnits(cell.x, cell.y);
                     // x/y — в игровых единицах (их даёт toUnits), угол — экранный,
                     // он не зависит от масштаба: пиксели и единицы растянуты одинаково.
-                    anchors[side].push([+a.x.toFixed(2), +a.y.toFixed(2), +cell.ang.toFixed(3)]);
+                    anchors[side].push([+a.x.toFixed(2), +a.y.toFixed(2), +cell.ang.toFixed(3), cell.depth]);
+                    occl[side].push(cell.hidden ? 1 : 0);
                     grips[side].push(gripPatch(sprite, cell));
                 }
                 sprites.push({ dir: dir.name, pose: pose.label, index: i, sprite });
@@ -751,10 +1191,12 @@ function bakeAll() {
             frames[dir.name][pose.label] = cells;
             anchorsByPose.set(`${dir.name}/${pose.label}`, anchors);
             gripsByPose.set(`${dir.name}/${pose.label}`, grips);
+            occlByPose.set(`${dir.name}/${pose.label}`, occl);
         }
         process.stdout.write(`  ${dir.name} ok\n`);
     }
-    return { frames, sprites, anchors: Object.fromEntries(anchorsByPose), grips: Object.fromEntries(gripsByPose) };
+    return { frames, sprites, anchors: Object.fromEntries(anchorsByPose), grips: Object.fromEntries(gripsByPose),
+        occl: Object.fromEntries(occlByPose) };
 }
 
 function contactSheet(sprites, zoom) {
@@ -858,6 +1300,10 @@ function emit(baked) {
     for (const [key, value] of Object.entries(baked.grips || {})) {
         if (ship(key)) grips[key] = value;
     }
+    const occl = {};
+    for (const [key, value] of Object.entries(baked.occl || {})) {
+        if (ship(key)) occl[key] = value;
+    }
     const streams = encodeFrames(frames);
     const meta = {
         who: who(), source: "Quaternius Universal Base Characters + Universal Animation Pack (CC0)",
@@ -867,6 +1313,7 @@ function emit(baked) {
         poses: POSES.filter(p => p.ship).map(p => ({ label: p.label, clip: p.clip, frames: p.frames, fps: p.fps })),
         anchors,
         grips,
+        occl,
         ramps: RAMP_KEYS.reduce((m, k) => {
             m[k] = { at: RAMP_AT[k], steps: rampSteps(k), look: RAMPS[k].look, offsets: RAMPS[k].offsets };
             return m;
@@ -911,16 +1358,17 @@ function emitSmooth(baked) {
         for (const label of SMOOTH_POSES) if (poses[label]) frames[dir][label] = poses[label];
     }
     const keep = key => SMOOTH_POSES.includes(key.split("/")[1]);
-    const anchors = {}, grips = {};
+    const anchors = {}, grips = {}, occl = {};
     for (const [key, value] of Object.entries(baked.anchors)) if (keep(key)) anchors[key] = value;
     for (const [key, value] of Object.entries(baked.grips || {})) if (keep(key)) grips[key] = value;
+    for (const [key, value] of Object.entries(baked.occl || {})) if (keep(key)) occl[key] = value;
     const meta = {
         who: who(), smooth: true, steps: SMOOTH_STEPS,
         source: "Quaternius Universal Rig (CC0), тот же запек, но без дизеринга и обводки",
         baked: new Date().toISOString().slice(0, 10), tool: "tools/hero-bake.js --smooth --emit-smooth",
         cell: CELL, pxPerUnit: PX_PER_UNIT, footPad: FOOT, heroPx: CELL.h, bodyUnits: BODY_UNITS,
         poses: POSES.filter(p => SMOOTH_POSES.includes(p.label)).map(p => ({ label: p.label, clip: p.clip, frames: p.frames, fps: p.fps })),
-        anchors, grips, dirs: DIRS.map(d => d.name),
+        anchors, grips, occl, dirs: DIRS.map(d => d.name),
         // Дорожек нет: цвет одежды в этом режиме запечён, панель внешности на него не влияет
         // (и не должна — сравнивают-то силуэт и посадку, а не палитру).
         palette: SMOOTH_PALETTE_HEX.map(hex => [hex, hex])
@@ -968,6 +1416,8 @@ if (flag("preview")) {
     fs.writeFileSync(path.join(OUT, "sheet-2x.png"), encodePNG(contactSheet(baked.sprites, 2), [22, 30, 21]));
     console.log(`SHEET: ${baked.sprites.length} кадров → ${OUT}/sheet-1x.png, sheet-2x.png (${((Date.now() - t0) / 1000).toFixed(1)} с)`);
     if (flag("emit")) emit(baked);
+} else if (flag("holes")) {
+    measureHoles();
 } else if (flag("fit")) {
     measureFit(buildScene(), loadAnimLibs());
 } else {

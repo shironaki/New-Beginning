@@ -64,6 +64,10 @@ const SMOOTH_ALIAS = { run: "walk", attack: "chop", gather: "chop", torch: "idle
 export const HERO3D = {
     enabled: true,
     quality: "grade",
+    // Причина, по которой запрошенный режим не включился. Нужна потому, что
+    // «?hero3d=smooth → пусто» без этой строки невозможно разобрать: молчаливый
+    // откат выглядел как сломанная игра, а не как отсутствующий модуль.
+    error: "",
     get ready() { return typeof document !== "undefined" && Object.keys(SRC.streams).length > 0; }
 };
 
@@ -80,6 +84,7 @@ export async function hero3dQuality(quality) {
             const mod = await import("./herosmooth.js");
             SOURCES.smooth = bindSource({ name: "smooth", streams: mod.STREAMS, meta: mod.META, paletteHex: mod.PALETTE_HEX, poses: new Map(), paletteKey: null });
         } catch (err) {
+            HERO3D.error = String((err && err.message) || err).slice(0, 200);
             return false;
         }
     }
@@ -268,6 +273,18 @@ export function heroSprite(p, look) {
             };
         },
         /**
+         * Скрыта ли кисть этой руки за телом В ЭТОМ КАДРЕ: 1/0 из запекки
+         * (сравнивает глубину кисти с буфером глубины кадра), null — данных нет.
+         * Порядок «предмет ↔ тело» обязан решать кадр, а не ракурс и не векторный
+         * `rig.behind`: в анимации руки меняются местами каждый кадр, и поэтому
+         * клинок спереди уходил за спину, а сзади вылезал поверх корпуса.
+         */
+        hidden(hand = "right") {
+            const o = src.meta.occl?.[`${pose.dir}/${pose.label}`]?.[hand === "left" ? "l" : "r"];
+            if (!o || o.length <= index) return null;
+            return !!o[index];
+        },
+        /**
          * Заполнен ли в этом кадре пиксель под мировой точкой (x, y от линии стоп).
          * Спрайт — плоская фигура, поэтому «рука за телом» превращается в «факел
          * исчез»: укрывать предмет за силуэтом можно только пока сам пиксель руки
@@ -325,3 +342,5 @@ export const HERO_SPRITE_CELL = {
 
 /** Есть ли у активного выхода этот кадр — нужно инструментам сравнения. */
 export const hero3dHas = (key) => Boolean(SRC.streams[key]);
+/** Сколько связок есть у активного выхода — «ноль» означает, что модуль пуст. */
+export const hero3dLinkCount = () => Object.keys(SRC.streams).length;

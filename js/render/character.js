@@ -429,20 +429,37 @@ function paintCharacter(ctx, p) {
             // целиком: возвращать под него кисть нечего, только работа лишняя.
             if (grip) {
                 ctx.imageSmoothingEnabled = false;             // пиксели, не размытие
-                ctx.drawImage(sprite.canvas, grip.sx, grip.sy, grip.sw, grip.sh,
+                // Тот же лист, что и для тела: кулак обязан тонироваться вместе с
+                // героем, иначе поверх предмета проступает немокший кусок руки.
+                ctx.drawImage(tint ? tintedSheet(sprite.canvas, tint) : sprite.canvas,
+                              grip.sx, grip.sy, grip.sw, grip.sh,
                               grip.dx, grip.dy, grip.dw, grip.dh);
                 ctx.imageSmoothingEnabled = true;
             }
         };
+        // Порядок «предмет ↔ тело» берётся из кадра. У запекки есть буфер
+        // глубины, поэтому она знает, какая кисть в этом кадре ушла за корпус, а
+        // какая осталась спереди; `rig.behind` (векторная имитация ракурса) знал
+        // только направление взгляда — отсюда и жалоба «спереди предмет за
+        // спиной, сзади вылезает». Еда у рта и свет — как всегда, спереди:
+        // иначе факел гаснет в каждом втором кадре (см. farItemInFront).
         const farHand = rig.behind ? "right" : "left";
-        const nearHand = farHand === "right" ? "left" : "right";
-        const farInFront = farItemInFront(p, farHand, held[farHand]);
-        if (!farInFront) paintItem(farHand, true);
+        const hiddenHand = (hand) => {
+            if (farItemInFront(p, hand, held[hand])) return false;
+            const baked = sprite.hidden ? sprite.hidden(hand) : null;
+            if (baked !== null && baked !== undefined) return baked;
+            return hand === farHand;                           // векторный герой / нет данных
+        };
+        const behind = { right: hiddenHand("right"), left: hiddenHand("left") };
+        // Тонировка погоды считается ДО спрайта: патч кулака рисуется внутри
+        // paintItem, и он обязан видеть тот же слой, что и тело.
+        const tint = heroWeatherTint(p);
+        for (const hand of ["right", "left"]) if (behind[hand]) paintItem(hand, true);
+        const sheet = tint ? tintedSheet(sprite.canvas, tint) : sprite.canvas;
         ctx.imageSmoothingEnabled = false;         // спрайт 1:1, интерполяция тут = каша
-        ctx.drawImage(sprite.canvas, sprite.x, sprite.y, sprite.w, sprite.h);
+        ctx.drawImage(sheet, sprite.x, sprite.y, sprite.w, sprite.h);
         ctx.imageSmoothingEnabled = true;
-        paintItem(nearHand, false);
-        if (farInFront) paintItem(farHand, false);
+        for (const hand of ["right", "left"]) if (!behind[hand]) paintItem(hand, false);
         if (p.wading) paintWaterline(ctx, idle);
         if (turning) ctx.restore();
         ctx.restore();
@@ -618,6 +635,62 @@ function paintCharacter(ctx, p) {
     if (turning) ctx.restore();
     ctx.restore();
 }
+
+/* --- промокание и иней ----------------------------------------------------
+ * Спрайт — это картинка, а не набор фигур: «ткань потемнела от воды» в ней
+ * нельзя выразить перекраской дорожек (цвет уже запечён в палитру кадра).
+ * Поэтому поверх кадра кладётся ОДИН тонированный слой, удержанный внутри
+ * непрозрачных пикселей спрайта (`source-atop`): мокрая одежда темнее и холоднее,
+ * снег — наоборот, светлее и синее. Ни одного лишнего пикселя за силуэтом не
+ * появляется, и тень на земле, ватерлиния и предмет в руке не трогаются.
+ */
+export const WET = {
+    rainA: 0.44, snowA: 0.14, snowRamp: 0.14, fromWading: 6,  // 6 из 9 секунд TRACK.wetLife — «ещё мокрый»
+    wet: [24, 38, 56], snow: [206, 226, 244]
+};
+
+/** Насколько герой промёрз/промок, 0..1, и каким слоем это рисуется. */
+export function heroWeatherTint(p) {
+    const wet = clamp01((p.wet || 0) / WET.fromWading);
+    const rain = p.weather === "rain" || p.weather === "storm";
+    const snow = p.weather === "snow";
+    const sky = p.underground ? 0 : clamp01(p.groundWet || 0);
+    // Под крыше́й погода героя не касается: в пещере или в доме герой сохнет, а
+    // не темнеет от дождя за стеной. Брод (wet) остаётся — в лужу можно сесть и
+    // под навесом.
+    const open = p.underground ? 0 : 1;
+    const k = Math.max(wet, open * (rain ? 0.35 + 0.5 * sky : 0), open * (snow ? 0.30 + 0.34 * sky : 0));
+    if (k <= 0.02) return null;
+    // Снег поверх дождя — всё равно вода: иней на мокром не держится.
+    const cold = snow && !rain;
+    // Альфа не равна k: при k≈0.3 (пошёл дождь, ещё сухо) слой 0.08 ничего не
+    // показывает, а при k=1 (стоял в воде) 0.40 уже заливает героя синевой.
+    // Поэтому база + надбавка: лёгкая мокрая ткань видна сразу, но потолок тот же.
+    return { k, a: cold ? WET.snowA + WET.snowRamp * k : WET.rainA * (0.55 + 0.45 * k), rgb: cold ? WET.snow : WET.wet };
+}
+
+let tintSheet = null;
+/** Кадр с тонированным слоем внутри силуэта. Канвас-скретч переиспользуется. */
+function tintedSheet(canvas, tint) {
+    if (!canvas || !canvas.width) return canvas;
+    if (!tintSheet || tintSheet.width !== canvas.width || tintSheet.height !== canvas.height) {
+        tintSheet = document.createElement("canvas");
+        tintSheet.width = canvas.width;
+        tintSheet.height = canvas.height;
+    }
+    const c = tintSheet.getContext("2d");
+    c.save();
+    c.globalCompositeOperation = "source-over";
+    c.clearRect(0, 0, tintSheet.width, tintSheet.height);      // следы прошлого кадра не нужны
+    c.drawImage(canvas, 0, 0);
+    c.globalCompositeOperation = "source-atop";
+    c.fillStyle = `rgb(${tint.rgb[0]},${tint.rgb[1]},${tint.rgb[2]})`;
+    c.globalAlpha = tint.a;
+    c.fillRect(0, 0, tintSheet.width, tintSheet.height);
+    c.restore();
+    return tintSheet;
+}
+export const __tintSheet = () => tintSheet;
 
 /** Ватерлиния: кольцо на поверхности, вода поверх ботинок, пена у тела. */
 function paintWaterline(ctx, idle) {
