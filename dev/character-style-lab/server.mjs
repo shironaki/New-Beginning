@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const labRoot = path.dirname(fileURLToPath(import.meta.url));
 const gameJsRoot = path.resolve(labRoot, '../../js');
-const mime = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.mjs':'text/javascript; charset=utf-8', '.svg':'image/svg+xml', '.gif':'image/gif', '.png':'image/png', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.txt':'text/plain; charset=utf-8' };
+const mime = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.mjs':'text/javascript; charset=utf-8', '.svg':'image/svg+xml', '.gif':'image/gif', '.png':'image/png', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.txt':'text/plain; charset=utf-8', '.glb':'model/gltf-binary', '.bin':'application/octet-stream', '.gltf':'model/gltf+json; charset=utf-8', '.json':'application/json; charset=utf-8' };
 http.createServer(async (req, res) => {
   if (!['GET','HEAD'].includes(req.method)) { res.writeHead(405,{Allow:'GET, HEAD'}).end(); return; }
   try {

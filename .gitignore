@@ -5,3 +5,4 @@ _preview_*.png
 .artifacts/
 dev/character-style-lab/gandalf-refs/
 image-search/
+dev/character-style-lab/.smoke/

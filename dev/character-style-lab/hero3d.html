@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>3D-риг Quaternius + пиксель-лист · изолированный стенд</title>
+  <link rel="stylesheet" href="./sprite-lab.css">
+  <style>
+    .stage3d { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr); gap: 16px; align-items: start; }
+    @media (max-width: 900px) { .stage3d { grid-template-columns: 1fr; } }
+    .panel { background: #10190f; border: 1px solid #2c4030; border-radius: 14px; padding: 14px; display: grid; gap: 12px; }
+    .panel h2 { margin: 0; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; color: #9fb98f; }
+    .gl-host { position: relative; aspect-ratio: 3 / 4; background: radial-gradient(circle at 50% 30%, #1d2b1c, #0b1410 70%); border-radius: 10px; overflow: hidden; }
+    .gl-host canvas { width: 100% !important; height: 100% !important; display: block; }
+    .pix-host { background: #0b1410; border-radius: 10px; padding: 10px; display: grid; justify-items: center; gap: 10px; }
+    #pixCanvas, #sheetCanvas { image-rendering: pixelated; max-width: 100%; height: auto; }
+    #refCanvas { border-radius: 8px; max-width: 100%; height: auto; image-rendering: pixelated; }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+    .row label { display: grid; gap: 4px; font-size: 12px; color: #b9c7b3; }
+    .row select, .row input[type=range] { accent-color: #8fb169; min-width: 92px; }
+    .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+    .btns button { background: #24371f; color: #d9e6c8; border: 1px solid #3c5238; border-radius: 8px; padding: 7px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+    .btns button:hover { background: #2e4527; }
+    .status { font-size: 12px; color: #97a88e; min-height: 16px; }
+    .status.err { color: #e88f7a; }
+    .license { font-size: 12px; color: #97a88e; border: 1px dashed #3c5238; border-radius: 12px; padding: 12px 14px; }
+    .license b { color: #d9e6c8; }
+    .seg { display: inline-flex; border: 1px solid #3c5238; border-radius: 8px; overflow: hidden; }
+    .seg button { background: transparent; color: #b9c7b3; border: 0; padding: 6px 11px; font: inherit; font-size: 13px; cursor: pointer; }
+    .seg button[aria-pressed=true] { background: #35502c; color: #f0f7e6; }
+  </style>
+  <script type="importmap">
+    { "imports": {
+        "three": "./vendor/three.module.js",
+        "three/addons/": "./vendor/addons/"
+    } }
+  </script>
+</head>
+<body>
+<main class="lab-shell">
+  <header class="lab-header">
+    <div class="header-copy">
+      <p class="eyebrow">ИЗОЛИРОВАННЫЙ СТЕНД · НАСТОЯЩИЕ АССЕТЫ QUATERNIUS (CC0)</p>
+      <h1>3D-база героя<br><span>Universal Base Characters → пиксель-лист</span></h1>
+      <p class="intro">Здесь лежат настоящие файлы пака <b>Universal Base Characters</b> (Quaternius): скелет на 65 костей, скины Superhero Male/Female, волосы, глаза, 1k-текстуры, плюс паки анимаций <b>anims.glb</b> (29 клипов). Лицензия CC0 — в отличие от itch-паков, ассеты можно держать в репозитории. Справа тот же кадр прогоняется через пиксельную сетку, чтобы получить спрайт в формате 64×80 / 96×128, как в 2D-паках.</p>
+      <nav class="nav-links" aria-label="Другие стенды">
+        <a href="./">← Sprite Lab</a>
+        <a href="./gandalf-sheet.html">Листовой плеер ↗</a>
+        <a href="./comparison.html">Галерея вариантов ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="stage3d">
+    <div class="panel">
+      <h2>Оригинал · three.js</h2>
+      <div class="gl-host" id="glHost"></div>
+      <div class="row">
+        <label>Персонаж
+          <span class="seg" id="charPick"><button data-char="male" aria-pressed="true">Male</button><button data-char="female" aria-pressed="false">Female</button></span>
+        </label>
+        <label>Анимация <select id="clipPick"></select></label>
+        <label>Скорость <input id="speedPick" type="range" min="20" max="200" value="100"></label>
+      </div>
+      <div class="row">
+        <label>Кадр <input id="framePick" type="range" min="0" max="7" value="0" step="1"></label>
+        <label>Поворот <input id="yawPick" type="range" min="-180" max="180" value="-24" step="1"></label>
+        <label class="btns" style="align-content:end"><button id="playBtn" type="button">Играть ▸</button></label>
+        <label class="btns" style="align-content:end"><button id="resetBtn" type="button">Сброс камеры</button></label>
+      </div>
+      <p class="status" id="status">инициализация…</p>
+    </div>
+
+    <div class="panel">
+      <h2>Пиксель-кадр из 3D</h2>
+      <div class="pix-host"><canvas id="pixCanvas" width="320" height="400" aria-label="Пиксельная версия текущего кадра"></canvas></div>
+      <div class="row">
+        <label>Сетка
+          <select id="gridPick"><option value="64x80">64×80 (как в паке)</option><option value="96x128" selected>96×128 (наш лад)</option><option value="48x64">48×64</option></select>
+        </label>
+        <label>Палитра
+          <select id="quantPick"><option value="palette" selected>палитра игры</option><option value="poster">постеризация</option></select>
+        </label>
+        <label>Тени <input id="ditherPick" type="range" min="0" max="6" value="2"></label>
+        <label><span class="seg"><button id="outlineBtn" aria-pressed="true">Обводка</button></span></label>
+      </div>
+      <h2 style="margin-top:6px">Лист анимации</h2>
+      <div class="pix-host"><canvas id="sheetCanvas" width="768" height="128" aria-label="Лист кадров выбранной анимации"></canvas></div>
+      <div class="btns">
+        <button id="sheetBtn" type="button">Собрать лист из 6 кадров</button>
+        <button id="saveBtn" type="button">Скачать кадр PNG</button>
+      </div>
+      <h2 style="margin-top:6px">Наш 2D-риг для сверки</h2>
+      <div class="pix-host"><canvas id="refCanvas" width="280" height="470"></canvas></div>
+    </div>
+  </section>
+
+  <p class="license">
+    <b>Происхождение.</b> Модель и текстуры — «Universal Base Characters» и «Universal Animation Pack» автора Quaternius, лицензия
+    <b>CC0 1.0</b> (общественное достояние): копировать, изменять и использовать в коммерческих играх можно свободно, файл
+    <code>assets/quaternius/LICENSE-CC0.txt</code>. Текстуры урезаны до 1k для веба, остальное — как в оригинале.
+    Production (<code>js/render/character.js</code>) не тронут: стенд только показывает, как этот риг выглядит и во что он превращается на пиксельной сетке.
+    Скачанный вами zip в воркспейс не приехал — если положите его в <code>dev/character-style-lab/uploads/</code>, подставлю оригинальные листы рядом.
+  </p>
+</main>
+<script type="module" src="./hero3d.js"></script>
+</body>
+</html>
