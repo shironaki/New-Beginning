@@ -12,6 +12,8 @@ const say = (msg, isError = false) => { status.textContent = msg; status.classLi
 
 const host = document.getElementById('glHost');
 const pixCanvas = document.getElementById('pixCanvas');
+const gameCanvas = document.getElementById('gameCanvas');
+const gameCtx = gameCanvas ? gameCanvas.getContext('2d') : null;
 const sheetCanvas = document.getElementById('sheetCanvas');
 const refCanvas = document.getElementById('refCanvas');
 const clipPick = document.getElementById('clipPick');
@@ -209,7 +211,8 @@ const cellCtx = cell.getContext('2d', { willReadFrequently: true });
 
 function gridSize() {
   const [w, h] = gridPick.value.split('x').map(Number);
-  return { w, h };
+  const opt = gridPick.selectedOptions[0];
+  return { w, h, fill: Number(opt?.dataset?.fill || 0.94) };
 }
 
 const renderPixel = createPixelRenderer((w, h) => {
@@ -246,6 +249,7 @@ function captureCell(skipGround = true) {
     { data: tmpCtx.getImageData(0, 0, sw, sh).data, w: sw, h: sh },
     {
       grid: { w, h },
+      fill: gridSize().fill,
       mode: quantPick.value,
       palette: PALETTE_RGB,
       ink: INK,
@@ -257,6 +261,31 @@ function captureCell(skipGround = true) {
   cell.width = sprite.w; cell.height = sprite.h;
   cellCtx.putImageData(new ImageData(sprite.data, sprite.w, sprite.h), 0, 0);
   return sprite;
+}
+
+function blitGame() {
+  if (!gameCtx || !cell.width) return;
+  const zoom = 2;
+  const w = cell.width * zoom;
+  const h = cell.height * zoom;
+  if (gameCanvas.width !== w || gameCanvas.height !== h) { gameCanvas.width = w; gameCanvas.height = h; }
+  gameCtx.imageSmoothingEnabled = false;
+  gameCtx.fillStyle = '#2a3a24';
+  gameCtx.fillRect(0, 0, w, h);
+  gameCtx.fillStyle = '#31432a';
+  for (let i = 0; i < 26; i += 1) {
+    const gx = (i * 61) % w;
+    const gy = h - ((i * 37) % Math.round(h * 0.45)) - 6;
+    gameCtx.fillRect(gx, gy, 4, 2);
+  }
+  gameCtx.fillStyle = 'rgba(8,12,8,.42)';
+  gameCtx.beginPath();
+  gameCtx.ellipse(w / 2, h - 8, Math.round(w * 0.16), 5, 0, 0, Math.PI * 2);
+  gameCtx.fill();
+  const scale = (30 * zoom) / cell.height;
+  const dw = cell.width * scale;
+  const dh = cell.height * scale;
+  gameCtx.drawImage(cell, Math.round((w - dw) / 2), Math.round(h - 8 - dh + 4), dw, dh);
 }
 
 function blit(target, ctx, zoom) {
@@ -275,7 +304,10 @@ function blit(target, ctx, zoom) {
 
 function redrawPixel() {
   const sprite = captureCell();
-  if (sprite) blit(pixCanvas, pixCtx, Math.max(2, Math.round(320 / sprite.w)));
+  if (sprite) {
+    blit(pixCanvas, pixCtx, Math.max(2, Math.round(320 / sprite.w)));
+    blitGame();
+  }
   return Boolean(sprite);
 }
 

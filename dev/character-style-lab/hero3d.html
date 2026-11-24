@@ -77,7 +77,7 @@
       <div class="pix-host"><canvas id="pixCanvas" width="320" height="400" aria-label="Пиксельная версия текущего кадра"></canvas></div>
       <div class="row">
         <label>Сетка
-          <select id="gridPick"><option value="64x80">64×80 (как в паке)</option><option value="96x128" selected>96×128 (наш лад)</option><option value="48x64">48×64</option></select>
+          <select id="gridPick"><option value="64x80" data-fill="0.94">64×80 (как в паке)</option><option value="96x128" data-fill="0.94" selected>96×128 (наш лад)</option><option value="48x64" data-fill="0.94">48×64</option><option value="40x40" data-fill="0.75">Игровой кадр 40×40 · герой 30 px</option></select>
         </label>
         <label>Палитра
           <select id="quantPick"><option value="palette" selected>палитра игры</option><option value="poster">постеризация</option></select>
@@ -85,6 +85,8 @@
         <label>Тени <input id="ditherPick" type="range" min="0" max="6" value="2"></label>
         <label><span class="seg"><button id="outlineBtn" aria-pressed="true">Обводка</button></span></label>
       </div>
+      <h2 style="margin-top:6px">Как в игре (1:1)</h2>
+      <div class="pix-host"><canvas id="gameCanvas" width="184" height="120" aria-label="Спрайт в игровом масштабе, 1 пиксель = 1 пиксель игры"></canvas><p class="status" style="margin:0">герой 30 px при zoom 2 — как <code>heroHeight</code> в <code>js/render/renderer.js</code></p></div>
       <h2 style="margin-top:6px">Лист анимации</h2>
       <div class="pix-host"><canvas id="sheetCanvas" width="768" height="128" aria-label="Лист кадров выбранной анимации"></canvas></div>
       <div class="btns">
