@@ -71,12 +71,16 @@ test("server retries reuse a receipt and imported legacy notes instead of creati
         assert.eq(noteIdentity(note()), noteIdentity({ ...note(), shot: "different screenshot" }));
     } finally { fs.rmSync(root, { recursive: true }); }
 });
-test("server keeps binary captures outside Git's notes directory and rejects invalid reports", () => {
+test("картинка заметки едет в Git рядом с текстом; тяжёлый кадр остаётся локальным", () => {
     const root = temp();
     try {
         const a = storeNote({ ...note(), shot: "data:image/png;base64,YWJj" }, root);
-        assert.ok(fs.existsSync(path.join(root, `.artifacts/notes/${a.id}.png`)));
-        assert.eq(fs.readdirSync(path.join(root, "docs/notes")).length, 1);
+        // Раньше скриншот писался в `.artifacts/notes/` — игнорируемую папку: в
+        // репозиторий уезжала ссылка в никуда, и владелец видел «пометка есть, а
+        // показать нечего». Значит кадр обязан лежать в docs/notes рядом с .md.
+        assert.ok(fs.existsSync(path.join(root, `docs/notes/${a.file.replace(".md", "")}.png`)));
+        assert.ok(a.picture, "ответ обязан сообщать, что картинка приложена");
+        assert.eq(fs.readdirSync(path.join(root, "docs/notes")).length, 2);   // .md и .png — оба в репозитории
         assert.throws(() => storeNote({ ...note(), at: "bad" }, root));
         assert.throws(() => storeNote({ ...note(), x: null }, root));
         assert.not(noteStem({ ...note(), zone: "../../evil" }, 1).includes("/"));

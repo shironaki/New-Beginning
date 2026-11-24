@@ -72,28 +72,51 @@ const PACKS = {
 const PROP_MODEL = {
     rock: "rock_largeA.glb",
     ore_rock: "rock_tallB.glb",
-    scree: { file: "stone_tallD.glb", fit: "max" },
-    beach_pebbles: { file: "stone_tallB.glb", fit: "max", px: 4 },
+    // У плоских деталей px — это ШИРИНА кадра (fit: "max"), а не высота: без
+  // явного числа осыпь пеклась в 2×4 пикселя одного тона и исчезала на земле
+  // (ревизию показывает `node tools/props-audit.js`).
+    scree: { file: "stone_tallD.glb", fit: "max", px: 15 },
+    beach_pebbles: { file: "stone_tallB.glb", fit: "max", px: 9 },
     log: { file: "log.glb", fit: "max", px: 16 },
     driftwood: { file: "log_large.glb", fit: "max", px: 20 },
     firewood: { file: "log.glb", fit: "max", px: 12 },
-    burnt_stump: "stump_old.glb",
+    // Пень: брали низкий stump_old — на кадре он читался как блин, и владелец
+    // прав был: «вообще не похож на пень». Высокая версия + подгонка по Y даёт
+    // обрубок, а не площадку; тёмная обугленная кора — из общей рамки контраста.
+    // Пень: брали низкий stump_old — на кадре он читался как блин, и владелец
+    // прав: «вообще не похож на пень». Высокая версия + подгонка по длинной оси
+    // дают обрубок 16 px в поперечнике; по Y пень сжимался в щепку (7 px).
+    burnt_stump: { file: "stump_oldTall.glb", fit: "max", px: 16 },
     bush: "plant_bushDetailed.glb",
     mushroom_patch: { file: "mushroom_redGroup.glb", fit: "max", px: 12 },
     pine: "tree_pineTallA.glb",
     spruce: "tree_pineTallB.glb",
-    tree_pine: "tree_pineTallD.glb",
     dead_tree: "tree_thin_dark.glb",
     ancient_oak: "tree_simple_dark.glb",
     /* Деревня: Quaternius «Medieval Village MegaKit» (CC0), glTF-модули.
        Это НЕ «дом целиком» — это детали конструктора, из которых дом собирается
        на сетке: стена + крыша + труба дают reading, которого у процедурного
        «треугольника с полосками» нет никогда. */
-    hut_wall: { file: "Overhang_Plaster_Long.gltf", pack: "village", fit: "max", px: 46 },
-    // Обваловавшаяся стена руин — та же деталь, но ниже: из фундамента торчит
-    // половина. Отдельный px здесь важнее, чем отдельная модель.
-    ruin_wall: { file: "Overhang_Plaster_Long.gltf", pack: "village", fit: "max", px: 26 },
-    hut_roof: { file: "Roof_RoundTiles_6x6.gltf", pack: "village", fit: "max", px: 56 },
+    // Стена — это стена, а не навес. Раньше обе детали брались из
+    // Overhang_Plaster_Long, и в кадре получалась «полка на ножках»: игрок
+    // читал это как предмет, висящий в воздухе. Wall_Plaster_Straight — глухая
+    // панель от пола до потолка, её высота и есть то, на что садится крыша.
+    // Кадр стены обязан быть ВЫШЕ тайла, иначе «дом» выглядит ящиком, а крыше
+    // не на что опираться. 70 px — то же число, что в PROP_HEIGHT и в lift крыши.
+    // Одиночная панель Wall_Plaster_Straight на тайле looked обелиском: у неё
+    // аспект 1:2.7. Long-версия (модуль на два тайла) даёт ширину порядка тайла,
+    // и «стена + крыша» начинают читаться как сарай, а не как щит на палке.
+    hut_wall: { file: "Wall_Plaster_Straight_L.gltf", pack: "village", fit: "max", px: 46 },
+    // Обломок стены в руинах — неровный кирпич: у пака есть деталь, которая
+    // выглядит разваленой, значит не надо врать масштабом.
+    // «Long» у неровного кирпича в паке нет — берём обычный модуль и режем
+    // высоту: обломок и должен быть ниже стены, а не шире.
+    ruin_wall: { file: "Wall_UnevenBrick_Straight.gltf", pack: "village", fit: "max", px: 30 },
+    // Крыша садится НА стену, поэтому её cap меньше высоты стены (70): иначе
+    // кадр залезает за карниз и снова читается как навес в воздухе.
+    // 6x6 из пака — это крыща сарая на шесть тайлов: на одном тайле она
+    // выглядела красным зонтом. Roof_RoundTiles_2x1 ровно по размеру хижины.
+    hut_roof: { file: "Roof_RoundTile_2x1.gltf", pack: "village", fit: "max", px: 52 },
     chimney: { file: "Prop_Chimney.gltf", pack: "village", fit: "y", px: 30 },
     fence: { file: "Prop_WoodenFence_Single.gltf", pack: "village", fit: "max", px: 22 },
     crate: { file: "Prop_Crate.gltf", pack: "village", fit: "max", px: 16 },
@@ -492,8 +515,14 @@ if (EMIT) {
             bytes.push(run, value);
             i += run - 1;
         }
+        const model = modelOf(e.kind);
         kinds[e.kind] = {
             pack: e.pack, source: e.file,
+            // Что пекарня считало главной осью: «y» — рост (дерево), «max» — самая
+            // длинная сторона (лежачее бревно, панель крыши). Ревизии без этого
+            // нечем отличить «низкий пень» от «короткой крыши»: у второй высота не
+            // подгоняется вовсе, и флаги сыпались на ровные места.
+            fit: model.fit || "y", px: e.height,
             x0: e.bbox.x0, y0: e.bbox.y0, w: bw, h: bh,
             // смещение центра основания кадра к точке пропа, в единицах мира
             anchorX: +(-(e.bbox.x0 + bw / 2) / PX_PER_UNIT).toFixed(3),

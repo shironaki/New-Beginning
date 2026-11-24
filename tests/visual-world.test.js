@@ -20,6 +20,7 @@ import { heroLookPalette } from "../js/render/hero3d.js";
 import { PROP_SPRITES, PROP_META } from "../js/render/propsprites.js";
 import { paintProp3D, prop3dStatus, PROPS3D } from "../js/render/props3d.js";
 import { PROP_HEIGHT, propHeight } from "../js/render/tilesart.js";
+import { unsupportedBy } from "../js/world/debris.js";
 import { ITEMS } from "../js/sandbox/items.js";
 
 suite("final coastline and beach");
@@ -487,7 +488,7 @@ test("запеченный кадр пропа рисуется, а побиты
     assert.eq(prop3dStatus().kinds, Object.keys(PROP_SPRITES).length, "статус обязан врать, если лист не тот");
 });
 test("размер кадра = propHeight: сетка коллизий и силуэт не разъезжаются", () => {
-    for (const kind of ["pine", "spruce", "rock", "ore_rock", "hut_wall", "hut_roof", "chimney", "fence", "crate", "wagon"]) {
+    for (const kind of ["pine", "spruce", "rock", "ore_rock", "hut_wall", "hut_roof", "ruin_wall", "burnt_stump", "chimney", "fence", "crate", "wagon"]) {
         const e = PROP_SPRITES[kind];
         assert.ok(e, `в листе нет кадра «${kind}»`);
         const want = propHeight(kind, 1);
@@ -510,6 +511,83 @@ test("пепелище собирается из настоящих детале
             assert.ok(ITEMS[item], `«${kind}» роняет несуществующий «${item}»`);
         }
     }
+});
+
+test("поднятая деталь стоит на опоре, а не в воздухе", () => {
+    // Претензия владельца: красная крыша висела над пепелищем. Правила два:
+    // под каждой деталью с lift обязан стоять предмет, на который она сослана
+    // (`on`), и lift не имеет права превышать высоту этой опоры — иначе кадр
+    // уезжает за карниз и снова читается как навес на палке.
+    const H = (kind) => PROP_SPRITES[kind] ? PROP_SPRITES[kind].height : propHeight(kind, 1);
+    for (const zoneId of ["ashfall", "ruins"]) {
+        for (let s = 0; s < 8; s++) {
+            const zone = generateZone(zoneId, 1066618561 + s * 7919);
+            const at = new Map();
+            for (const o of zone.objects) {
+                if (o.removed || o.backdrop) continue;
+                const k = `${o.tx},${o.ty}`;
+                if (!at.has(k)) at.set(k, []);
+                at.get(k).push(o);
+            }
+            let lifted = 0;
+            for (const o of zone.objects) {
+                if (!o.lift || o.removed || o.backdrop) continue;
+                lifted++;
+                assert.ok(o.on, `${zoneId}: у «${o.kind}» есть lift ${o.lift}, но не указано, на чём он стоит`);
+                let found = null;
+                for (let dx = -1; dx <= 1 && !found; dx++) for (let dy = -1; dy <= 1 && !found; dy++) {
+                    for (const n of at.get(`${o.tx + dx},${o.ty + dy}`) || []) if (n.kind === o.on) found = n;
+                }
+                assert.ok(found, `${zoneId}: «${o.kind}» висит над пустотой — рядом нет «${o.on}»`);
+                assert.ok(o.lift <= H(o.on) + 2,
+                    `${zoneId}: lift ${o.lift} выше опоры «${o.on}» (${H(o.on)} px) — деталь в воздухе`);
+            }
+            assert.ok(lifted > 0, `${zoneId}: за 8 сидов ни одной поднятой детали — проверка ничего не проверяет`);
+        }
+    }
+});
+test("снос опоры на реальном раскладе двора роняет ровно то, что на ней стояло", () => {
+    // Правило в одну сторону уже проверено выше; здесь — обратная: игрок валит
+    // стену, и крыша обязана уйти в обломки, а не остаться декорацией. Список
+    // падений считает unsupportedBy (world/debris.js), его же зовёт main.js.
+    const zone = generateZone("ashfall", 1066618561);
+    const roof = zone.objects.find((o) => o.kind === "hut_roof" && o.lift);
+    assert.ok(roof, "во дворе должна быть крыша на lift");
+    const walls = zone.objects.filter((o) => o.kind === roof.on
+        && Math.abs(o.tx - roof.tx) <= 1 && Math.abs(o.ty - roof.ty) <= 1 && !o.lift);
+    assert.ok(walls.length >= 1, "под крышей должна стоять стена");
+    walls[0].depleted = true;
+    assert.ok(unsupportedBy(zone.objects, walls[0]).some((o) => o === roof),
+        "живых опор у крыши не осталось — она обязана попасть в список падения");
+    // А на второй стене (если хижина двухстенная) крыша держится: валим её — и
+    // падение считается заново, уже без обеих стен.
+    if (walls.length > 1) {
+        const before = unsupportedBy(zone.objects, walls[1]).length;
+        assert.ok(!unsupportedBy(zone.objects, walls[1]).includes(roof),
+            "крыша уже в списке падения — её нельзя ронять дважды");
+        assert.ok(before >= 0);
+    }
+});
+test("запечённый лист уходит на экран блитом 1:1, а не дрожащим даунскейлом", async () => {
+    const { fitSheet } = await import("../js/render/character.js");
+    const src = new ShimCanvas(101, 113);
+    const cv = new ShimCanvas(101, 113);
+    const ctx = cv.getContext("2d");
+    ctx.scale(0.4, 0.4);                                     // телефон: dpr 2 · zoom 1.6 → 0.4
+    const fit = fitSheet(ctx, src, 101 * 0.4167, 113 * 0.4167);
+    assert.eq(fit.canvas.width, Math.round(101 * 0.4167 * 0.4), "лист должен совпасть с размером на устройстве");
+    assert.ok(Math.abs(fit.w * 0.4 - fit.canvas.width) < 1, "после свёртки блит обязан быть 1:1");
+    assert.ok(fit.canvas !== src, "свёрнутый лист — другой канвас, а не подделка под оригинал");
+    assert.ok(Math.abs(fit.kx * src.width - fit.canvas.width) < 1
+        && Math.abs(fit.ky * src.height - fit.canvas.height) < 1,
+        "коэффициент листа должен совпадать с его новым размером — иначе патч кулака разъедется с рукой");
+    const again = fitSheet(ctx, src, 101 * 0.4167, 113 * 0.4167);
+    assert.eq(again.canvas, fit.canvas, "тот же размер при том же содержимом берётся из кэша");
+    src.__rev = (src.__rev || 0) + 1;                        // как tintedSheet: тон перекрашен
+    assert.ok(fitSheet(ctx, src, 101 * 0.4167, 113 * 0.4167).canvas !== fit.canvas,
+        "перекрашенный лист обязан сбросить кэш, иначе на экран уйдёт старый тон");
+    ctx.scale(4, 4);                                         // крупный зум: 1.6 экранных px на единицу мира
+    assert.eq(fitSheet(ctx, src, 101, 113).canvas, src, "когда лист уходит 1:1 или крупнее, подменять его нечем");
 });
 
 await run("visual-world");

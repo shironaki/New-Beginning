@@ -34,7 +34,8 @@ import { Inventory } from "./sandbox/inventory.js";
 import { itemDef, itemEmoji, itemName, foodValue } from "./sandbox/items.js";
 import { propDef, rollDrops, requiredTool, toolHint } from "./sandbox/gather.js";
 import { Needs } from "./survival/needs.js";
-import { DebrisField, shardFan } from "./world/debris.js";
+import { DebrisField, shardFan, unsupportedBy } from "./world/debris.js";
+import { loadStyle, saveStyle, styleKey } from "./ui/styleflags.js";
 import { ambientTemperature } from "./survival/temperature.js";
 import { Campfire } from "./survival/campfire.js";
 import { CookingJournal, isCookable } from "./survival/cooking.js";
@@ -490,6 +491,7 @@ export class Game {
         // бил). Осколки идут веером по той же оси и ложатся там, где упали.
         this.breakIntoDebris(obj, def, tall);
         obj.depleted = true;
+        this.collapseSupports(obj);               // то, что стояло на этом пропаде, падает
         this.zone.removeSolid(obj);              // its footprint goes with it
         this.bus.emit("world:harvest", { kind: obj.kind, drops });
         startPickup(this, obj);
@@ -559,6 +561,30 @@ export class Game {
         for (const s of shards) this.debris.spawn(s.x, s.y, s);
         this.bus.emit("world:collapse", { kind: obj.kind, x: obj.x, y: obj.y, shards: shards.length });
         return shards.length;
+    }
+
+    /**
+     * Опора ушла — деталь падает. Крыша на месте снесённой стены была главным
+     * «летающим объектом» во дворе, поэтому правило живёт здесь, а не в
+     * раскладке: оно работает и для загрузки из сейва, и для любой постройки,
+     * которую игрок разберёт сам. `on` проставляет worldgen.
+     */
+    collapseSupports(obj) {
+        if (!this.zone || !obj) return 0;
+        // Правило «что именно падает» живёт в world/debris.js рядом с физикой
+        // осколков — там же, где оно покрывается тестом без игрового цикла.
+        const doomed = unsupportedBy(this.zone.objects, obj);
+        for (const o of doomed) {
+            o.lift = 0;
+            o.fallen = true;
+            const def = propDef(o.kind);
+            const tall = propHeight(o.kind, o.size || 1);
+            this.particles.impact(o.x, o.y + 2, Math.round(6 + tall / 8));
+            this.camera.shake(FX.shake.fell * 0.7, FX.shake.fellTime);
+            if (def) this.breakIntoDebris(o, def, tall);
+        }
+        if (doomed.length) this.bus.emit("world:support-lost", { kind: obj.kind, dropped: doomed.length });
+        return doomed.length;
     }
 
     /**
@@ -764,6 +790,29 @@ export class Game {
         if (def.interact === "fire") this.fires.set(this.fireKey(this.zone, obj), new Campfire({ bus: this.bus }));
         this.bus.emit("world:built", { kind, tx, ty });
         return obj;
+    }
+
+    /**
+     * Сменить стиль из меню, а не из адресной строки. Применяется сразу, без
+     * перезагрузки: hero3d и props3d — обычные модули с выключателями, а
+     * инвалидация чанков заодно чистит кэш кадров под новый свет/тон.
+     */
+    async setStyle(patch) {
+        this.style = { ...this.style || {}, ...patch };
+        saveStyle(this.style);
+        const props3d = await import("./render/props3d.js");
+        props3d.PROPS3D.enabled = this.style.props3d !== "off";
+        props3d.setPropTone(this.style.props3dTone || null);
+        if (this.style.hero3d !== undefined) {
+            const hero3d = await import("./render/hero3d.js");
+            hero3d.HERO3D.enabled = this.style.hero3d !== "off";
+            if (this.style.hero3d !== "off" && this.style.hero3d !== "grade") {
+                await hero3d.hero3dQuality(this.style.hero3d);
+            }
+        }
+        this.renderer.invalidate();
+        this.hud.toast(`Стиль: ${styleKey(this.style)}`, "🎨");
+        return this.style;
     }
 
     eat(id) { return startMeal(this, id); }
@@ -1212,54 +1261,47 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
         };
         window.addEventListener("error", (e) => bootFail(e.error || e.message), { once: true });
 
-        const trial = new URLSearchParams(window.location.search).get("relief") === "1";
-        const GameClass = trial ? (await import("./dev/relief-trial.js")).ReliefTrialGame : Game;
-        const game = new GameClass({ canvas, hudRoot, seed: "ashes-and-grain" });
-        if (trial) {
-            const banner = document.createElement("aside");
-            banner.className = "reliefTrialBanner";
-            const link = document.createElement("a"); link.href = "./"; link.textContent = "← Основная игра";
-            game.trialStatus = document.createElement("span");
-            const hint = document.createElement("small");
-            hint.textContent = "Пилот · меню: день/ночь/дождь/зима, факел · основное сохранение не меняется. Пробный прогресс сбросится после перезагрузки.";
-            banner.append(link, game.trialStatus, hint); hudRoot.append(banner);
-        }
-        // Сравнение стилей героя без пересборки: ?hero3d=smooth — тот же 3D-риг, но
-        // без пиксельного грейда (14 тонов на дорожку, ни дизеринга, ни обводки);
-        // ?hero3d=off — прежняя векторная фигура. Гладкий модуль весит 291 КБ и
-        // приходит только по этому запросу, поэтому обычный игрок его не качает.
-        const heroMode = new URLSearchParams(window.location.search).get("hero3d");
-        if (heroMode) {
+        // Переходов в рельефные зоны в игровом мире больше нет: `?relief=1`
+        // подменял класс игры, и «пилот» уезжал в превью и в сохранение владельца.
+        // Лаборатория рельефа живёт отдельно — dev/relief.html (и ReliefTrialGame
+        // остаётся доступен только оттуда, для сравнения физики).
+        const game = new Game({ canvas, hudRoot, seed: "ashes-and-grain" });
+        // Стиль — и героя, и пропов — берётся из одного места: параметр адреса
+        // важнее выбора в меню, меню важнее значения по умолчанию. На телефоне
+        // адресной строки нет, поэтому то же самое умеет «Вид мира» в меню игры.
+        const style = loadStyle({ hero3d: "grade", props3d: "on" }, window.location.search);
+        game.style = style;
+        // ?hero3d=smooth — тот же 3D-риг, но без пиксельного грейда (14 тонов на
+        // дорожку, ни дизеринга, ни обводки); hero3d=off — прежняя векторная
+        // фигура. Гладкий модуль весит 643 КБ и приходит только по запросу.
+        if (style.hero3d !== "grade") {
             const hero3d = await import("./render/hero3d.js");
-            if (heroMode === "off") hero3d.HERO3D.enabled = false;
+            if (style.hero3d === "off") hero3d.HERO3D.enabled = false;
             else {
-                const ok = await hero3d.hero3dQuality(heroMode);
+                const ok = await hero3d.hero3dQuality(style.hero3d);
                 if (!ok) {
-                    console.warn(`[hero3d] режим «${heroMode}» недоступен: `
+                    console.warn(`[hero3d] режим «${style.hero3d}» недоступен: `
                         + `${hero3d.HERO3D.error || "нет такого режима"} — играет «${hero3d.HERO3D.quality}»`);
                 }
             }
         }
-        // Стиль пропов мира включается так же, как стиль героя: ?props3d=off
-        // возвращает процедурные кривые, ?props3d=on заставляет 3D-спрайты даже
-        // если среда их не потянула (причина видна в prop3dStatus()).
-        // ?props3dTone=winter|autumn|wet|snowwet|plain — кадр в другом тоне, чем
-        // диктует сезон: сравнивать погоду удобно на одном и том же дереве.
-        
+        // Стиль пропов — оттуда же: props3d=off возвращает процедурные кривые,
+        // props3d=on заставляет 3D-спрайты даже если среда их не потянула
+        // (причина видна в prop3dStatus()). props3dTone=winter|autumn|wet|
+        // snowwet|plain — кадр в другом тоне, чем диктует сезон: сравнивать
+        // погоду удобно на одном и том же дереве.
         const props3d = await import("./render/props3d.js");
-        // Флаги читает props3d.readFlags — тот же разбор, что видит dev-панель,
-        // чтобы «что включено» не пришлось описывать в двух местах.
-        const flags = props3d.readFlags(window.location.search);
-        if (flags.enabled !== undefined) props3d.PROPS3D.enabled = flags.enabled;
-        if (flags.tone) props3d.setPropTone(flags.tone);
+        props3d.PROPS3D.enabled = style.props3d !== "off";
+        if (style.props3dTone) props3d.setPropTone(style.props3dTone);
         // Штамп сборки: без него «правки не доехали» и «правки не видно»
         // выглядят одинаково. Здесь ровно то, что реально загрузилось.
         try {
             const st = props3d.prop3dStatus();
             const stamp = document.createElement("div");
             stamp.id = "buildStamp";
-            stamp.textContent = `сборка 72 · 3D-пропы: ${st.enabled ? st.kinds : 0} (${st.reason || "ок"})`
-                + ` · свет ${st.sun ? `×${st.sun.amp.toFixed(2)}/${st.sun.amb.toFixed(2)}` : "—"} · тон ${st.tone || "авто"}`;
+            stamp.textContent = `сборка 73 · 3D-пропы: ${st.enabled ? st.kinds : 0} (${st.reason || "ок"})`
+                + ` · свет ${st.sun ? `×${st.sun.amp.toFixed(2)}/${st.sun.amb.toFixed(2)}` : "—"}`
+                + ` · тон ${st.tone || "авто"} · ${styleKey(style)}`;
             (document.body || document.documentElement).appendChild(stamp);
         } catch { /* штамп — не игра */ }
         window.GAME = game;

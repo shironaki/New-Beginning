@@ -28,6 +28,35 @@ export function resumeSaved(game) {
         ? "Загружен старый сейв: он не содержал состояние собранных ресурсов." : "Продолжаем с сохранённого места", "💾");
     return true;
 }
+/**
+ * «Вид мира» — то же, что ?props3d / ?hero3d в адресной строке, но пальцем по
+ * экрану: на телефоне адресной строки нет, и без этого пункта игрок остаётся с
+ * тем стилем, который выбрал однажды при запуске. Выбор запоминается в этом
+ * браузере и применяется без перезагрузки.
+ */
+const STYLE_CHOICES = {
+    props3d: [["on", "Модели из паков (3D-запёк)"], ["off", "Процедурные кривые"]],
+    hero3d: [["grade", "Пиксельный 3D-риг"], ["smooth", "Гладкий 3D-риг (без грейда)"], ["off", "Векторная фигура"]],
+    props3dTone: [["auto", "Как диктует сезон и погода"], ["plain", "Без тона"], ["autumn", "Осень"],
+                  ["winter", "Зима"], ["wet", "Мокрый"], ["snowwet", "Мокрый снег"]]
+};
+
+function openStyleMenu(g, back) {
+    const style = g.style || {};
+    const current = (key, options) => (options.find(([v]) => (style[key] ?? options[0][0]) === v) || options[0])[1];
+    const rows = [["Пропы", "props3d"], ["Герой", "hero3d"], ["Тон кадра", "props3dTone"]].map(([title, key]) => ({
+        label: `${title}: ${current(key, STYLE_CHOICES[key])}`,
+        action: () => g.hud.openPanel(title, STYLE_CHOICES[key].map(([value, label]) => ({
+            label,
+            action: () => Promise.resolve(g.setStyle({ [key]: value === "auto" ? null : value }))
+                .then(() => openStyleMenu(g, back))
+        })), "style")
+    }));
+    rows.push({ html: "Ссылка со ?props3d=off или ?hero3d=smooth перекрывает этот выбор: сравнение в превью всегда работает как ожидалось." });
+    rows.push({ label: "Назад", action: back });
+    g.hud.openPanel("Вид мира", rows, "style");
+}
+
 export function openSessionMenu(game) {
     const g = game, initial = g.sessionReady === false;
     g.input.releaseAll(); g.touch?.reset();
@@ -46,6 +75,7 @@ export function openSessionMenu(game) {
         })), "handedness");
     } });
     if (!initial) rows.push({ label: "Внешность", action: () => openAppearance(g, () => openSessionMenu(g)) });
+    if (!initial) rows.push({ label: "Вид мира", action: () => openStyleMenu(g, () => openSessionMenu(g)) });
     if (!initial) rows.push({ label: "Состояние и причины", action: () => g.openCondition() });
     if (!initial) rows.push({ label: "Сохранить игру", icon: "💾", action: () => checkpoint(g) });
     if (!g.isTrial) rows.push({ label: "Новая игра", action: () => {
@@ -68,8 +98,9 @@ export function openSessionMenu(game) {
     } });
     rows.push({ html: "Сохранение хранится в этом браузере. На телефоне, ПК, Pages и превью — отдельные хранилища. Перед закрытием нажмите «Сохранить игру»." });
     if (g.isTrial) rows.push({ label: "День / ночь / дождь / зима", action: () => g.openTrialConditions() });
-    if (!g.isTrial) rows.push({ label: "Игровой участок рельефа", action: () => leaveFor(g, "?relief=1") });
-    g.hud.openPanel("Игра · пауза", rows, "session", { locked: initial });
+    // «Игровой участок рельефа» отсюда убран: переход в рельефные зоны владелец
+    // отменил, а вместе с ссылкой из меню из игры уползал и ?relief=1.
+     g.hud.openPanel("Игра · пауза", rows, "session", { locked: initial });
 }
 export function leaveFor(game, url) {
     if (!game.isTrial && game.sessionReady === false) {

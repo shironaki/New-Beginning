@@ -4,12 +4,13 @@
  * world/debris.js — чистая математика падения, она проверяется без канваса.
  * faceFactors из props3d.js — как палитра кадра получает светотень по стороне
  * света; сам спрайт в node не строится (нет document.createElement), и это
- * правильно: тесту нужны коэффициенты, а не растр.
+ * правильно: тесту нужны коэффициенты, а не растр. Там же, где растр всё-таки
+ * нужен (тень осколка на земле), работает подстава document из shim.
  */
 import { suite, test, assert, run } from "./tiny.js";
 import { ShimCanvas } from "../tools/canvas-shim.js";
 import { DebrisField, shardFan, DEBRIS } from "../js/world/debris.js";
-import { faceFactors, defaultSun, propSunFor, propSpritePixels, setPropSun } from "../js/render/props3d.js";
+import { faceFactors, defaultSun, paintDebris3D, propSunFor, propSpritePixels, PROPS3D, setPropSun } from "../js/render/props3d.js";
 
 suite("падение и разрушение");
 
@@ -19,7 +20,7 @@ test("тело падает, отскакивает и остаётся лежа
     let rested = 0;
     for (let i = 0; i < 240; i += 1) f.step(1 / 60, { onRest: () => { rested += 1; } });
     assert.eq(rested, 1, "onRest обязан сработать ровно один раз");
-    assert.eq(b.z, 0, "телёг должен лежать на земле");
+    assert.eq(b.z, 0, "тело должно лежать на земле");
     assert.lt(Math.abs(b.vx), DEBRIS.restSpeed, "горизонталь гаснет трением");
 });
 
@@ -247,5 +248,54 @@ test("вечер меняет сторону света, а не только я
 // вернуть среду «как было» в этом же файле уже некуда, да и незачем: процесс
 // тестов на этом заканчивается.
 void docSaved;
+
+test("щепка пружинит меньше обломка и ложится быстрее", () => {
+    // Тот же импульс, разная масса: без поправки «дождь из щепок» подпрыгивал
+    // как полено и висел в воздухе — ровно та претензия, из-за которой rule
+    // вообще придумали.
+    const light = new DebrisField(), heavy = new DebrisField();
+    const a = light.spawn(100, 100, { z: 70, vz: 0, vx: 0, scale: 0.35 });
+    const b = heavy.spawn(100, 100, { z: 70, vz: 0, vx: 0, scale: 1.6 });
+    assert.lt(a.mass, b.mass, "масса обязана расти с размером кадра");
+    let peakLight = 0, peakHeavy = 0, wasAir = false;
+    for (let i = 0; i < 240; i += 1) {
+        light.step(1 / 60, {}); heavy.step(1 / 60, {});
+        if (a.z > 0.5) wasAir = true;
+        if (wasAir) { peakLight = Math.max(peakLight, a.vz); peakHeavy = Math.max(peakHeavy, b.vz); }
+    }
+    assert.lt(peakLight, peakHeavy, "лёгкий осколок не имеет права отскакивать выше тяжёлого");
+    assert.ok(a.grounded && a.z === 0 && b.z === 0, "оба тела обязаны лечь, а не остаться в полёте");
+});
+
+suite("осколок в полёте");
+
+test("тень остаётся на земле, когда тело поднялось", () => {
+    // Ключевое слово «висит» в претензии владельца означало ровно это: осколок
+    // летел, а вместе с ним летела и тень — то есть кадру было нечем сказать,
+    // где земля. Рисуем одно и то же тело на земле и в 40 px над ней.
+    if (!globalThis.document) {
+        globalThis.document = { createElement: (tag) => (tag === "canvas" ? new ShimCanvas(1, 1) : {}) };
+    }
+    PROPS3D.enabled = true;
+    const shot = (z) => {
+        const cv = new ShimCanvas(90, 120), ctx = cv.getContext("2d");
+        ctx.translate(45, 100);                                   // «ноги» тела — точка на земле
+        paintDebris3D(ctx, { kind: "log", z, scale: 1, size: 1, settling: 0, ang: 0 }, { settle: 0.18 });
+        const band = (y0, y1) => {
+            let n = 0;
+            for (let y = y0; y < y1; y++) for (let x = 0; x < 90; x++) if (cv.data[(y * 90 + x) * 4 + 3] > 0) n++;
+            return n;
+        };
+        return { ground: band(94, 106), air: band(40, 66) };
+    };
+    const onGround = shot(0), flying = shot(40);
+    // На земле пятно широкое, в полёте — сжавшееся: важно не «сколько пикселей»,
+    // а что оно не улетает вместе с телом: без него кадр читается «приклеен к
+    // воздуху».
+    assert.ok(onGround.ground > 20 && flying.ground > 8,
+        `пятно на земле обязано остаться при любой высоте (на земле ${onGround.ground}, в полёте ${flying.ground})`);
+    assert.ok(flying.air > 20, "поднятое тело рисуется над землёй, а не вмазывается в неё");
+    assert.ok(onGround.air < flying.air, "на земле в верхних строках кадра быть нечего");
+});
 
 await run("physics-debris");

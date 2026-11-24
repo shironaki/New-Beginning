@@ -776,9 +776,14 @@ function placeStoryProps(zone, rng) {
         for (const [x, y] of [[hx, hy + 1], [hx + 6, hy + 1]]) {
             if (map.inBounds(x, y)) addProp(zone, "hut_wall", x, y, { solid: true });
         }
-        // Крышу и трубу ставим СЕВЕРО-ВОСТОЧНИЕ стены, на тайл выше: y-сортировка
-        // рисует их до стены, и деталь ложится на неё, а не повисает над пеплом.
-        if (map.inBounds(hx + 1, hy)) addProp(zone, "hut_roof", hx + 1, hy, { solid: false, size: 0.94, lift: 34 });
+        // Крыша — НА стене, а не рядом с ней: у панели 6×6 свой центр, и сдвиг на
+        // тайл вперёд вешал её в воздухе над пеплом («летающие объекты» из отзыва
+        // владельца). lift = высота опоры, `on` — для правила «опоры нет → падаем».
+        if (map.inBounds(hx, hy + 1)) addProp(zone, "hut_roof", hx, hy + 1, {
+            // 44 px = верх стены из propsprites минус скат. Число сверяет
+            // tests/visual-world: «поднятая деталь сидит на опоре, а не в воздухе».
+            solid: false, size: 0.94, lift: 44, on: "hut_wall"
+        });
         if (map.inBounds(hx + 2, hy - 1)) addProp(zone, "chimney", hx + 2, hy - 1, { solid: true });
         if (map.inBounds(hx + 5, hy + 3)) addProp(zone, "crate", hx + 5, hy + 3, { solid: true });
         if (map.inBounds(hx + 8, hy + 3)) addProp(zone, "wagon", hx + 8, hy + 3, { solid: true });
@@ -805,8 +810,11 @@ function placeStoryProps(zone, rng) {
             // Из конструктора собираем то, чего процедурная отрисовка не давала:
             // уцелевший угол с крышей и трубой. Две детали на фундамент — и это
             // уже «дом», а не «прямоугольник из сажи».
-            if (map.inBounds(bx, by) && rng.chance(0.7)) addProp(zone, "hut_wall", bx, by, { solid: true });
-            if (map.inBounds(bx + 1, by - 1)) addProp(zone, "hut_roof", bx + 1, by - 1, { solid: false, size: 0.9, lift: 30 });
+            const hasWall = map.inBounds(bx, by) && rng.chance(0.7);
+            if (hasWall) addProp(zone, "hut_wall", bx, by, { solid: true });
+            // Крыша только над стеной: «уцелел угол — уцелела и крыша» читается,
+            // а висящая в воздухе панель читается как баг.
+            if (hasWall) addProp(zone, "hut_roof", bx, by, { solid: false, size: 0.9, lift: 44, on: "hut_wall" });
             if (map.inBounds(bx + 3, by - 1) && rng.chance(0.5)) addProp(zone, "chimney", bx + 3, by - 1, { solid: true });
             if (map.inBounds(bx + bw - 1, by + bh - 2) && rng.chance(0.45)) {
                 addProp(zone, "crate", bx + bw - 1, by + bh - 2, { solid: true });

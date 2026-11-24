@@ -429,10 +429,12 @@ function paintCharacter(ctx, p) {
             // целиком: возвращать под него кисть нечего, только работа лишняя.
             if (grip) {
                 ctx.imageSmoothingEnabled = false;             // пиксели, не размытие
-                // Тот же лист, что и для тела: кулак обязан тонироваться вместе с
-                // героем, иначе поверх предмета проступает немокший кусок руки.
-                ctx.drawImage(tint ? tintedSheet(sprite.canvas, tint) : sprite.canvas,
-                              grip.sx, grip.sy, grip.sw, grip.sh,
+                // Тот же лист, что и для тела (включая тонировку) и то же свёрнутое
+                // разрешение: иначе кулак и рука сошлись бы на пиксель разъехавшимися
+                // сетками — на телефоне это выглядит как оторванный рукав.
+                ctx.drawImage(fit.canvas,
+                              Math.round(grip.sx * fit.kx), Math.round(grip.sy * fit.ky),
+                              Math.max(1, Math.round(grip.sw * fit.kx)), Math.max(1, Math.round(grip.sh * fit.ky)),
                               grip.dx, grip.dy, grip.dw, grip.dh);
                 ctx.imageSmoothingEnabled = true;
             }
@@ -454,10 +456,11 @@ function paintCharacter(ctx, p) {
         // Тонировка погоды считается ДО спрайта: патч кулака рисуется внутри
         // paintItem, и он обязан видеть тот же слой, что и тело.
         const tint = heroWeatherTint(p);
-        for (const hand of ["right", "left"]) if (behind[hand]) paintItem(hand, true);
         const sheet = tint ? tintedSheet(sprite.canvas, tint) : sprite.canvas;
+        const fit = fitSheet(ctx, sheet, sprite.w, sprite.h);
+        for (const hand of ["right", "left"]) if (behind[hand]) paintItem(hand, true);
         ctx.imageSmoothingEnabled = false;         // спрайт 1:1, интерполяция тут = каша
-        ctx.drawImage(sheet, sprite.x, sprite.y, sprite.w, sprite.h);
+        ctx.drawImage(fit.canvas, sprite.x, sprite.y, fit.w, fit.h);
         ctx.imageSmoothingEnabled = true;
         for (const hand of ["right", "left"]) if (!behind[hand]) paintItem(hand, false);
         if (p.wading) paintWaterline(ctx, idle);
@@ -688,8 +691,51 @@ function tintedSheet(canvas, tint) {
     c.globalAlpha = tint.a;
     c.fillRect(0, 0, tintSheet.width, tintSheet.height);
     c.restore();
+    // Канвас один и тот же, содержимое — новое на каждый кадр. Любой, кто кэширует
+    // производное от листа (см. fitSheet), обязан это заметить.
+    tintSheet.__rev = (tintSheet.__rev || 0) + 1;
     return tintSheet;
 }
+
+/* --------------------- запечённый лист → экран без дыр --------------------- */
+
+const FIT_CACHE = new Map();
+let FIT_SEQ = 0;
+
+/**
+ * «Одежда просвечивается» — это не палитра и не дизеринг, а способ, каким лист
+ * попадает на экран. Запечён он в 101×113, а в мир уходит в ~42 единицы; когда
+ * коэффициент экрана не целый (телефон: dpr 2 · zoom 1.6), nearest-neighbour
+ * выбрасывает каждый второй столбец — и там, где единственными пикселями были
+ * пиксели рубахи, остаётся дыра, сквозь которую видно землю. Поэтому перед
+ * уменьшением лист сворачивается фильтром ровно до экранного размера, а блит
+ * снова делает 1:1: пиксели остаются пикселями, дыр не возникает.
+ */
+export function fitSheet(ctx, sheet, dwWorld, dhWorld) {
+    const plain = { canvas: sheet, w: dwWorld, h: dhWorld, kx: 1, ky: 1 };
+    const t = ctx && ctx.getTransform ? ctx.getTransform() : null;
+    const dev = t ? Math.hypot(t.a, t.b) || 0 : 0;      // экранных пикселей на единицу мира
+    if (!dev || !sheet || !sheet.width) return plain;
+    const dw = Math.round(dwWorld * dev), dh = Math.round(dhWorld * dev);
+    if (!(dw > 0 && dh > 0) || dw >= sheet.width || dh >= sheet.height) return plain;
+    const seq = sheet.__fitSeq === undefined ? (sheet.__fitSeq = ++FIT_SEQ) : sheet.__fitSeq;
+    const key = `${seq}:${sheet.__rev || 0}:${dw}x${dh}`;
+    let small = FIT_CACHE.get(key);
+    if (!small) {
+        if (FIT_CACHE.size > 64) FIT_CACHE.clear();
+        if (typeof document === "undefined" || !document.createElement) return plain;
+        small = document.createElement("canvas");
+        small.width = dw; small.height = dh;
+        const c = small.getContext("2d");
+        c.imageSmoothingEnabled = true;                 // единственный раз, где нужно сглаживание
+        c.drawImage(sheet, 0, 0, sheet.width, sheet.height, 0, 0, dw, dh);
+        FIT_CACHE.set(key, small);
+    }
+    return { canvas: small, w: dw / dev, h: dh / dev, kx: dw / sheet.width, ky: dh / sheet.height };
+}
+
+/** Для тестов и превью: сколько размеров листа сейчас в кэше. */
+export const fitCacheSize = () => FIT_CACHE.size;
 export const __tintSheet = () => tintSheet;
 
 /** Ватерлиния: кольцо на поверхности, вода поверх ботинок, пена у тела. */

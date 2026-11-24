@@ -260,10 +260,8 @@ export function installDevTools(game, win = window) {
         relief.style.color = "#e2c58e";
         relief.addEventListener("click", (e) => { e.preventDefault(); leaveFor(game, relief.href); });
         p.append(relief);
-        const trial = el("a", { textContent: "↗ Игровой участок: хворост и костёр", href: "?relief=1", target: "_self" });
-        trial.style.color = "#e2c58e";
-        trial.addEventListener("click", (e) => { e.preventDefault(); leaveFor(game, trial.href); });
-        row(trial);
+        // «?relief=1» из адреса игры убран: пилот подменял класс игры и лез в
+        // основное сохранение. Рельеф остался только стендом (ссылка выше).
         p.append(el("small", { textContent: "Перед переходом основной прогресс сохраняется. Вернувшись, нажмите «Продолжить сохранение»." }));
 
         // ---- time

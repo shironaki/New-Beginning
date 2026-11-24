@@ -82,7 +82,9 @@ export class DebrisField {
             scale: o.scale || 1,
             ang: o.ang || 0,
             spin: o.spin !== undefined ? o.spin : speed * cfg.spinFromV * (seed ? -1 : 1),
-            mass: o.mass || 1,
+            // Масса по умолчанию — квадрат размера: щепка от крупного обломка
+            // отличается и кадром, и тем, как быстро ей пора ложиться.
+            mass: o.mass === undefined ? Math.max(0.25, (o.scale || 1) ** 2.2) : o.mass,
             grounded: false,
             sinking: 0,
             settling: 0,
@@ -163,7 +165,11 @@ export class DebrisField {
                 // поправки каждый второй шаг выглядел бы как удар с трением.
                 const restImpact = Math.max(cfg.restVz, cfg.gravity * dt * 1.5);
                 if (impact > restImpact) {
-                    b.vz = impact * cfg.restitution;
+                    // Лёгкий осколок пружинит меньше тяжёлого обломка: без этой
+                    // поправки щепка mass=0.35 отскакивала так же, как полено, и
+                    // в кадре выглядело «деревянный дождик завис в воздухе».
+                    const spring = cfg.restitution * Math.min(1, 0.35 + (b.mass || 1) * 0.65);
+                    b.vz = impact * spring;
                     b.vx *= cfg.groundFriction; b.vy *= cfg.groundFriction;
                     b.spin += (b.vx + b.vy) * cfg.bounceSpin * 0.01;
                     b.grounded = false;
@@ -210,6 +216,30 @@ export class DebrisField {
     }
 
     clear() { this.bodies.length = 0; this.stats.live = 0; return this; }
+}
+
+/**
+ * Детали, которые повиснут, если у пропа `lost` убрать опору.
+ *
+ * Поднятый объект привязан к соседу словом `on` (в `kind` опоры) в пределах
+ * одного тайла — это расставляет worldgen. Важно, что ищем МЫ не «проп похож
+ * на опору», а «живой опоры под деталью больше нет»: у хижины под одной крышей
+ * может стоять две стены, и сносить из-за этого весь двор нельзя. Иначе игрок
+ * получил бы обрушение от первого же удара — а крыша, висящая над пустотой,
+ * была как раз той претензией, из-за которой правило придумали.
+ */
+export function unsupportedBy(objects, lost) {
+    const out = [];
+    if (!lost || !objects) return out;
+    const near = (a, b) => Math.abs(a.tx - b.tx) <= 1 && Math.abs(a.ty - b.ty) <= 1;
+    const live = [];
+    for (const o of objects) if (!o.removed && !o.depleted) live.push(o);
+    for (const o of live) {
+        if (o === lost || !o.lift || o.on !== lost.kind || !near(o, lost)) continue;
+        if (live.some((s) => s !== lost && s !== o && s.kind === o.on && near(o, s))) continue;
+        out.push(o);
+    }
+    return out;
 }
 
 /**

@@ -37,7 +37,7 @@ const WET = {
     snowCap: 0.55               // шапка снега на верхних пикселях колонок
 };
 /** Эти пропы «дышат» на ветру — те же лиственные, что качает tilesart. */
-const SWAY = new Set(["pine", "spruce", "tree_pine", "dead_tree", "ancient_oak", "bush", "hut_roof"]);
+const SWAY = new Set(["pine", "spruce", "dead_tree", "ancient_oak", "bush", "hut_roof"]);
 /** Флаги отладки; `enabled` выключается сам, если канвасов в среде нет. */
 export const PROPS3D = {
     enabled: true,
@@ -116,24 +116,15 @@ export function setPropSun(next) {
 }
 export function propSun() { return SUN; }
 
-/** Ручной тон для сравнения стилей: ?props3dTone=winter / setPropTone(null). */
+/**
+ * Ручной тон для сравнения стилей: ?props3dTone=winter или пункт меню «Вид
+ * мира». Разбором адресной строки владеет ui/styleflags.js — единый источник
+ * «что включено» для игры, меню и штампа сборки; здесь только приёмник.
+ */
 export function setPropTone(tone) {
     if (PROPS3D.tone === (tone || null)) return false;
     PROPS3D.tone = tone || null;
     return true;
-}
-
-/** Тон и свет из адресной строки — чтобы владелец сравнивал их без пересборки. */
-export function readFlags(search = "") {
-    let p = null;
-    try { p = new URLSearchParams(search); } catch { return {}; }
-    const mode = p.get("props3d");
-    const out = {};
-    if (mode === "off" || mode === "vector") out.enabled = false;
-    else if (mode === "on" || mode === "model") out.enabled = true;
-    const tone = p.get("props3dTone") || p.get("propsTone");
-    if (tone) out.tone = tone;
-    return out;
 }
 
 const CACHE = new Map();
@@ -321,10 +312,15 @@ export function paintProp3D(ctx, obj, opts = {}) {
     // стене). Мир передаёт число в пикселях — см. placeStoryProps в worldgen.
     const lift = obj.lift || 0;
     const w = sprite.w, h = sprite.h;
-    ctx.fillStyle = lift ? "rgba(14,12,10,0.12)" : "rgba(14,12,10,0.22)";
-    ctx.beginPath();
-    ctx.ellipse(0, 0, w * 0.34, w * 0.13, 0, 0, Math.PI * 2);
-    ctx.fill();
+    // Контактная тень — только у того, что стоит на земле. Пятно под деталью,
+    // стоящей на другой детали, и есть тот самый «летающий объект»: разрыв между
+    // спрайтом и тенью читается как воздух, каким бы аккуратным ни был lift.
+    if (!lift) {
+        ctx.fillStyle = "rgba(14,12,10,0.22)";
+        ctx.beginPath();
+        ctx.ellipse(0, 0, w * 0.34, w * 0.13, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
     ctx.drawImage(sprite.canvas, Math.round(-w / 2), Math.round(-h - lift));
     ctx.restore();
     PROPS3D.stats.drawn += 1;
@@ -370,23 +366,30 @@ export function paintDebris3D(ctx, body, opts = {}) {
     if (!sprite) return false;
     const scale = (body.scale || 1) * (body.size || 1);
     const settle = body.settling > 0 ? Math.max(0, body.settling / (opts.settle || 0.18)) : 1;
+    const w = sprite.w, h = sprite.h;
+    const lift = Math.max(0, body.z || 0);
+    // 1 на земле → ~0.18 на высоте 500 px: пятно тает вместе с подлётом.
+    const ground = 1 / (1 + lift / 110);
     ctx.save();
-    ctx.translate(0, -Math.round(body.z));
+    ctx.globalAlpha = Math.min(1, 0.3 + ground * 0.7);
+    ctx.fillStyle = `rgba(14,12,10,${(0.22 * ground).toFixed(3)})`;
+    ctx.beginPath();
+    // Пятно уменьшается вместе с высотой: это единственное, что отличает в кадре
+    // «кусок летит» от «кусок висит» — раньше тень рисовалась уже после
+    // translate(0, -z) и уезжала вверх вместе с телом, поэтому осколок на
+    // подъёме выглядел приклеенным к воздуху (претензия «обломки висят»).
+    const spread = 0.55 + 0.45 * ground;
+    ctx.ellipse(0, 0, w * 0.34 * scale * spread, w * 0.13 * scale * spread, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(0, -Math.round(lift));
     ctx.globalAlpha = Math.min(1, 0.25 + settle * 0.75) * (body.sinking > 0 ? 0.55 : 1);
     if (body.ang) ctx.rotate(body.ang);
     // Тело в полёте чуть разворачивается по вертикали: иначе квадратный кадр
     // выглядит наклейкой, а не куском дерева.
     ctx.scale(scale, scale * (1 - Math.abs(Math.sin(body.ang || 0)) * 0.08));
-    const w = sprite.w, h = sprite.h;
-    // Тень под телом — по земле, не по телу: при подъёме она остаётся внизу.
-    ctx.save();
-    ctx.rotate(-(body.ang || 0));
-    ctx.scale(1, 1);
-    ctx.fillStyle = `rgba(14,12,10,${(0.20 - Math.min(0.14, body.z / 900)).toFixed(3)})`;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, w * 0.32 * scale, w * 0.12 * scale, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
     ctx.drawImage(sprite.canvas, Math.round(-w / 2), Math.round(-h / 2) + Math.round(h * 0.18));
     ctx.restore();
     PROPS3D.stats.drawn += 1;

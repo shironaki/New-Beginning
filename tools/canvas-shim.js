@@ -167,6 +167,9 @@ export class ShimContext {
         s.e = a * e2 + c * f2 + e; s.f = b * e2 + d * f2 + f;
     }
     setTransform(a, b, c, d, e, f) { Object.assign(this.s, { a, b, c, d, e, f }); }
+    // Браузер отдаёт матрицу — по ней код считает, сколько экранных пикселей
+    // приходится на единицу мира (см. fitSheet в render/character.js).
+    getTransform() { const s = this.s; return { a: s.a, b: s.b, c: s.c, d: s.d, e: s.e, f: s.f }; }
     _pt(x, y) { const s = this.s; return [s.a * x + s.c * y + s.e, s.b * x + s.d * y + s.f]; }
     _scaleFactor() { const s = this.s; return Math.sqrt(Math.abs(s.a * s.d - s.b * s.c)) || 1; }
 

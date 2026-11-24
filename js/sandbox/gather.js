@@ -28,7 +28,10 @@ export const PROPS = {
     palm:        { name: "Пальма",       tool: "axe", hits: 3, drops: [["log", 1], ["fiber", 2]], solid: true, xp: 3, shade: true, block: 4.2 },
     dead_tree:   { name: "Сухое дерево", tool: "axe", hits: 2, drops: [["firewood", 3], ["log", 1, 0.5]], solid: true, xp: 2, block: 4.2 },
     burnt_tree:  { name: "Обгоревшее дерево", tool: "axe", hits: 2, drops: [["charcoal", 2], ["firewood", 2]], solid: true, xp: 2, block: 4.6 },
-    burnt_stump: { name: "Обугленный пень", tool: null, hits: 2, drops: [["charcoal", 1], ["ash_dust", 1]], solid: false, xp: 1, block: 3.6 },
+    // Пень — не дерево: у 16-пиксельного кадра нет ни причин иметь collider на
+    // 3.6 единицы (это радиус сосны), ни права спотыкать. `block` без `solid`
+    // только вводил в заблуждение.
+    burnt_stump: { name: "Обугленный пень", tool: null, hits: 2, drops: [["charcoal", 1], ["ash_dust", 1]], solid: false, xp: 1, block: 0 },
     driftwood:   { name: "Плавник",      tool: null, hits: 1, drops: [["firewood", 2]], solid: false, xp: 1, block: 0 },
 
     /* ---- постройки (3D-детали деревни, разбираются руками/инструментом) ---- */
