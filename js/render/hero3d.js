@@ -104,6 +104,44 @@ const labelFor = (src, want) => (src.has(want) ? want : (src === SOURCES.smooth 
  * заменить пять записей палитры, а не перепекать 188 кадров. У гладкого выхода дорожек
  * нет: там цвет запечён сплошным веером из 14 тонов, и перекраска осознанно не работает.
  */
+/**
+ * Группы записей палитры, которые в листе ЗАПЕЧЁНЫ своим цветом, а должны идти
+ * за образом: рубашка, шарф, плащ, сумка, металл и кожа ремней. Без этого у
+ * героя на спине оставалась кремовая «рубашка» из палитры листа (#e6dcbc), какой
+ * бы цвет ни выбрал игрок, — ровно претензия «на спине белая палитра в одежде».
+ * Дорожек (ramps) для них в запекке нет, зато имена записей есть, поэтому
+ * перекраска идёт по имени: оттенок каждой записи сохраняется (он и делает
+ * ткань объёмной), меняется только тон группы.
+ */
+const COLOR_GROUPS = [
+    { look: "shirt", names: ["shirt", "shirtLight", "shirtShade", "shirtDeep", "scarf", "scarfLight", "scarfShadow", "scarfDeep"] },
+    { look: "cloak", names: ["cloak", "cloakLight", "pack", "packDark", "packLight", "blanket", "blanketDark"], skipWhenUnset: true },
+    { look: "accent", names: ["metal", "metalLight", "metalShade", "brass", "brassLight", "laces"] }
+];
+const lumOf = (rgb) => 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+/** Индексы именованных записей палитры листа (значение кадра = индекс + 1). */
+function indexOfNames(meta) {
+    if (meta._nameIndex) return meta._nameIndex;
+    const map = new Map();
+    (meta.palette || []).forEach(([name, hex], i) => map.set(name, i));
+    meta._nameIndex = map;
+    return map;
+}
+/**
+ * Перекрасить группу в новый тон, сохранив относительную светлоту каждой
+ * записи: ratio = lum(запись)/lum(база группы). Так «светлый блик» остаётся
+ * бликом, а «тёмная складка» — складкой, и ткань не превращается в flat-пятно.
+ */
+function recolorGroup(out, src, indices, baseHex) {
+    const base = toRgb(baseHex);
+    const baseLum = Math.max(8, lumOf(src.base[indices[0]]));
+    for (const i of indices) {
+        if (i === undefined || i >= out.length) continue;
+        const ratio = Math.max(0.25, Math.min(1.9, lumOf(src.base[i]) / baseLum));
+        for (let c = 0; c < 3; c += 1) out[i][c] = Math.max(0, Math.min(255, Math.round(base[c] * ratio)));
+    }
+}
+
 function paletteFor(look, src = SRC) {
     const ramps = src.meta.ramps;
     if (!ramps) return src.base;
@@ -119,7 +157,22 @@ function paletteFor(look, src = SRC) {
         const steps = Math.min(meta.steps, spec.offsets.length);
         for (let i = 0; i < steps; i += 1) out[meta.at + i] = toRgb(shadeHex(base, spec.offsets[i]));
     }
-    src.paletteKey = key;
+    // Группы по именам (см. COLOR_GROUPS). Ключ пересборки обязан учитывать и
+    // эти поля: иначе смена рубашки не меняет палитру, потому что key собран
+    // только по дорожкам.
+    const groupKey = COLOR_GROUPS.map(g => `${g.look}=${(look && look[g.look]) || ""}`).join("|");
+    const fullKey = `${key}#${groupKey}`;
+    if (fullKey === src.paletteKey) return src.paletteRgb;
+    const indices = indexOfNames(src.meta);
+    for (const group of COLOR_GROUPS) {
+        const want = look && look[group.look];
+        if (!want) {
+            if (group.skipWhenUnset) continue;               // плаща нет — пусть останутся запечённые цвета
+        }
+        const list = group.names.map(n => indices.get(n)).filter(i => i !== undefined);
+        if (list.length) recolorGroup(out, src, list, want || src.paletteHex[list[0]]);
+    }
+    src.paletteKey = fullKey;
     src.paletteRgb = out;
     for (const pose of src.poses.values()) pose.canvases.fill(null);   // канвасы собраны по старой палитре
     return out;
@@ -127,6 +180,41 @@ function paletteFor(look, src = SRC) {
 
 /** Палитра дорожек для произвольного look — наружу ради теста и превью панели внешности. */
 export const heroLookPalette = (look) => paletteFor(look, SOURCES.grade);
+
+/**
+ * Сколько «мокроты» на долю данной записи палитры. Претензия владельца №3:
+ * при промокании слой наливали на ВЕСЬ силуэт, и кожа с лицом уезжали в
+ * тёмно-синий — герой выглядел синим человечком, а не мокрым человеком.
+ * Мокнет ткань (1.0), слегка — волосы (0.45) и обводка (0.35), кожа почти не
+ * меняет тон (0.10), огонь факела не меняется вовсе (0). Считается по ИМЕНИ
+ * записи, а не по индексам: имена приносит запекка, и они переживают переезд
+ * на другой лист.
+ */
+const WET_WEIGHT = {
+    skin: 0.10, skinLight: 0.10, skinHighlight: 0.08, skinShadow: 0.12, skinDeep: 0.12,
+    stubble: 0.12, jawShade: 0.12,
+    hair: 0.45, hairMid: 0.45, hairLight: 0.42, hairHighlight: 0.40,
+    ink: 0.35, inkSoft: 0.35, inkWarm: 0.35,
+    flame: 0, flameMid: 0, flameCore: 0, flameGlow: 0, ember: 0
+};
+/** Значение кадра = индекс палитры + 1; вес в долях 0..255 (0 для пустоты). */
+export function heroWetWeights(src = SOURCES.grade) {
+    if (src.wetWeights) return src.wetWeights;
+    const n = src.paletteHex.length + 1;
+    const w = new Uint8Array(n).fill(255);
+    w[0] = 0;
+    const byName = new Map((src.meta.palette || []).map(([name], i) => [name, i + 1]));
+    for (const [name, value] of Object.entries(WET_WEIGHT)) if (byName.has(name)) w[byName.get(name)] = Math.round(value * 255);
+    // Дорожки: у них имени в списке нет, но роль known — skin/hair едут по
+    // своей дорожке, cloth/pants мокнут целиком.
+    const ramps = src.meta.ramps || {};
+    for (const [ramp, meta] of Object.entries(ramps)) {
+        const weight = ramp === "skin" ? 0.10 : ramp === "hair" ? 0.45 : 1;
+        for (let i = 0; i < meta.steps; i += 1) w[meta.at + i + 1] = Math.round(weight * 255);
+    }
+    src.wetWeights = w;
+    return w;
+}
 
 function decodeBase64(b64) {
     if (typeof Buffer !== "undefined") {
@@ -255,7 +343,11 @@ export function heroSprite(p, look) {
     if (!canvas) return null;
     const pixels = data.frames[index];
     return {
-        canvas, dir: pose.dir, label: pose.label, index,
+        canvas, dir: pose.dir, label: pose.label, index, pixels,
+        // Веса положены ЛЮБОМУ источнику: у гладкого нет дорожек, и он честно
+        // получает «мокнет всё» — то, что было раньше. Раньше фильтр стоял здесь,
+        // и в режиме сравнения мокрый слой вообще исчезал (претензия п.3).
+        wet: heroWetWeights(src),
         x: -CELL.w / 2 * U, y: TOP, w: src.W, h: src.H,
         /**
          * Кусок спрайта вокруг кисти этого кадра — {src…, dst…} для drawImage.

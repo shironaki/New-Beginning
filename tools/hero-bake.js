@@ -188,6 +188,9 @@ const INK = [28, 22, 16];
  * пересобираются из цвета образа — один запёк, любые цвета куртки.
  */
 const RAMP_KEYS = ["cloth", "skin", "hair", "pants"];
+/** Имена записей палитры запекки — по ним лицо отличает «кожу» от «ткани». */
+const PALETTE_NAMES = (typeof PALETTE !== "undefined" && PALETTE.length)
+    ? PALETTE.map(entry => (Array.isArray(entry) ? entry[0] : entry.name || "")) : [];
 const TRACK_OF = { cloth: 1, skin: 2, hair: 3, pants: 4 };
 const TRACK_NAME = ["", "cloth", "skin", "hair", "pants"];
 const rampSteps = key => RAMPS[key].offsets.length;
@@ -710,6 +713,19 @@ function faceFill(frame, head) {
  * кисти: если в этой точке спрайта видна поверхность ЗАМЕТНО ближе глаза, черта
  * скрыта (затылок, вид сзади) и рисовать её нельзя.
  */
+/**
+ * Кожа ли под пикселем? Именованные записи — это ещё половина ответа: у лица
+ * в грейд-листе тон кожи лежит в ДОРОЖКЕ skin (её значения считает RAMP_AT), и
+ * проверка только по именам отбрасывала нос с ртом на ровном месте — «лица нет»,
+ * хотя штамп вызывался.
+ */
+function isFaceSkin(value) {
+    if (!value || value === 255) return false;
+    if (/skin/i.test(PALETTE_NAMES[value - 1] || "")) return true;
+    const at = RAMP_AT.skin, steps = rampSteps("skin");
+    return at !== undefined && value >= at && value < at + steps;
+}
+
 function stampFeatures(scene, frame, sprite) {
     const basis = frame._basis;
     const pos = SMOOTH ? SMOOTH_AT.hair : PALETTE.length;      // черта = самый тёмный тон
@@ -738,14 +754,32 @@ function stampFeatures(scene, frame, sprite) {
             nodes[d.feature].push({ x: (p.x - BOX.x) / SS, y: (p.y - BOX.y) / SS });
         }
     }
-    const stamp = (x, y) => {
-        const px = Math.round(x), py = Math.round(y);
-        if (px < 0 || py < 0 || px >= CELL.w || py >= CELL.h) return;
-        const at = py * CELL.w + px;
-        if (sprite.index[at] === 255) return;                     // в фон не рисуем
-        sprite.index[at] = pos;
-        const o = at * 4;
-        sprite.data[o] = rgb[0]; sprite.data[o + 1] = rgb[1]; sprite.data[o + 2] = rgb[2]; sprite.data[o + 3] = 255;
+    /**
+     * Штамп ПЯТНОМ, а не точкой. Прежняя версия ставила на глаз один пиксель —
+     * при голове в 24 пикселя это две соринки, и лицо читалось пустым овалом
+     * («нет лица» — владелец повторял это трижды). 2×1 на глаз + бровь 2×1
+     * дают взгляд, который переживает и даунсэмплинг, и квантование палитры.
+     */
+    const SOFT = 2;                                               // inkSoft — тень, а не дыра
+    const rgbSoft = hexRgb(PALETTE_NAMES[1]);
+    const stamp = (x, y, w = 1, h = 1, color = null, index = null) => {
+        const x0 = Math.round(x - (w - 1) / 2), y0 = Math.round(y - (h - 1) / 2);
+        const col = color || rgb, at0 = index === null ? pos : index;
+        for (let dy = 0; dy < h; dy += 1) {
+            for (let dx = 0; dx < w; dx += 1) {
+                const px = x0 + dx, py = y0 + dy;
+                if (px < 0 || py < 0 || px >= CELL.w || py >= CELL.h) continue;
+                const at = py * CELL.w + px;
+                if (sprite.index[at] === 255) continue;             // в фон не рисуем
+                // Бровь и глаз важнее «случайного» блика кожи, а вот нос и рот
+                // только тогда, когда под ними всё ещё кожа: иначе улыбка
+                // переползает в волосы и в профиль превращается в грязь.
+                if (at0 === SOFT && !isFaceSkin(sprite.index[at])) continue;
+                sprite.index[at] = at0;
+                const o = at * 4;
+                sprite.data[o] = col[0]; sprite.data[o + 1] = col[1]; sprite.data[o + 2] = col[2]; sprite.data[o + 3] = 255;
+            }
+        }
     };
     // По две точки: левая и правая сторона лица. Разделяем по центру головы — в
     // профиль обе группы слипаются в одну, и тогда ставится одна точка (это
@@ -761,11 +795,18 @@ function stampFeatures(scene, frame, sprite) {
         }));
     };
     const eyeC = clusters(nodes.eyes), browC = clusters(nodes.brows);
-    for (const e of eyeC) stamp(e.x, e.y);
+    for (const e of eyeC) stamp(e.x, e.y, 2, 1);
     // Брови — на строку ВЫШЕ своего центра, но не ниже уровня глаз: иначе в
     // наклоне головы они сливаются с глазами в одну полосу (первая версия
     // именно так и делала — лицо выглядело повязкой).
-    for (const b of browC) stamp(b.x, Math.min(b.y - 1, (eyeC[0] ? eyeC[0].y : b.y) - 2));
+    for (const b of browC) stamp(b.x, Math.min(b.y - 1, (eyeC[0] ? eyeC[0].y : b.y) - 2), 2, 1);
+    // Нос и рот — только в анфас и 3/4 (оба глаза видны раздельно). В профиль
+    // они легли бы на щёку. Рот — тенью на 2 пикселя шире центра глаз.
+    if (eyeC.length === 2) {
+        const nx = (eyeC[0].x + eyeC[1].x) / 2, ny = (eyeC[0].y + eyeC[1].y) / 2;
+        stamp(nx, ny + 2, 1, 1, rgbSoft, SOFT);                    // кончик носа
+        stamp(nx, ny + 4, 3, 1, rgbSoft, SOFT);                    // рот
+    }
     return eyeC.length + browC.length;
 }
 /** Пиксель ячейки → игровые единицы: 2 px спрайта = 1 единица, ноль — линия стоп. */

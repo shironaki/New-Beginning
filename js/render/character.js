@@ -458,7 +458,7 @@ function paintCharacter(ctx, p) {
         // Тонировка погоды считается ДО спрайта: патч кулака рисуется внутри
         // paintItem, и он обязан видеть тот же слой, что и тело.
         const tint = heroWeatherTint(p);
-        const sheet = tint ? tintedSheet(sprite.canvas, tint) : sprite.canvas;
+        const sheet = tint ? tintedSheet(sprite.canvas, tint, sprite.pixels, sprite.wet) : sprite.canvas;
         const fit = fitSheet(ctx, sheet, sprite.w, sprite.h);
         for (const hand of ["right", "left"]) if (behind[hand]) paintItem(hand, true);
         ctx.imageSmoothingEnabled = false;         // спрайт 1:1, интерполяция тут = каша
@@ -679,8 +679,15 @@ export function heroWeatherTint(p) {
 }
 
 let tintSheet = null;
-/** Кадр с тонированным слоем внутри силуэта. Канвас-скретч переиспользуется. */
-function tintedSheet(canvas, tint) {
+/**
+ * Кадр с мокрой ТКАНЬЮ внутри силуэта. Канвас-скретч переиспользуется.
+ *
+ * Раньше это был один сплошной `fillRect` с `source-atop`: он честно трогал
+ * только непрозрачные пиксели, но трогал их все — и лицо, и руки, и ботинки
+ * становились тёмно-синими. Теперь слой взвешен по записи палитры каждого
+ * пикселя (см. heroWetWeights): ткань мокнет, кожа остаётся кожей.
+ */
+function tintedSheet(canvas, tint, pixels, weights) {
     if (!canvas || !canvas.width) return canvas;
     if (!tintSheet || tintSheet.width !== canvas.width || tintSheet.height !== canvas.height) {
         tintSheet = document.createElement("canvas");
@@ -688,14 +695,33 @@ function tintedSheet(canvas, tint) {
         tintSheet.height = canvas.height;
     }
     const c = tintSheet.getContext("2d");
+    if (!pixels || !weights) {                                  // данных о пикселях нет — старый честный слой
+        c.save();
+        c.globalCompositeOperation = "source-over";
+        c.clearRect(0, 0, tintSheet.width, tintSheet.height);
+        c.drawImage(canvas, 0, 0);
+        c.globalCompositeOperation = "source-atop";
+        c.fillStyle = `rgb(${tint.rgb[0]},${tint.rgb[1]},${tint.rgb[2]})`;
+        c.globalAlpha = tint.a;
+        c.fillRect(0, 0, tintSheet.width, tintSheet.height);
+        c.restore();
+        return tintSheet;
+    }
     c.save();
-    c.globalCompositeOperation = "source-over";
-    c.clearRect(0, 0, tintSheet.width, tintSheet.height);      // следы прошлого кадра не нужны
+    c.clearRect(0, 0, tintSheet.width, tintSheet.height);
     c.drawImage(canvas, 0, 0);
-    c.globalCompositeOperation = "source-atop";
-    c.fillStyle = `rgb(${tint.rgb[0]},${tint.rgb[1]},${tint.rgb[2]})`;
-    c.globalAlpha = tint.a;
-    c.fillRect(0, 0, tintSheet.width, tintSheet.height);
+    const img = c.getImageData(0, 0, tintSheet.width, tintSheet.height);
+    const d = img.data;
+    for (let i = 0, n = d.length / 4; i < n; i += 1) {
+        const o = i * 4;
+        if (d[o + 3] < 8) continue;                             // пустота кадра не тонируется
+        const a = tint.a * ((weights[pixels[i]] || 0) / 255);
+        if (a <= 0.002) continue;
+        d[o] += (tint.rgb[0] - d[o]) * a;
+        d[o + 1] += (tint.rgb[1] - d[o + 1]) * a;
+        d[o + 2] += (tint.rgb[2] - d[o + 2]) * a;
+    }
+    c.putImageData(img, 0, 0);
     c.restore();
     // Канвас один и тот же, содержимое — новое на каждый кадр. Любой, кто кэширует
     // производное от листа (см. fitSheet), обязан это заметить.

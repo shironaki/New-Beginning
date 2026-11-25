@@ -18,6 +18,7 @@ import { DEFAULT_LOOK } from "../js/render/character.js";
 import { META as HERO_META, PALETTE_HEX as HERO_PALETTE, STREAMS as HERO_STREAMS } from "../js/render/heroframes.js";
 import { heroLookPalette } from "../js/render/hero3d.js";
 import { PROP_SPRITES, PROP_META } from "../js/render/propsprites.js";
+import { installDOM } from "./dom-harness.js";
 import fs from "node:fs";
 import path from "node:path";
 import { cameraBasis } from "../tools/raster3d.js";
@@ -573,6 +574,179 @@ test("одна модель — один масштаб: кадр хранит �
     }
     const ch = PROP_SPRITES.chimney;
     assert.ok(ch.h > ch.w, `труба ${ch.w}×${ch.h}: дымоход обязан быть выше, чем шире`);
+});
+
+/* ------------------------- герой: лицо, вода, одежда ------------------------- */
+
+/** Имя записи палитры по значению кадра (runtime читает palette[value - 1]). */
+function frameName(meta, v) {
+    if (!v || v === 255) return "empty";
+    const i = v - 1;
+    if (i === meta.inkAt && i >= meta.palette.length) return "ink";
+    if (i < meta.palette.length) return meta.palette[i][0];
+    for (const [ramp, m] of Object.entries(meta.ramps || {})) {
+        if (i >= m.at && i < m.at + m.steps) return `ramp:${ramp}`;
+    }
+    return `#${i}`;
+}
+/**
+ * installDOM меняет глобальные объекты, а соседним тестам нужен честный
+ * ShimCanvas: с FakeElement вместо документа офскрин-маска падающей тени
+ * превращается в пустоту, и тень «исчезает» в тесте, которого это не касается.
+ * Поэтому ставим DOM вокруг тела теста и обязательно снимаем.
+ */
+async function withDom(fn) {
+    const keys = ["document", "window", "requestAnimationFrame", "localStorage"];
+    const saved = {};
+    for (const k of keys) saved[k] = globalThis[k];
+    installDOM();
+    try {
+        return await fn();
+    } finally {
+        for (const k of keys) globalThis[k] = saved[k];
+    }
+}
+
+const HERO_LOOK = { gender: "male", coat: "#446d68", skin: "#e0b594", hair: "#302b29",
+    pants: "#48473e", shirt: "#899383", vest: "#41524e", accent: "#c9a063", cloak: null };
+
+test("лицо героя доживает до игрового кадра: глаза в анфас, ничего — сзади", async () => {
+    return withDom(async () => {
+        // Меш глаз в паке занимает ~1.7 px большого кадра, и boxAverage размывал их
+        // в тон кожи: в игре лицо было пустым овалом («нет лица» — три отзыва подряд).
+        // Штамп рисует глаза и брови пятном 2×1 ПОСЛЕ квантования, поэтому проверяем
+        // не «есть ли тёмные пиксели» (обводка есть всегда), а РИСУНОК: в анфас
+        // внутри головы обязана найтись строка с двумя раздельными тёмнымиrunами
+        // (левый и правый глаз), а сзади — ни одного.
+        const { heroSprite, hero3dQuality, HERO3D } = await import("../js/render/hero3d.js");
+        // Соседние тесты этого файла переключают выход на smooth (у него нет ни
+        // дорожек, ни штампа лица) — фиксируем грейд и возвращаем как было.
+        const prevQuality = HERO3D.quality;
+        await hero3dQuality("grade");
+        const CELL = GRADED_META.cell, px0 = "ink";
+        const darkAt = (pixels, x, y) => String(frameName(GRADED_META, pixels[y * CELL.w + x])).startsWith(px0)
+            && !/inkSoft/.test(frameName(GRADED_META, pixels[y * CELL.w + x]));
+        // Черта лица — это КОРОТКИЙ тёмный run МЕЖДУ краями силуэта: first/last
+        // '#'-пиксели строки это обводка, её отбрасываем вместе со всём, что
+        // дальше них. Иначе окно головы ловит обводку с двух сторон и «видит»
+        // глаза там, где их нет.
+        const runsOf = (line) => {
+            const a = line.indexOf("#"), b = line.lastIndexOf("#");
+            if (a < 0 || b <= a) return 0;
+            let i = a; while (line[i] === "#") i += 1;               // за первым run'ом
+            let j = b; while (line[j - 1] === "#") j -= 1;          // перед последним
+            const inner = line.slice(i, j);
+            const runs = (inner.match(/#{1,3}/g) || []).length;
+            // wide=1 считать только ЧЕРТЫ от 2 px: одиночные точки глаз старая
+            // запеканка оставляла и на глаз похожими быть не могли (см. контроль).
+            return { runs, wide: (inner.match(/#{2,3}/g) || []).length };
+        };
+        const front = heroSprite({ dir: "down", anim: 0, gait: 0, moving: false, look: HERO_LOOK, phase: 0 }, HERO_LOOK);
+        assert.ok(front && front.pixels, "анфас обязан собираться из запечённого листа");
+        // Полоса лица: окно вокруг головы (x 34..68, y 14..28), а не вся строка —
+        // за пределами силуэта в сетке кадра лежит фон, и «обводка» съедала
+        // границу. Внутри окна тёмныеrunы могут быть только от черт лица.
+        const HEAD = { x0: 34, x1: 68, y0: 14, y1: 28 };
+        const faceRow = (pixels, want = "wide") => {
+            let hits = 0;
+            for (let y = HEAD.y0; y < HEAD.y1; y += 1) {
+                let line = "";
+                for (let x = HEAD.x0; x < HEAD.x1; x += 1) line += darkAt(pixels, x, y) ? "#" : ".";
+
+                const r = runsOf(line);
+                if ((want === "wide" ? r.wide : r.runs) >= 2) hits += 1;
+            }
+            return hits;
+        };
+        const eyesRows = faceRow(front.pixels);
+        assert.ok(eyesRows >= 1, `в анфас нужна строка с двумя раздельными глазами по 2 px (таких строк: ${eyesRows})`);
+        // Нос и рот — inkSoft, и они обязаны лежать НИЖЕ линии глаз: это проверка
+        // раскладки лица, а не «нашли сколько-то тёмных пикселей где попало».
+        const softBelowEyes = (pixels, eyeRow) => {
+            let soft = 0;
+            for (let y = eyeRow + 1; y < HEAD.y1 + 8; y += 1) for (let x = HEAD.x0; x < HEAD.x1; x += 1)
+                if (frameName(GRADED_META, pixels[y * CELL.w + x]) === "inkSoft") soft += 1;
+            return soft;
+        };
+        const eyeRow = (() => {
+            for (let y = HEAD.y0; y < HEAD.y1; y += 1) {
+                let line = "";
+                for (let x = HEAD.x0; x < HEAD.x1; x += 1) line += darkAt(front.pixels, x, y) ? "#" : ".";
+                if (runsOf(line).wide >= 2) return y;
+            }
+            return HEAD.y1;
+        })();
+        assert.ok(softBelowEyes(front.pixels, eyeRow) >= 1,
+            "ниже глаз нет ни одной мягкой тени — значит носа и рта в кадре нет");
+        const back = heroSprite({ dir: "up", anim: 0, gait: 0, moving: false, look: HERO_LOOK, phase: 0 }, HERO_LOOK);
+        // Сзади — ни одного run'а вообще (даже одиночного): черт там быть не может.
+        const bad = (() => {
+            let hits = 0;
+            for (let y = HEAD.y0; y < HEAD.y1; y += 1) {
+                let line = "";
+                for (let x = HEAD.x0; x < HEAD.x1; x += 1) line += darkAt(back.pixels, x, y) ? "#" : ".";
+                if (runsOf(line).runs >= 1) hits += 1;
+            }
+            return hits;
+        })();
+        assert.eq(bad, 0, "сзади глаз быть не может: проверка глубины обязана прятать черты");
+        await hero3dQuality(prevQuality);
+    });
+});
+
+test("мокрый слой красит ткань, а не лицо", async () => {
+    return withDom(async () => {
+        // «При промокании всё тело окрашивается в тёмно-синий» — раньше слой шёл
+        // одним fillRect по силуэту. Веса теперь считаются по записям палитры.
+        const { heroWetWeights } = await import("../js/render/hero3d.js");
+        const { heroSprite } = await import("../js/render/hero3d.js");
+        const spr = heroSprite({ dir: "down", anim: 0, gait: 0, moving: false, look: HERO_LOOK, phase: 0 }, HERO_LOOK);
+        // Рантайм тонировать умеет только если кадр принёс и пиксели, и веса.
+        assert.ok(spr.pixels && spr.wet, "heroSprite обязан отдавать pixels и wet для мокрого слоя");
+        // Каждый возможный значение кадра обязано иметь свой вес, иначе пиксель
+        // тонируется «undefined» (NaN в канвасе).
+        let maxV = 0;
+        for (let i = 0; i < spr.pixels.length; i += 1) if (spr.pixels[i] > maxV) maxV = spr.pixels[i];
+        assert.ok(spr.wet.length > maxV, `весов не хватает: максимум значения кадра ${maxV}, весов ${spr.wet.length}`);
+        assert.eq(heroWetWeights().length, HERO_PALETTE.length + 1,
+            "грейд: весов ровно по одному на каждую запись палитры и каждую дорожку");
+        const w = heroWetWeights();
+        const at = (name) => GRADED_META.palette.findIndex(([n]) => n === name) + 1;
+        assert.ok(w[at("skin")] <= 40, `кожа почти не мокнет (вес ${w[at("skin")]})`);
+        assert.ok(w[at("skinLight")] <= 40, "блик на коже тоже");
+        assert.ok(w[at("coat")] === 255 && w[at("trousers")] === 255, "ткань мокнет целиком");
+        assert.ok(w[at("hair")] > 90 && w[at("hair")] < 170, `волосы мокнут наполовину (${w[at("hair")]})`);
+        assert.eq(w[at("flameCore")], 0, "огонь факела тонировать нельзя");
+        assert.eq(w[0], 0, "пустота кадра не тонируется");
+        const ramps = GRADED_META.ramps;
+        assert.ok(w[ramps.skin.at + 1] <= 40, "дорожка кожи обязана наследовать вес");
+        assert.ok(w[ramps.cloth.at + 1] === 255, "дорожка ткани обязана мокнуть");
+    });
+});
+
+test("рубашка, плащ и аксессуар идут за образом, а не остаются кремом", async () => {
+    return withDom(async () => {
+        // В листе эти записи запечены своим цветом: на спине героя лежала кремовая
+        // «рубашка» (#e6dcbc), какой бы цвет ни выбрал игрок («на спине белая
+        // палитра в одежде»). Дорожек для них нет, поэтому перекраска идёт по имени
+        // группы, с сохранением светлоты каждой записи.
+        const { heroLookPalette } = await import("../js/render/hero3d.js");
+        const idx = (name) => GRADED_META.palette.findIndex(([n]) => n === name);
+        assert.eq(GRADED_META.palette[idx("shirt")][1].toLowerCase(), "#e6dcbc",
+            "проверка завязана на запечённый кремовый тон рубашки");
+        const red = heroLookPalette({ ...HERO_LOOK, shirt: "#7a2f2f" });
+        assert.ok(Math.abs(red[idx("shirt")][0] - 0x7a) <= 46 && red[idx("shirt")][2] < 0x70,
+            `рубашка не перекрашивается: ${red[idx("shirt")].join(",")}`);
+        const order = ["shirtDeep", "shirtShade", "shirt", "shirtLight"].map(n => idx(n));
+        const lum = (i) => 0.299 * red[i][0] + 0.715 * red[i][1] + 0.072 * red[i][2];
+        const lums = order.map(lum);
+        for (let i = 1; i < lums.length; i += 1) assert.ok(lums[i] > lums[i - 1],
+            `светлота рубашки не упорядочена: ${lums.map(v => Math.round(v)).join(" ")}`);
+        const gold = heroLookPalette({ ...HERO_LOOK, accent: "#ffd700" });
+        assert.ok(gold[idx("brass")][0] > 200 && gold[idx("brass")][1] > 160, "латунь обязана идти за акцентом");
+        const plain = heroLookPalette(HERO_LOOK), cloaked = heroLookPalette({ ...HERO_LOOK, cloak: "#20303f" });
+        assert.ok(cloaked[idx("cloak")].join(",") !== plain[idx("cloak")].join(","), "плащ обязан перекрашиваться, когда он надет");
+    });
 });
 
 test("размер кадра = propHeight: сетка коллизий и силуэт не разъезжаются", () => {
