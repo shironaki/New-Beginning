@@ -6,7 +6,8 @@
  * молчаливая стойкость к битому JSON в приватном режиме.
  */
 import { suite, test, assert, run } from "./tiny.js";
-import { loadStyle, saveStyle, styleKey } from "../js/ui/styleflags.js";
+import { readFileSync } from "node:fs";
+import { loadStyle, saveStyle, styleKey, clearStyle } from "../js/ui/styleflags.js";
 
 // Хранилище как в браузере, но в памяти теста.
 const store = new Map();
@@ -62,6 +63,28 @@ test("битое хранилище — не причина не играть", 
 });
 
 suite("штамп сборки говорит то же, что меню");
+
+test("кнопка в ловушке запуска чистит ровно тот же ключ", () => {
+    // index.html живёт вне модулей и обязан знать то же имя, что и хранилище
+    // стиля: разъехались — и «Забыть сохранённый вид» ничего не забывает.
+    const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+    assert.ok(/localStorage\.removeItem\("nb\.style\.v1"\)/.test(html), "в index.html нет сброса ключа nb.style.v1");
+    assert.ok(html.indexOf("window.__bootFail =") < html.indexOf('src="js/main.js"'), "ловушка обязана стоять до модуля");
+});
+
+test("сохранённый вид можно забыть одним пальцем — без консоли", () => {
+    // Смысл ровно один: чёрный экран из-за сохранённого стиля обязан иметь
+    // выход на телефоне, где нет ни адресной строки, ни разработчика.
+    store.clear();
+    saveStyle({ hero3d: "smooth", props3d: "off", broken: "?" });
+    assert.eq(store.size, 1);
+    assert.ok(clearStyle());
+    assert.eq(store.size, 0);
+    const back = loadStyle({ hero3d: "grade", props3d: "on" }, "");
+    assert.eq(back.hero3d, "grade");
+    assert.eq(back.props3d, "on");
+    assert.eq(back.broken, undefined);
+});
 
 test("человеческая строка стиля описывает оба выключателя", () => {
     assert.ok(styleKey({ props3d: "off", hero3d: "smooth" }).includes("кривые"));

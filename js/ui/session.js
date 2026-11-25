@@ -1,4 +1,5 @@
 import { openAppearance } from "./appearance.js";
+import { clearStyle } from "./styleflags.js";
 /** Browser session controls. No automatic overwrite until Continue/New Game
  * has been explicitly selected; failed loads keep both live state and disk. */
 export function checkpoint(game, quiet = false) {
@@ -53,6 +54,16 @@ function openStyleMenu(g, back) {
         })), "style")
     }));
     rows.push({ html: "Ссылка со ?props3d=off или ?hero3d=smooth перекрывает этот выбор: сравнение в превью всегда работает как ожидалось." });
+    // Страховка для телефона: если сохранённый вид что-то сломал, чёрный экран
+    // должен иметь выход без консоли и без чистки хранилища руками.
+    rows.push({
+        label: "Забыть сохранённый вид", icon: "⟲", hint: "к значениям по умолчанию",
+        action: () => {
+            clearStyle();
+            const here = globalThis.location;
+            if (here && here.reload) here.reload(); else openStyleMenu(g, back);
+        }
+    });
     rows.push({ label: "Назад", action: back });
     g.hud.openPanel("Вид мира", rows, "style");
 }

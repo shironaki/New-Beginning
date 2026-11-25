@@ -76,6 +76,26 @@ if (!fs.existsSync(path.join(ROOT, ".nojekyll"))) {
     problems.push("нет файла .nojekyll — Pages прогонит сайт через Jekyll");
 }
 
+/* ---- 4. «чёрный экран» обязан быть объясним ---------------------------- */
+/* Страница может молчать тремя способами: модуль не доехал, упал на
+   линковке, застыл в await. Для первых двух ловушка должна стоять в HTML ДО
+   подключения модуля (обработчик на window позже уже ничего не ловит), для
+   третьего — watchdog обязан ждать флаг `__boot.started`, который ставит
+   main.js после первого кадра. */
+const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+checked += 3;
+const trapAt = html.indexOf("window.__bootFail =");
+const modAt = html.search(/<script[^>]*src="js\/main\.js"/);
+if (trapAt < 0 || modAt < 0 || trapAt > modAt) {
+    problems.push("index.html: ловушка __bootFail должна объявляться до <script src=\"js/main.js\">");
+}
+if (!/__boot\.started/.test(html) || !/__boot\.started\s*=/.test(main)) {
+    problems.push("index.html + js/main.js: watchdog без флага __boot.started не работает");
+}
+if (/if \(!canvas \|\| !hudRoot\) return;/.test(main)) {
+    problems.push("js/main.js: молчаливый return без #game — ровно тот чёрный экран, что нельзя объяснить");
+}
+
 /* ---- report ------------------------------------------------------------ */
 if (problems.length) {
     console.log(`\n❌ Pages: ${problems.length} проблем(ы) из ${checked} проверок\n`);

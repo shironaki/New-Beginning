@@ -1245,31 +1245,31 @@ export class Game {
  * ----------------------------------------------------------------------- */
 if (typeof document !== "undefined" && typeof window !== "undefined") {
     window.addEventListener("DOMContentLoaded", async () => {
+        window.__stage?.("main.js доехал");
+        // A blank page tells nobody anything. Если запуск падает — неудачный
+        // деплой, недзагруженный файл, старый кэшированный модуль — об этом
+        // должно быть сказано на экране, а не оставлен чёрный прямоугольник.
+        // Сама ловушка живёт в index.html, до модуля: ошибку линковки ESM здесь
+        // поймать уже нельзя, обработчик на window ещё не поставлен.
+        const bootFail = (err) => (window.__bootFail
+            ? window.__bootFail(err)
+            : console.error("[boot]", err));
         const canvas = document.getElementById("game");
         const hudRoot = document.getElementById("hud");
-        if (!canvas || !hudRoot) return;
-
-        // A blank page tells nobody anything. If the boot throws — a bad
-        // deploy, a file that did not upload, an old cached module — say so
-        // on screen instead of leaving a black rectangle.
-        const bootFail = (err) => {
-            const box = document.createElement("div");
-            box.style.cssText = "position:fixed;inset:0;display:flex;align-items:center;"
-                + "justify-content:center;padding:24px;background:#14120e;color:#f0e6d2;"
-                + "font:14px/1.5 ui-monospace,Menlo,Consolas,monospace;text-align:left;z-index:99999";
-            box.innerHTML = "<div><b style='color:#f0cc8c'>Игра не запустилась</b><br><br>"
-                + String((err && err.message) || err)
-                + "<br><br><span style='color:#9a8f7c'>Обнови страницу с очисткой кэша "
-                + "(Ctrl+Shift+R). Если повторится — пришли этот текст.</span></div>";
-            document.body.append(box);
-        };
-        window.addEventListener("error", (e) => bootFail(e.error || e.message), { once: true });
+        // Раньше здесь молча стоял `return`, и на телефоне это выглядело ровно
+        // как «чёрный экран без объяснений». Нет канваса — значит страница
+        // отдалась не та (кэш, битый HTML): так и пишем.
+        if (!canvas || !hudRoot) {
+            bootFail(Error("в документе нет #game/#hud — страница не та (кэш или битая загрузка)"));
+            return;
+        }
 
         // Переходов в рельефные зоны в игровом мире больше нет: `?relief=1`
         // подменял класс игры, и «пилот» уезжал в превью и в сохранение владельца.
         // Лаборатория рельефа живёт отдельно — dev/relief.html (и ReliefTrialGame
         // остаётся доступен только оттуда, для сравнения физики).
         const game = new Game({ canvas, hudRoot, seed: "ashes-and-grain" });
+        window.__stage?.("игра собрана");
         // Стиль — и героя, и пропов — берётся из одного места: параметр адреса
         // важнее выбора в меню, меню важнее значения по умолчанию. На телефоне
         // адресной строки нет, поэтому то же самое умеет «Вид мира» в меню игры.
@@ -1309,6 +1309,7 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
             (document.body || document.documentElement).appendChild(stamp);
         } catch { /* штамп — не игра */ }
         window.GAME = game;
+        window.__stage?.(`стиль применён: ${styleKey(style)}`);
         // The owner's control room. Loaded lazily and locked behind a
         // password, so an ordinary player never sees it and the module costs
         // nothing until it is asked for.
@@ -1318,5 +1319,12 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
         game.viewport = installViewport(game, document.getElementById("stage"), window, document);
         bindSessionLifecycle(game, window, document);
         game.start();
+        // «start() вызван» ещё ничего не значит: первый кадр — вот настоящее
+        // «игра жива». Watchdog из index.html ждёт именно этого флага.
+        window.__stage?.("start() вызван");
+        requestAnimationFrame(() => {
+            window.__boot.started = true;
+            window.__stage?.("первый кадр");
+        });
     });
 }
