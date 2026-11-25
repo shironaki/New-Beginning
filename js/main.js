@@ -1303,19 +1303,25 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
             const st = props3d.prop3dStatus();
             const stamp = document.createElement("div");
             stamp.id = "buildStamp";
-            stamp.textContent = `сборка 74 · 3D-пропы: ${st.enabled ? st.kinds : 0} (${st.reason || "ок"})`
+            stamp.textContent = `сборка 75 · 3D-пропы: ${st.enabled ? st.kinds : 0} (${st.reason || "ок"})`
                 + ` · свет ${st.sun ? `×${st.sun.amp.toFixed(2)}/${st.sun.amb.toFixed(2)}` : "—"}`
                 + ` · тон ${st.tone || "авто"} · ${styleKey(style)}`;
             (document.body || document.documentElement).appendChild(stamp);
-        } catch { /* штамп — не игра */ }
+        } catch (e) { window.__stage?.(`штамп не выведен: ${e.message}`); /* штамп — не игра */ }
         window.GAME = game;
         window.__stage?.(`стиль применён: ${styleKey(style)}`);
         // The owner's control room. Loaded lazily and locked behind a
         // password, so an ordinary player never sees it and the module costs
-        // nothing until it is asked for.
-        if (!trial) import("./dev/devtools.js")
+        // nothing until it is asked for. Раньше здесь стоял `if (!trial)` —
+        // флаг пилота умер вместе с ?relief=1, а проверка осталась: в браузере
+        // это ReferenceError до первой отрисовки, то есть чёрный экран (в node
+        // блок не исполняется, и тесты его не видели; теперь видят —
+        // tests/browser-boot.test.js).
+        import("./dev/devtools.js")
             .then((m) => m.installDevTools(game, window))
-            .catch(() => { /* dev tools are optional */ });
+            // Пульт — дело добровольное, но «молча не загрузился» это тот же
+            // чёрный экран по честоте: пусть будет записано в стадии запуска.
+            .catch((e) => window.__stage?.(`пульт не загрузился: ${(e && e.message) || e}`));
         game.viewport = installViewport(game, document.getElementById("stage"), window, document);
         bindSessionLifecycle(game, window, document);
         game.start();

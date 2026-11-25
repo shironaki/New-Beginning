@@ -54,11 +54,28 @@
   отдаются 200, `npm run check` чист, 40 кадров под строгой (chrome-подобной)
   обёрткой канваса без исключений — значит чёрный экран был либо кэшем, либо
   тем, что node увидеть не может. Теперь это видно на экране, а не в догадках.
-- VERIFY: `npm test` — 21/21 набора (visual-world 42: причёски, пол, тень;
-  stage67 12: чипы вместо прокрутки), `npm run props:audit` — ✅ 21/21,
-  `npm run pages` — 162 ссылки, `node tools/playtest.js 73` — 811 проверок
-  чисто; кадры `.artifacts/b74-yard-shadow.png`, `b74-ruins-dawn.png`,
-  `b74-hair-down.png`, `b74-hair-up.png`; штамп сборки — 74.
+- _(чёрный экран владельца)_ — **2026-10-10**. Объяснился сам, красным блоком:
+  `ReferenceError: trial is not defined`, `js/main.js:1315`. Причина — моя же
+  ревизия блока 73: вырезая `?relief=1`, убрали `const trial = …`, а строка
+  `if (!trial) import("./dev/devtools.js")` осталась. Живёт она в ветке
+  `if (typeof document !== "undefined" …)`, которую в node не исполняет ни один
+  тест: игра умирала до первой отрисовки при полностью зелёном `npm test`.
+  Пульт ставится всегда; заведены `tests/browser-boot.test.js` (4 теста; в
+  цепочке `npm test` теперь 22 файла) и два молчаливых `catch` bootstrapа
+  пишут причину в стадии запуска: `пульт не загрузился: …`,
+  `штамп не выведен: …`. Проверено отрицательным контролем: возвращаешь
+  `if (!trial)` — тест красный с текстом ошибки, убираешь — зелёный. В
+  `tests/dom-harness.js` добавлены `window.location` и `append`/`prepend`
+  (без них bootstrap headless не исполнялся); `npm run pages` сторожит три
+  инварианта ловушки, `tests/style-flags.test.js` — общий ключ `nb.style.v1`.
+- VERIFY: `npm test` — 22/22 набора, 497 тестов (visual-world 42: причёски,
+  пол, тень; stage67 13: чипы вместо прокрутки, покрытие полей, превью;
+  browser-boot 4: bootstrap headless), `npm run check` — синтаксис чист,
+  `npm run props:audit` — ✅ 21/21, `npm run pages` — 167 ссылок,
+  `node tools/playtest.js 73` — 811 проверок чисто; кадры
+  `.artifacts/b74-yard-shadow.png`, `b74-ruins-dawn.png`, `b74-hair-down.png`,
+  `b74-hair-up.png`. Штамп сборки — **75**: после починки bootstrap'а старый
+  номер означал бы, что правки не доехали.
 
 ## Блок 73 — опора под крышей, тень осколка, стиль из меню и ревизия кода
 
