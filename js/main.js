@@ -1303,7 +1303,7 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
             const st = props3d.prop3dStatus();
             const stamp = document.createElement("div");
             stamp.id = "buildStamp";
-            stamp.textContent = `сборка 75 · 3D-пропы: ${st.enabled ? st.kinds : 0} (${st.reason || "ок"})`
+            stamp.textContent = `сборка 76 · 3D-пропы: ${st.enabled ? st.kinds : 0} (${st.reason || "ок"})`
                 + ` · свет ${st.sun ? `×${st.sun.amp.toFixed(2)}/${st.sun.amb.toFixed(2)}` : "—"}`
                 + ` · тон ${st.tone || "авто"} · ${styleKey(style)}`;
             (document.body || document.documentElement).appendChild(stamp);

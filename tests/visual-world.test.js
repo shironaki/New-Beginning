@@ -18,6 +18,9 @@ import { DEFAULT_LOOK } from "../js/render/character.js";
 import { META as HERO_META, PALETTE_HEX as HERO_PALETTE, STREAMS as HERO_STREAMS } from "../js/render/heroframes.js";
 import { heroLookPalette } from "../js/render/hero3d.js";
 import { PROP_SPRITES, PROP_META } from "../js/render/propsprites.js";
+import fs from "node:fs";
+import path from "node:path";
+import { cameraBasis } from "../tools/raster3d.js";
 import { META as GRADED_META } from "../js/render/heroframes.js";
 const GRADED_CELL = GRADED_META.cell;
 import { paintProp3D, prop3dStatus, PROPS3D } from "../js/render/props3d.js";
@@ -516,6 +519,62 @@ test("запеченный кадр пропа рисуется, а побиты
     assert.ok(!paintProp3D(ctx, { kind: "pine", tx: 1, ty: 1, hits: 1 }), "побитый проп остаётся процедурным");
     assert.eq(prop3dStatus().kinds, Object.keys(PROP_SPRITES).length, "статус обязан врать, если лист не тот");
 });
+/** Габарит ВСЕЙ gltf-модели: union по всем POSITION-аксессорам всех примитивов. */
+function gltfBox(file) {
+    const json = JSON.parse(fs.readFileSync(`${file}.gltf`, "utf8"));
+    const bin = fs.readFileSync(`${file}.bin`);
+    let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+    for (const mesh of json.meshes || []) {
+        for (const prim of mesh.primitives || []) {
+            const acc = json.accessors[prim.attributes.POSITION];
+            const view = json.bufferViews[acc.bufferView];
+            const v = new Float32Array(bin.buffer, bin.byteOffset + (view.byteOffset || 0), acc.count * 3);
+            for (let i = 0; i < acc.count; i += 1) {
+                for (let k = 0; k < 3; k += 1) {
+                    const x = v[i * 3 + k];
+                    if (x < mn[k]) mn[k] = x;
+                    if (x > mx[k]) mx[k] = x;
+                }
+            }
+        }
+    }
+    return { mn, mx };
+}
+
+test("одна модель — один масштаб: кадр хранит пропорции модели, а не каждого примитива", () => {
+    // У детали конструктора примитивов несколько. Пока габарит считался для
+    // каждого из них отдельно, каждая часть растягивалась к своему числу
+    // пикселей: у трубы (кирпичная колонна 1×1×3 м + каменное кольцо верха
+    // 0.9×0.9×0.34 м) кольцо выросло в 88 раз, и в лист лёг «жернов» — плоская
+    // плита камней с дырой вместо дымохода. Стена из трёх частей (кладка
+    // 0.88 м, штукатурка 3 м, доска-раскоска) дала «полосатую» панель с
+    // гигантской диагональной подпоркой — на это жаловался владелец.
+    // Единый масштаб аспект сохраняет; «каждый сам по себе» ломает его всегда.
+    const dir = "dev/character-style-lab/assets/quaternius/village";
+    const basis = cameraBasis({ yaw: PROP_META.yaw, pitch: PROP_META.pitch, target: [0, 1, 0], distance: 8 });
+    const dot = (a, p) => a[0] * p[0] + a[1] * p[1] + a[2] * p[2];
+    for (const [kind, file] of [["hut_wall", "Wall_Plaster_Straight_L"], ["ruin_wall", "Wall_BottomCover"],
+        ["hut_roof", "Roof_RoundTile_2x1"], ["chimney", "Prop_Chimney"], ["fence", "Prop_WoodenFence_Single"],
+        ["crate", "Prop_Crate"], ["wagon", "Prop_Wagon"]]) {
+        const { mn, mx } = gltfBox(path.join(dir, file));
+        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+        for (let i = 0; i < 8; i += 1) {
+            const p = [(i & 1 ? mx[0] : mn[0]), (i & 2 ? mx[1] : mn[1]), (i & 4 ? mx[2] : mn[2])];
+            x0 = Math.min(x0, dot(basis.right, p)); x1 = Math.max(x1, dot(basis.right, p));
+            y0 = Math.min(y0, dot(basis.up, p)); y1 = Math.max(y1, dot(basis.up, p));
+        }
+        const want = (x1 - x0) / Math.max(1e-4, y1 - y0);
+        const e = PROP_SPRITES[kind];
+        const got = e.w / Math.max(1, e.h);
+        // Полоса широкая нарочно: перспектива запекки и резка ground-плиты
+        // съедают кадры. Смысл проверки — порядок величины, а не микрон.
+        assert.ok(got > want * 0.55 && got < want * 1.8,
+            `${kind}: кадр ${e.w}×${e.h} (аспект ${got.toFixed(2)}) не похож на модель (${want.toFixed(2)}) — части растянуты порознь`);
+    }
+    const ch = PROP_SPRITES.chimney;
+    assert.ok(ch.h > ch.w, `труба ${ch.w}×${ch.h}: дымоход обязан быть выше, чем шире`);
+});
+
 test("размер кадра = propHeight: сетка коллизий и силуэт не разъезжаются", () => {
     for (const kind of ["pine", "spruce", "rock", "ore_rock", "hut_wall", "hut_roof", "ruin_wall", "burnt_stump", "chimney", "fence", "crate", "wagon"]) {
         const e = PROP_SPRITES[kind];

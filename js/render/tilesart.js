@@ -1650,7 +1650,11 @@ export const PROP_HEIGHT = {
     // tools/prop-bake.js теми же числами — тест проверяет, что они не разъехались.
     // Стена выше тайла: на этом числе держится и lift крыши в worldgen, и
     // длина падающей тени. Обязано совпадать с cap в tools/prop-bake.js.
-    hut_wall: 50, hut_roof: 52, chimney: 30, fence: 21, crate: 16, wagon: 40
+    hut_wall: 50, hut_roof: 52, chimney: 30, fence: 21, crate: 16,
+    // Телега меряется по ширине следа (fit:"x"), поэтому её «высота» в игре —
+    // фактическая высота кадра, 26 px. Ровняй по ширине (48) — и под ногами
+    // появится невидимая тумба выше самой телеги.
+    wagon: 26
 };
 /** These grow with the prop's own `size`; the rest are built, not grown. */
 const HEIGHT_SCALES = new Set([

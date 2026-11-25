@@ -75,20 +75,20 @@ const PROP_MODEL = {
     // У плоских деталей px — это ШИРИНА кадра (fit: "max"), а не высота: без
   // явного числа осыпь пеклась в 2×4 пикселя одного тона и исчезала на земле
   // (ревизию показывает `node tools/props-audit.js`).
-    scree: { file: "stone_tallD.glb", fit: "max", px: 15 },
-    beach_pebbles: { file: "stone_tallB.glb", fit: "max", px: 9 },
-    log: { file: "log.glb", fit: "max", px: 16 },
-    driftwood: { file: "log_large.glb", fit: "max", px: 20 },
-    firewood: { file: "log.glb", fit: "max", px: 12 },
+    scree: { file: "stone_tallD.glb", fit: "max", px: 15, lit: true },
+    beach_pebbles: { file: "stone_tallB.glb", fit: "max", px: 9, lit: true },
+    log: { file: "log.glb", fit: "max", px: 16, lit: true },
+    driftwood: { file: "log_large.glb", fit: "max", px: 20, lit: true },
+    firewood: { file: "log.glb", fit: "max", px: 12, lit: true },
     // Пень: брали низкий stump_old — на кадре он читался как блин, и владелец
     // прав был: «вообще не похож на пень». Высокая версия + подгонка по Y даёт
     // обрубок, а не площадку; тёмная обугленная кора — из общей рамки контраста.
     // Пень: брали низкий stump_old — на кадре он читался как блин, и владелец
     // прав: «вообще не похож на пень». Высокая версия + подгонка по длинной оси
     // дают обрубок 16 px в поперечнике; по Y пень сжимался в щепку (7 px).
-    burnt_stump: { file: "stump_oldTall.glb", fit: "max", px: 16 },
+    burnt_stump: { file: "stump_oldTall.glb", fit: "max", px: 16, lit: true },
     bush: "plant_bushDetailed.glb",
-    mushroom_patch: { file: "mushroom_redGroup.glb", fit: "max", px: 12 },
+    mushroom_patch: { file: "mushroom_redGroup.glb", fit: "max", px: 12, lit: true },
     pine: "tree_pineTallA.glb",
     spruce: "tree_pineTallB.glb",
     dead_tree: "tree_thin_dark.glb",
@@ -128,14 +128,22 @@ const PROP_MODEL = {
     // «плетень» превращается в гребёнку колышков.
     fence: { file: "Prop_WoodenFence_Single.gltf", pack: "village", fit: "x", px: 40 },
     crate: { file: "Prop_Crate.gltf", pack: "village", fit: "max", px: 16 },
-    wagon: { file: "Prop_Wagon.gltf", pack: "village", fit: "max", px: 40 }
+    // Телега стоит РЯДОМ (ящик, кострище, стена), значит размерить её надо по
+  // ширине следа, как стену и забор: «max» даёт 37×23, и телега оказывается
+  // МЕНЬШЕ ящика — ровно та претензия, что была к забору до fit:"x".
+    wagon: { file: "Prop_Wagon.gltf", pack: "village", fit: "x", px: 48 }
 };
 /** Запись таблицы → нормализованный вид. Строка — это просто файл. */
 function modelOf(kind) {
     const raw = PROP_MODEL[kind];
     if (!raw) return null;
     const spec = typeof raw === "string" ? { file: raw } : raw;
-    return { file: spec.file, pack: spec.pack || "kenney", fit: spec.fit || "y", px: spec.px || null };
+    // `lit` — «разверни нормаль к камере». По умолчанию так делаем только с
+    // деревней: у её деталей тонкие грани, и тыльная сторона стены иначе
+    // выходит чёрной. Лёжащий хлам (бревно, осыпь, пень) — тот же случай с
+    // другой стороны: у цилиндра, положенного на бок, нам видна именно сторона,
+    // повёрнутая ОТ солнца, и без разворота бревно рисуется чёрной лестницей.
+    return { file: spec.file, pack: spec.pack || "kenney", fit: spec.fit || "y", px: spec.px || null, lit: !!spec.lit };
 }
 const KINDS = String(flag("kinds", null) || Object.keys(PROP_MODEL)).split(",");
 
@@ -170,8 +178,11 @@ const MATERIAL_TINT = [
  */
 const STONE_KINDS = /rock|stone|scree|pebble|ore|flint/i;
 const STONE_TINT = {
-    grass: "#5c6a4f", dirt: "#82807a", stone: "#8d8a83", moss: "#66744f",
-    snow: "#cfd8da", tan: "#8a857c", _default: "#82807a"
+    // Серый держится ниже 0.56 яркости: верхняя грань валуна получает полный
+    // свет солнца, и на более светлом камне она выбеливается в снежный ком —
+    // ровно так «булыжник» и выглядел в кадре.
+    grass: "#4e5a43", dirt: "#736f68", stone: "#7c7972", moss: "#59643f",
+    snow: "#cfd8da", tan: "#7b7568", _default: "#736f68"
 };
 function stoneRole(name) {
     const key = Object.keys(STONE_TINT).find(k => k !== "_default" && new RegExp(k, "i").test(name || ""));
@@ -209,6 +220,30 @@ function bakeKind(kind) {
     const height = px || propHeight(kind, 1) || 8;                // пикселей экрана при зуме 1
     const basis = cameraBasis({ yaw: YAW, pitch: PITCH, target: [0, height * 0.45, 0], distance: height * 3.2 });
     const fwd = basis.fwd;
+    /**
+     * ГАБАРИТ ВСЕЙ МОДЕЛИ. У детали конструктора примитивов несколько, и раньше
+     * масштаб считался ДЛЯ КАЖДОГО из них: каждый растягивался к одному и тому
+     * же числу пикселей. Труба = кирпичная колонна 1×1×3 м + каменное кольцо
+     * верха 0.9×0.9×0.34 м — и кольцо вырастало в 88 раз, колонка в 10, обе
+     * стартовали от «своего» низа. На кадре это плоское кольцо камней с дырой —
+     * ровно «жернов», о котором говорил владелец. Стена из трёх примитивов
+     * (кладка 0.88 м, штукатурка 3 м, доска-раскоска) давала «полосатую» панель
+     * с гигантской диагональной подпоркой. Один габарит, один масштаб, один
+     * ноль — и части остаются соотнесены ровно как в паке.
+     */
+    let gMinX = Infinity, gMaxX = -Infinity, gMinY = Infinity, gMaxY = -Infinity, gMinZ = Infinity, gMaxZ = -Infinity;
+    for (const prim of meshes) {
+        const p = prim.positions;
+        for (let i = 0; i + 2 < p.length; i += 3) {
+            if (p[i] < gMinX) gMinX = p[i]; if (p[i] > gMaxX) gMaxX = p[i];
+            if (p[i + 1] < gMinY) gMinY = p[i + 1]; if (p[i + 1] > gMaxY) gMaxY = p[i + 1];
+            if (p[i + 2] < gMinZ) gMinZ = p[i + 2]; if (p[i + 2] > gMaxZ) gMaxZ = p[i + 2];
+        }
+    }
+    const gSpanY = Math.max(1e-4, gMaxY - gMinY);
+    const gSpanFoot = Math.max(1e-4, gMaxX - gMinX, gMaxZ - gMinZ);
+    const gSpan = fit === "max" ? Math.max(gSpanY, gSpanFoot) : fit === "x" ? gSpanFoot : gSpanY;
+    const modelScale = height / gSpan;
     const drawables = meshes.map((prim) => {
         const count = prim.count;
         let positions = prim.positions, normals = prim.normals, used = count;
@@ -252,7 +287,7 @@ function bakeKind(kind) {
             // иначе в листе они чёрным пятном (у конструктора грани тонкие).
             // …но только у конструктора: у Kenney-моделей задняя грань и должна
             // оставаться тёмной, иначе крона дерева выцветает в плоское пятно.
-            if (pack === "village" && nx * fwd[0] + ny * fwd[1] + nz * fwd[2] > 0) { nx = -nx; ny = -ny; nz = -nz; }
+            if ((pack === "village" || spec.lit) && nx * fwd[0] + ny * fwd[1] + nz * fwd[2] > 0) { nx = -nx; ny = -ny; nz = -nz; }
             for (const o of [a, b, c]) { normals[o] = nx; normals[o + 1] = ny; normals[o + 2] = nz; }
         }
         const mat = materialInfo(rig, prim.material, dir, (uri) => path.join(dir, path.basename(decodeURIComponent(uri))));
@@ -267,28 +302,19 @@ function bakeKind(kind) {
             const l = Math.max(0.5, Math.min(1.15, lumOf(mat.factor) / 0.62));
             factor = [base[0] * l, base[1] * l, base[2] * l, 1];
         }
-        // Модель в метрах: приводим к нужному размеру и ставим ногами в 0.
-        // «y» — рост по вертикали (дерево), «max» — самая длинная ось (бревно,
-        // крыша, ящик): у лежащей детали Y — это толщина, и подгонка по ней
-        // раздула бы проп во столько раз, во сколько он длинный.
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-        for (let i = 0; i < used * 3; i += 3) {
-            minX = Math.min(minX, positions[i]); maxX = Math.max(maxX, positions[i]);
-            minY = Math.min(minY, positions[i + 1]); maxY = Math.max(maxY, positions[i + 1]);
-            minZ = Math.min(minZ, positions[i + 2]); maxZ = Math.max(maxZ, positions[i + 2]);
-        }
-        const spanY = Math.max(1e-4, maxY - minY);
-        const spanFoot = Math.max(1e-4, maxX - minX, maxZ - minZ);
-        // fit:"x" — подгонка по ШИРИНЕ следа. Нужна для того, что стоит рядом:
-        // у стены, забора и фундамента важна непрерывность вдоль тайла, а не
-        // высота. Подогнанный по вертикали модуль даёт 20 px при тайле 44 — и
-        // «ряд одинаковых pillars» вместо стены (это и был обвал в руинах).
-        const span = fit === "max" ? Math.max(spanY, spanFoot) : fit === "x" ? spanFoot : spanY;
-        const scale = height / span;
+        // Модель в метрах: приводим к нужному размеру и ставим ногами в 0 —
+        // ОДНИМ масштабом на всю модель (см. gSpan выше). «y» — рост по
+        // вертикали (дерево), «max» — самая длинная ось (бревно, крыша, ящик):
+        // у лежащей детали Y — это толщина, и подгонка по ней раздула бы проп
+        // во столько раз, во сколько он длинный. fit:"x" — подгонка по ШИРИНЕ
+        // следа: у стены, забора и фундамента важна непрерывность вдоль тайла,
+        // а не высота; модуль, подогнанный по вертикали, даёт 20 px при тайле
+        // 44 — и «ряд обелисков» вместо стены (это и был обвал в руинах).
+        const scale = modelScale;
         const pos = new Float32Array(used * 3);
         for (let i = 0; i < used; i += 1) {
             pos[i * 3] = positions[i * 3] * scale;
-            pos[i * 3 + 1] = (positions[i * 3 + 1] - minY) * scale;
+            pos[i * 3 + 1] = (positions[i * 3 + 1] - gMinY) * scale;
             pos[i * 3 + 2] = positions[i * 3 + 2] * scale;
         }
         // Плита «под моделью»: паки стелют под проп горизонтальную подложку
