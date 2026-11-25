@@ -61,6 +61,37 @@ const MIME = {
     ".webmanifest": "application/manifest+json; charset=utf-8"
 };
 
+/**
+ * Заголовки для исходников в dev-режиме. «no-cache» лишь просит
+ * перевалидировать, а над превью стоит прокси, который охотно отдаёт своё тело
+ * по старому URL: владелец несколько раз получал «правок не видно» именно так
+ * (в последний раз — старый `js/main.js` с уже удалённой строкой). no-store
+ * запрещает хранить ответ, а HTML дополнительно получает ?v=… на main.js и
+ * style.css: новый URL физически не может прийти из чужого кэша.
+ * Картинки и прочее не трогаем — их пересобирают редко, а no-store на них
+ * раздул бы каждую перезагрузку страницы до десятков мегабайт.
+ */
+export const NO_STORE = "no-store, no-cache, must-revalidate, max-age=0";
+export function devHeaders(type) {
+    return /^(text\/html|text\/css|text\/javascript|application\/javascript)/.test(type)
+        ? { "Content-Type": type, "Cache-Control": NO_STORE, "Pragma": "no-cache", Expires: "0" }
+        : { "Content-Type": type, "Cache-Control": "no-cache" };
+}
+
+/** Метка сборки для адресов: меняется при каждом анонсе live-reload. */
+let BUILD = Date.now();
+export function buildToken() { return BUILD; }
+
+/**
+ * Ставит ?v=<BUILD> на входные файлы страницы. Отдельная функция потому, что
+ * именно она и есть обход прокси-кэша, и её можно проверить без сервера.
+ */
+export function stampSources(html, token = BUILD) {
+    const src = String(html);
+    const put = (s, url) => (s.includes(`${url}?v=`) ? s : s.replace(`="${url}"`, `="${url}?v=${token}"`));
+    return put(put(src, "js/main.js"), "css/style.css");
+}
+
 // A tiny inline favicon keeps the browser console clean in the live preview.
 const FAVICON = Buffer.from(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
@@ -350,13 +381,14 @@ export function createServer(opts = {}) {
             if (cfg.reload && type.startsWith("text/html")) {
                 fs.readFile(filePath, "utf8", (e2, html) => {
                     if (e2) { res.writeHead(500).end("500"); return; }
-                    const body = html.replace(/<\/body>/i, RELOAD_SNIPPET + "\n</body>");
-                    res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-cache" });
+                    let body = html.replace(/<\/body>/i, RELOAD_SNIPPET + "\n</body>");
+                    body = stampSources(body);
+                    res.writeHead(200, devHeaders(type));
                     res.end(body);
                 });
                 return;
             }
-            res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-cache" });
+            res.writeHead(200, devHeaders(type));
             fs.createReadStream(filePath).pipe(res);
         });
     });
@@ -371,6 +403,7 @@ export function createServer(opts = {}) {
     const announce = (file) => {
         clearTimeout(timer);
         timer = setTimeout(() => {
+            BUILD = Date.now();          // новые ?v= — новые байты, кэш прокси обезврежен
             const payload = `event: change\ndata: ${file}\n\n`;
             for (const c of clients) c.write(payload);
             if (clients.size) console.log(`[serve] ${file} → ${clients.size} перезагрузк(а/и)`);

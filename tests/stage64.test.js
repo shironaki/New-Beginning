@@ -2,7 +2,7 @@ import { test, assert, run } from "./tiny.js";
 import fs from "node:fs";
 import path from "node:path";
 import { NoteOutbox } from "../js/dev/note-outbox.js";
-import { createServer, storeNote, noteIdentity, noteStem } from "../serve.js";
+import { createServer, storeNote, noteIdentity, noteStem, devHeaders, stampSources, NO_STORE } from "../serve.js";
 import { MemoryStorage } from "../js/core/save.js";
 import { Campfire } from "../js/survival/campfire.js";
 import { Inventory } from "../js/sandbox/inventory.js";
@@ -11,6 +11,25 @@ import { Renderer } from "../js/render/renderer.js";
 import { installDOM, FakeElement } from "./dom-harness.js";
 const dom = installDOM();
 const { Game } = await import("../js/main.js");
+test('dev-сервер не отдаёт исходники из кэша прокси', () => {
+    // Смысл ровно один: «правок не видно» ≠ «правок не сделано». Пока .js и .html
+    // шли с no-cache, прокси превью возвращал старое тело — и владелец видел
+    // уже удалённую строку. no-store хранить запрещает, ?v= обходит любой кэш по URL.
+    const js = devHeaders("text/javascript; charset=utf-8");
+    assert.eq(js["Cache-Control"], NO_STORE);
+    assert.eq(js.Expires, "0");
+    const html = devHeaders("text/html; charset=utf-8");
+    assert.ok(/no-store/.test(html["Cache-Control"]));
+    // Картинки намеренно остаются кэшируемыми: иначе каждая перезагрузка
+    // тянет десятки мегабайт паков.
+    assert.ok(!/no-store/.test(devHeaders("image/png")["Cache-Control"]));
+    const stamped = stampSources('<script type="module" src="js/main.js"></script>\n<link href="css/style.css">', "777");
+    assert.ok(/src="js\/main\.js\?v=777"/.test(stamped), "main.js без метки — прокси отдаст старое тело");
+    assert.ok(/href="css\/style\.css\?v=777"/.test(stamped), "style.css без метки — вперёд за устаревшим CSS");
+    // Повторный вызов не должен удваивать параметр.
+    assert.eq(stampSources(stamped, "777"), stamped);
+});
+
 const note = (i = 1) => ({ text: `report ${i}`, at: "2026-10-09T06:00:00Z", zone: "shore", x: i, y: 2 });
 const ack = { ok: true, pushed: true, file: "receipt.md" };
 function boot() {

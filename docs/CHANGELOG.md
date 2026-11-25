@@ -68,7 +68,22 @@
   `tests/dom-harness.js` добавлены `window.location` и `append`/`prepend`
   (без них bootstrap headless не исполнялся); `npm run pages` сторожит три
   инварианта ловушки, `tests/style-flags.test.js` — общий ключ `nb.style.v1`.
-- VERIFY: `npm test` — 22/22 набора, 497 тестов (visual-world 42: причёски,
+- _(второй заход к чёрному экрану)_ — **2026-10-10**. Второе фото показало то же
+  сообщение — и это был уже не мой код, а **кэш прокси превью**:
+  `Cache-Control: no-cache` лишь просит перевалидировать, а прокси охотно
+  отдаёт своё тело по старому URL, так что браузер владельцу крутил
+  уже удалённый `main.js`. Теперь `serve.js` отдаёт `.js`/`.css`/HTML с
+  `no-store, must-revalidate, max-age=0` + `Expires: 0` и вписывает в HTML
+  `js/main.js?v=<BUILD>` / `css/style.css?v=<BUILD>` (метка меняется на каждом
+  live-reload-анонсе). Картинки оставлены кэшируемыми: no-store на паках тянул
+  бы десятки мегабайт на каждую перезагрузку. `devHeaders()` и `stampSources()`
+  экспортируются из `serve.js` и проверяются `tests/stage64.test.js`, включая
+  идемпотентность — первая версия лепила `?v=…?v=…`, и тест это поймал.
+- Отдельно про GitHub Pages: там лежит **`main`**, а блоки 70–75 живут в ветке
+  `arena/160d0178-new-beginning`, которая не была вытолкнута на GitHub вообще.
+  «Полосатые» стены на снимке — это `main` до `fit:"x"` из блока 73. Ветка
+  вытолкнута, заведён PR: Pages починится слитием, а не правкой наугад.
+- VERIFY: `npm test` — 22/22 набора, 498 тестов (visual-world 42: причёски,
   пол, тень; stage67 13: чипы вместо прокрутки, покрытие полей, превью;
   browser-boot 4: bootstrap headless), `npm run check` — синтаксис чист,
   `npm run props:audit` — ✅ 21/21, `npm run pages` — 167 ссылок,
