@@ -64,6 +64,10 @@ const SMOOTH_ALIAS = { run: "walk", attack: "chop", gather: "chop", torch: "idle
 export const HERO3D = {
     enabled: true,
     quality: "grade",
+    // Какой лист по полу/причёске играет и почему чужой лист не приехал. Без
+    // этой строки «выбрал женщину, а он всё ещё он» невозможно разобрать.
+    sheet: "male/long",
+    sheetError: "",
     // Причина, по которой запрошенный режим не включился. Нужна потому, что
     // «?hero3d=smooth → пусто» без этой строки невозможно разобрать: молчаливый
     // откат выглядел как сломанная игра, а не как отсутствующий модуль.
@@ -147,7 +151,13 @@ function paletteFor(look, src = SRC) {
     if (!ramps) return src.base;
     const names = Object.keys(ramps);
     const key = names.map(name => String((look && look[RAMPS[name] && RAMPS[name].look]) || "")).join("|");
-    if (key === src.paletteKey) return src.paletteRgb;
+    const groupKey = COLOR_GROUPS.map(g => `${g.look}=${(look && look[g.look]) || ""}|`).join("")
+        + `#${(look && look.hairStyle) || ""}`;
+    // Ключ ОДИН и полный: раньше верхняя проверка сравнивала короткой ключ
+    // дорожек с полным (его пишет низ функции) и никогда не совпадала, поэтому
+    // палитра пересобиралась на каждый кадр.
+    const fullKey = `${key}#${groupKey}`;
+    if (fullKey === src.paletteKey) return src.paletteRgb;
     const out = src.base.map(rgb => rgb.slice());
     for (const name of names) {
         const meta = ramps[name];
@@ -160,9 +170,6 @@ function paletteFor(look, src = SRC) {
     // Группы по именам (см. COLOR_GROUPS). Ключ пересборки обязан учитывать и
     // эти поля: иначе смена рубашки не меняет палитру, потому что key собран
     // только по дорожкам.
-    const groupKey = COLOR_GROUPS.map(g => `${g.look}=${(look && look[g.look]) || ""}`).join("|");
-    const fullKey = `${key}#${groupKey}`;
-    if (fullKey === src.paletteKey) return src.paletteRgb;
     const indices = indexOfNames(src.meta);
     for (const group of COLOR_GROUPS) {
         const want = look && look[group.look];
@@ -172,10 +179,117 @@ function paletteFor(look, src = SRC) {
         const list = group.names.map(n => indices.get(n)).filter(i => i !== undefined);
         if (list.length) recolorGroup(out, src, list, want || src.paletteHex[list[0]]);
     }
+    // «Бритые» не требуют своего листа: дорожка волос становится дорожкой кожи
+    // чуть темнее лица, и пучок/коса перестают висеть на лысой голове. До этого
+    // выбор «Бритые» в редакторе не значил ровно ничего.
+    if (look && (look.hairStyle === "bald" || look.hairStyle === "buzz") && ramps.hair && ramps.skin) {
+        const hair = ramps.hair, skin = ramps.skin;
+        for (let i = 0; i < hair.steps; i += 1) {
+            const from = out[skin.at + Math.min(skin.steps - 1,
+                Math.round((i * (skin.steps - 1)) / Math.max(1, hair.steps - 1)))];
+            const shaved = [Math.round(from[0] * 0.9), Math.round(from[1] * 0.9), Math.round(from[2] * 0.92)];
+            out[hair.at + i] = shaved;
+        }
+        const near = [0, 1, 1, 2].map(i => out[hair.at + Math.min(i, hair.steps - 1)]);
+        ["hair", "hairMid", "hairLight", "hairHighlight"].forEach((n, i) => {
+            const at = indices.get(n);
+            if (at !== undefined) out[at] = near[i].slice();
+        });
+    }
     src.paletteKey = fullKey;
     src.paletteRgb = out;
     for (const pose of src.poses.values()) pose.canvases.fill(null);   // канвасы собраны по старой палитре
     return out;
+}
+
+/* ---------------------------- лист под пол и причёску ---------------------------- */
+
+/**
+ * Пол и причёска — это ФОРМА, а не цвет: `paletteFor` перекрашивает записи, а
+ * силуэт берёт из листа, поэтому выбор «Женщина» в редакторе не менял ничего
+ * (претензия п.7: «нет реакции на смену пола. На прическу»). Честный ответ —
+ * отдельные запечённые листы «кто + какая стрижка» и выбор по образу.
+ *
+ * Лист весит ~600 КБ, поэтому чужой лист НЕ тянется в старте: он грузится
+ * по требованию, и пока не приехал — играет дефолтный. Следующий же кадр
+ * собирается из своего источника, поэтому ни игра, ни превью не ждут и не
+ * падают, если файла нет (его может и не быть — например, лист «коса» пекарится
+ * только вместе с `--hair Hair_Buns`).
+ */
+const SHEET_FILES = {
+    "male/long": null,                                    // heroframes.js — он уже в графе
+    "male/short": "./heroframes-male-short.js",
+    "male/braid": "./heroframes-male-braid.js",
+    "female/long": "./heroframes-female.js",
+    "female/short": "./heroframes-female-short.js",
+    "female/braid": "./heroframes-female-braid.js"
+};
+/** Причёска образа → стрижка листа. «Бритые» — короткая стрижка с кожей вместо
+ *  волос (см. bald-блок в paletteFor), своего листа не просит. */
+const HAIR_CUT = { short: "short", buzz: "short", long: "long", braid: "braid", ponytail: "braid", bun: "braid", bald: "short" };
+const SHEET_SOURCES = new Map();
+const SHEET_PENDING = new Map();
+const SHEET_ERROR = {};
+
+export function hero3dSheetId(look) {
+    // Режим сравнения (smooth) играет одним листом: гладкого выхода для каждой
+    // причёски нет, и заставлять его молча грузить 600 КБ ради теста стиля —
+    // значит нагружать то, что и так спорное.
+    if (HERO3D.quality !== "grade") return "male/long";
+    const who = look && look.gender === "female" ? "female" : "male";
+    const cut = HAIR_CUT[(look && look.hairStyle) || "short"] || "long";
+    const id = `${who}/${cut}`;
+    return id in SHEET_FILES ? id : "male/long";
+}
+
+/** Загрузить лист, который просит образ. true — лист в кэше, false — нет файла. */
+export function hero3dSheet(look) {
+    const id = hero3dSheetId(look);
+    if (id === "male/long") return Promise.resolve(true);
+    if (SHEET_SOURCES.has(id)) return Promise.resolve(true);
+    if (SHEET_PENDING.has(id)) return SHEET_PENDING.get(id);
+    const file = SHEET_FILES[id];
+    const job = !file
+        ? Promise.resolve(false)
+        : import(/* @vite-ignore */ file).then((mod) => {
+            if (!mod || !mod.STREAMS || !mod.META) throw new Error("в листе нет STREAMS/META");
+            // Ячейка, опора и масштаб у всех листов общие (одна сетка запекки) —
+            // иначе посадка предмета и ватерлиния поедут на другом поле.
+            const g = SOURCES.grade.meta, m = mod.META;
+            if (m.cell.w !== g.cell.w || m.cell.h !== g.cell.h || m.footPad !== g.footPad) {
+                throw new Error(`сетка листа ${id} не совпадает с игрой: ${m.cell.w}×${m.cell.h}/${m.footPad}`);
+            }
+            SHEET_SOURCES.set(id, bindSource({
+                name: id, streams: mod.STREAMS, meta: m, paletteHex: mod.PALETTE_HEX,
+                poses: new Map(), paletteKey: null
+            }));
+            HERO3D.sheet = id;
+            return true;
+        }).catch((err) => {
+            SHEET_ERROR[id] = String((err && err.message) || err).slice(0, 180);
+            HERO3D.sheetError = SHEET_ERROR[id];
+            return false;
+        }).finally(() => SHEET_PENDING.delete(id));
+    SHEET_PENDING.set(id, job);
+    return job;
+}
+
+/** Готов ли лист, который просит образ (true — можно рисовать без догрузки). */
+export const hero3dSheetReady = (id) => id === "male/long" || SHEET_SOURCES.has(id);
+
+/** Что играет прямо сейчас — для штампа сборки и панели отладки. */
+export const hero3dSheetInfo = () => ({
+    id: HERO3D.sheet, loaded: SHEET_SOURCES.size + 1, errors: { ...SHEET_ERROR }
+});
+
+/** Источник кадра для образа: свой лист либо (пока не приехал) активный. */
+function srcFor(look) {
+    const id = hero3dSheetId(look);
+    if (id === "male/long") return SRC;
+    const have = SHEET_SOURCES.get(id);
+    if (have) return have;
+    if (!SHEET_PENDING.has(id) && SHEET_ERROR[id] === undefined) hero3dSheet(look);
+    return SRC;
 }
 
 /** Палитра дорожек для произвольного look — наружу ради теста и превью панели внешности. */
@@ -333,7 +447,7 @@ export function heroPose(p, src = SRC) {
 /** Спрайт для текущей позы: канвас + геометрия постановки. null — рисовать вектором. */
 export function heroSprite(p, look) {
     if (!HERO3D.enabled || !HERO3D.ready || p.sprite === false) return null;
-    const src = SRC;
+    const src = srcFor(look || p.look);
     const pose = heroPose(p, src);
     const data = decodePose(`${pose.dir}/${pose.label}`, src);
     if (!data) return null;
@@ -400,7 +514,7 @@ export function heroHandAnchor(p, hand = "right", extra = {}) {
     // координаты из одного источника, иначе огонёк уезжает с ладони (это ловит
     // tests/visual-world.test.js на четырёх ракурсах и в падении).
     if (!HERO3D.enabled || !HERO3D.ready || p.sprite === false) return null;
-    const src = SRC;
+    const src = srcFor(p.look);
     const pose = heroPose(p, src);
     const anchors = src.meta.anchors?.[`${pose.dir}/${pose.label}`];
     if (!anchors) return null;

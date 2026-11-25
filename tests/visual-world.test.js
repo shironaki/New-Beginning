@@ -607,6 +607,12 @@ async function withDom(fn) {
     }
 }
 
+/** Границы значений дорожки в кадре: значение = индекс + 1. */
+function META_RAMP(name) {
+    const m = GRADED_META.ramps[name];
+    return [m.at + 1, m.at + m.steps];
+}
+
 const HERO_LOOK = { gender: "male", coat: "#446d68", skin: "#e0b594", hair: "#302b29",
     pants: "#48473e", shirt: "#899383", vest: "#41524e", accent: "#c9a063", cloak: null };
 
@@ -618,7 +624,7 @@ test("лицо героя доживает до игрового кадра: г�
         // не «есть ли тёмные пиксели» (обводка есть всегда), а РИСУНОК: в анфас
         // внутри головы обязана найтись строка с двумя раздельными тёмнымиrunами
         // (левый и правый глаз), а сзади — ни одного.
-        const { heroSprite, hero3dQuality, HERO3D } = await import("../js/render/hero3d.js");
+        const { heroSprite, hero3dQuality, hero3dSheet, HERO3D } = await import("../js/render/hero3d.js");
         // Соседние тесты этого файла переключают выход на smooth (у него нет ни
         // дорожек, ни штампа лица) — фиксируем грейд и возвращаем как было.
         const prevQuality = HERO3D.quality;
@@ -690,6 +696,14 @@ test("лицо героя доживает до игрового кадра: г�
             return hits;
         })();
         assert.eq(bad, 0, "сзади глаз быть не может: проверка глубины обязана прятать черты");
+        // Женский лист обязан иметь ТО ЖЕ лицо. Раньше фильтр мешков глаз сверял
+        // два имени мужской базы («Face»/«Face.001»), а у женской они называются
+        // «Eyebrows»/«Eyes» — штамп просто не вызывался, и женщина в игре была
+        // с пустым овалом вместо лица.
+        const femaleLook = { ...HERO_LOOK, gender: "female", hairStyle: "long" };
+        assert.ok(await hero3dSheet(femaleLook), "женский лист обязан загрузиться");
+        const female = heroSprite({ dir: "down", anim: 0, gait: 0, moving: false, look: femaleLook, phase: 0 }, femaleLook);
+        assert.ok(faceRow(female.pixels) >= 1, "у женщины лицо обязано читаться так же, как у мужчины");
         await hero3dQuality(prevQuality);
     });
 });
@@ -747,6 +761,113 @@ test("рубашка, плащ и аксессуар идут за образо�
         const plain = heroLookPalette(HERO_LOOK), cloaked = heroLookPalette({ ...HERO_LOOK, cloak: "#20303f" });
         assert.ok(cloaked[idx("cloak")].join(",") !== plain[idx("cloak")].join(","), "плащ обязан перекрашиваться, когда он надет");
     });
+});
+
+test("пол и причёска берут свой лист: меняется фигура, а не оттенок", async () => {
+    return withDom(async () => {
+        // Три претензии подряд: «нет реакции на смену пола. На прическу». Их
+        // нельзя закрыть палитрой — paletteFor перекрашивает ЗАПИСИ, а форма
+        // живёт в листе. Значит для каждой связки «кто + какая стрижка» обязан
+        // лежать свой пропечённый лист, и выбор по образу обязан его достать.
+        const h = await import("../js/render/hero3d.js");
+        await h.hero3dQuality("grade");
+        const frame = async (gender, hairStyle, dir = "up") => {
+            const look = { ...HERO_LOOK, gender, hairStyle };
+            const id = h.hero3dSheetId(look);
+            assert.ok(await h.hero3dSheet(look), `лист «${id}» обязан загрузиться (${h.HERO3D.sheetError || "нет файла"})`);
+            const sp = h.heroSprite({ dir, anim: 0, gait: 0, moving: false, look, phase: 0 }, look);
+            assert.ok(sp && sp.pixels, `кадр из листа «${id}» обязан собраться`);
+            return sp.pixels;
+        };
+        const diff = (a, b) => { let n = 0; for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) n += 1; return n; };
+        const hair = META_RAMP("hair");
+        const hairCount = (px) => { let n = 0; for (let i = 0; i < px.length; i += 1) if (px[i] >= hair[0] && px[i] <= hair[1]) n += 1; return n; };
+
+        const maleLong = await frame("male", "long");
+        const femaleLong = await frame("female", "long");
+        const maleShort = await frame("male", "short");
+        const maleBun = await frame("male", "bun");
+        assert.ok(h.hero3dSheetId({ ...HERO_LOOK, hairStyle: "braid" }) !== h.hero3dSheetId({ ...HERO_LOOK, hairStyle: "long" }),
+            "«Коса» обязана звать свой лист, а не притворяться длинными");
+        assert.eq(h.hero3dSheetId({ ...HERO_LOOK, gender: "female", hairStyle: "ponytail" }), "female/braid",
+            "хвост = собранные волосы, тот же лист");
+        // Пол: другой базовый мешок + своя одежда. Порог — 40 px (0.35% кадра):
+        // ниже него «различие» тонет в дизеринге, и это ровно та ошибка, из-за
+        // которой первый вариант женского листа был мужчиной в юбке.
+        assert.gt(diff(maleLong, femaleLong), 40, "мужчина и женщина рисуются одним кадром");
+        // Причёска: масса волос меняется сильнее всего — она и проверяется.
+        assert.gt(hairCount(maleLong), hairCount(maleShort) * 2, "длинные волосы не длиннее коротких");
+        assert.gt(hairCount(maleBun), hairCount(maleShort), "собранные волосы должны быть видны сзади");
+        assert.gt(diff(maleLong, maleShort), 40, "короткая стрижка не меняет кадр");
+        // «Бритые» играют коротким листом, но дорожка волос становится кожей:
+        // отдельного листа лысой голове не нужно.
+        const buzz = await h.heroLookPalette({ ...HERO_LOOK, hairStyle: "buzz" });
+        const normal = await h.heroLookPalette({ ...HERO_LOOK, hairStyle: "short" });
+        const ramps = GRADED_META.ramps;
+        for (let i = 0; i < ramps.hair.steps; i += 1) {
+            const at = ramps.hair.at + i;
+            const want = buzz[at].join(",");
+            // Не сверяем ИНДЕКСЫ дорожек (их разное число): требование в том,
+            // что каждый слот волос стал затемнённым тоном кожи из её дорожки.
+            const fromSkin = Array.from({ length: ramps.skin.steps }, (_, j) => normal[ramps.skin.at + j])
+                .some(rgb => rgb.every((v, c) => {
+                    const factor = v ? buzz[at][c] / v : 1;
+                    return buzz[at][c] > 0 && factor >= 0.86 && factor <= 0.96;   // затемнение, а не подмена
+                }));
+            assert.ok(fromSkin, `слот волос ${i} после бритья не тон кожи: ${want}`);
+            assert.ok(want !== normal[at].join(","), `слот волос ${i} не изменился — бритых не видно`);
+        }
+        const lum = (rgb) => 0.299 * rgb[0] + 0.715 * rgb[1] + 0.072 * rgb[2];
+        const shavedLum = ramps.hair.steps ? lum(buzz[ramps.hair.at]) : 0;
+        const cutLum = lum(normal[ramps.hair.at]);
+        assert.gt(shavedLum, cutLum, "бритая голова обязана быть светлее причёски, а не темнее");
+        assert.eq(hairCount(await frame("male", "buzz")), hairCount(maleShort),
+            "лысина не обязана выстригать силуэт — меняется цвет волос, а не форма");
+    });
+});
+
+test("каменный нож не притворяется стальным", async () => {
+    // Претензия п.9: «в левой руке 4 деревянных ножа». drawKnife рисовал
+    // полированный стальной клинок с белым бликом для НОЖА любого уровня, и
+    // каменный орудный блок выглядел как готовое железо. Проверяем не вызов
+    // функции, а картинку: ярких стальных пикселей у каменного ножа нет.
+    const { ShimCanvas } = await import("../tools/canvas-shim.js");
+    const { drawHeldToolAt } = await import("../js/render/character.js");
+    const steelPixels = (tier) => {
+        const cv = new ShimCanvas(40, 40);
+        const ctx = cv.getContext("2d");
+        ctx.translate(20, 34);
+        drawHeldToolAt(ctx, { id: "knife", n: 1, tool: "knife", tier }, "down", 0,
+            { x: 0, y: 0, gripX: 0, gripY: 0, angle: 0, behind: false }, {}, "right");
+        let bright = 0;
+        for (let i = 0; i < cv.data.length; i += 4) {
+            const r = cv.data[i], g = cv.data[i + 1], b = cv.data[i + 2];
+            if (cv.data[i + 3] > 8 && r > 170 && g > 170 && b > 170) bright += 1;
+        }
+        return bright;
+    };
+    assert.eq(steelPixels(1), 0, "у каменного ножа стальное лезвие");
+    assert.gt(steelPixels(2), 3, "железный нож обязан читаться металлом");
+    // Рука обязана видеть уровень предмета: handTool() прокидывает tier из
+    // def-а, иначе рендеру неотличить кремень от железа.
+    const { handTool } = await import("../js/ui/hands.js");
+    assert.eq(handTool({ id: "knife", n: 1 }).tier, 1, "handTool обязан отдавать уровень предмета");
+});
+
+test("в стартовом лагере под ногами героя чисто", async () => {
+    // Претензия п.6: «под ногами какой-то проп». Им оказался `firewood`, который
+    // расстановка лагеря ставила в тайл СПРАВА от zone.spawnHint — на ширину
+    // спрайта. Костёр рядом остаётся: он сюжетный (start_fire) и обязан быть
+    //Reachable, а мусор в радиусе шага — нет.
+    const { generateZone } = await import("../js/world/worldgen.js");
+    const zone = generateZone("ashfall", 1066618561);
+    const hint = zone.spawnHint;
+    assert.ok(hint, "у стартовой зоны обязан быть spawnHint");
+    const near = (zone.objects || []).filter(o => Math.max(Math.abs(o.tx - hint.tx), Math.abs(o.ty - hint.ty)) <= 1);
+    const junk = near.filter(o => !o.story);
+    assert.eq(junk.map(o => `${o.kind}@${o.tx - hint.tx},${o.ty - hint.ty}`).join(" "), "",
+        "в радиусе тайла от стартовой точки не должно быть не-сюжетных пропадов");
+    assert.ok(near.some(o => o.story === "start_fire"), "костёр пролога обязан остаться у старта");
 });
 
 test("размер кадра = propHeight: сетка коллизий и силуэт не разъезжаются", () => {

@@ -764,7 +764,12 @@ function placeStoryProps(zone, rng) {
         zone.campSite = { tx: cx, ty: cy };
         addProp(zone, "tent", cx - 2, cy, { solid: true, story: "start_tent" });
         addProp(zone, "campfire", cx + 1, cy, { solid: false, story: "start_fire", fuel: 0 });
-        addProp(zone, "firewood", cx + 1, cy + 1, { solid: false, amount: 2 });
+        // Дрова у костра — да, но НЕ под ногами: стартовая точка это (cx, cy+1),
+        // и кучка в (cx+1, cy+1) лежала вплотную к спрайту героя. На 40-пиксельной
+        // фигуре это выглядело как «странный предмет под ногами» (претензия п.6),
+        // а не как поленница. Уводим на тайл дальше; вторая кучка стояла через
+        // два тайла и её не трогаем.
+        addProp(zone, "firewood", cx + 2, cy + 1, { solid: false, amount: 2 });
         addProp(zone, "firewood", cx, cy - 1, { solid: false, amount: 2 });
         zone.spawnHint = { tx: cx, ty: cy + 1 };
 

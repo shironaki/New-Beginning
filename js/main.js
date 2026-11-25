@@ -1304,17 +1304,18 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
             // Статика героя спрашивается динамическим импортом: в «hero3d=off»
             // лист на 627 КБ в графе не нужен вовсе, а здесь он и так уже
             // лежит в кэше модулей (его тянет render/character.js).
-            const { HERO3D } = await import("./render/hero3d.js");
+            const { HERO3D, hero3dSheetInfo } = await import("./render/hero3d.js");
             const stamp = document.createElement("div");
             stamp.id = "buildStamp";
-            stamp.textContent = `сборка 77 · 3D-пропы: ${st.enabled ? st.kinds : 0} (${st.reason || "ок"})`
+            stamp.textContent = `сборка 78 · 3D-пропы: ${st.enabled ? st.kinds : 0} (${st.reason || "ок"})`
                 + ` · свет ${st.sun ? `×${st.sun.amp.toFixed(2)}/${st.sun.amb.toFixed(2)}` : "—"}`
                 + ` · тон ${st.tone || "авто"} · ${styleKey(style)}`
                 // Герой в штампе обязателен: все три претензии блока (лицо, пол,
                 // мокрый слой) сидят в его листе, а лист грузится асинхронно.
                 // «Сборка есть, а героя не видно» = лист не доехал.
-                + ` · герой: ${HERO3D.ready ? HERO3D.quality : "лист не загружен"}`
-                + (HERO3D.error ? ` (${HERO3D.error})` : "");
+                + ` · герой: ${HERO3D.ready ? `${HERO3D.quality} · лист ${hero3dSheetInfo().id}` : "лист не загружен"}`
+                + (HERO3D.error ? ` (${HERO3D.error})` : "")
+                + (HERO3D.sheetError ? ` (лист: ${HERO3D.sheetError})` : "");
             (document.body || document.documentElement).appendChild(stamp);
         } catch (e) { window.__stage?.(`штамп не выведен: ${e.message}`); /* штамп — не игра */ }
         window.GAME = game;

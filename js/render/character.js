@@ -822,7 +822,14 @@ function drawHeldTool(ctx, tool, dir, side, swing, arm, behind, pose = {}, hand 
     switch (id) {
         case "axe": drawAxe(ctx, itemId.includes("iron")); break;
         case "pick": drawPick(ctx); break;
-        case "knife": ctx.scale(BODY.knifeScale, BODY.knifeScale); drawKnife(ctx); break;
+        case "knife":
+            // Уровень оружия обязан быть ВИДЕН. Каменный нож рисовался стальным
+            // клинком — отсюда «четыре одинаковых деревянных ножа» в левой руке:
+            // стек, берестяная оправа и белая полоса блика были у него общие с
+            // железным, и различить предметы в кадре было нельзя.
+            ctx.scale(BODY.knifeScale, BODY.knifeScale);
+            drawKnife(ctx, typeof tool === "string" ? 1 : (tool.tier ?? (itemId.includes("iron") ? 2 : 1)));
+            break;
         case "spear": drawSpear(ctx); break;
         case "rod": drawRod(ctx); break;
         case "hoe": drawHoe(ctx); break;
@@ -895,23 +902,46 @@ function drawPick(ctx) {
     ctx.fillRect(4.4, -10.2, 2, 1);
 }
 
-function drawKnife(ctx) {
+function drawKnife(ctx, tier = 2) {
     // A short blade in the fist: handle through the hand, blade above it.
-    ctx.fillStyle = "#5a3f26";
+    const stone = tier <= 1;
+    ctx.fillStyle = stone ? "#6a4a2c" : "#5a3f26";      // рукоять: дерево / кость+кожа
     ctx.fillRect(-1.1, -2.6, 2.2, 5);
-    ctx.fillStyle = "#3c2a19";
+    ctx.fillStyle = stone ? "#4a3320" : "#3c2a19";
     ctx.fillRect(-1.1, -2.6, 0.8, 5);
-    ctx.fillStyle = "#6d5536";                   // guard
+    if (stone) {
+        // Обмотка: на каменном ноге держит пластина, а не всадной хвост.
+        ctx.fillStyle = "#8a6f45";
+        ctx.fillRect(-1.6, -3.4, 3.2, 0.7);
+        ctx.fillRect(-1.6, -1.2, 3.2, 0.7);
+    }
+    ctx.fillStyle = stone ? "#7d6b4a" : "#6d5536";      // guard
     ctx.fillRect(-2, -3.6, 4, 1.2);
-    ctx.fillStyle = "#c9ced6";                   // blade
+    ctx.fillStyle = stone ? "#54565c" : "#c9ced6";      // blade: кремень / сталь
     ctx.beginPath();
-    ctx.moveTo(-1.3, -3.6); ctx.lineTo(1.3, -3.6);
-    ctx.lineTo(1.5, -9.6); ctx.lineTo(0, -11.4); ctx.lineTo(-1.3, -9.2);
+    if (stone) {
+        // Сколотая пластина: неровное лезвие, без зеркальной полосы.
+        ctx.moveTo(-1.4, -3.6); ctx.lineTo(1.4, -3.6);
+        ctx.lineTo(1.1, -7.4); ctx.lineTo(1.7, -8.6); ctx.lineTo(0.4, -11.1);
+        ctx.lineTo(-0.9, -9.4); ctx.lineTo(-1.5, -6.2);
+    } else {
+        ctx.moveTo(-1.3, -3.6); ctx.lineTo(1.3, -3.6);
+        ctx.lineTo(1.5, -9.6); ctx.lineTo(0, -11.4); ctx.lineTo(-1.3, -9.2);
+    }
     ctx.closePath(); ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.75)";
-    ctx.fillRect(0.3, -10, 0.8, 6);
-    ctx.fillStyle = "rgba(0,0,0,0.2)";
-    ctx.fillRect(-1.3, -9.4, 0.8, 5.6);
+    if (stone) {
+        ctx.fillStyle = "#7a7d86";                       // блик по гребню скола
+        ctx.beginPath();
+        ctx.moveTo(-0.4, -4.4); ctx.lineTo(0.8, -10.2); ctx.lineTo(0.2, -10.2);
+        ctx.lineTo(-0.9, -5.2); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "rgba(0,0,0,0.28)";
+        ctx.fillRect(-1.5, -6.2, 0.7, 2.6);
+    } else {
+        ctx.fillStyle = "rgba(255,255,255,0.75)";
+        ctx.fillRect(0.3, -10, 0.8, 6);
+        ctx.fillStyle = "rgba(0,0,0,0.2)";
+        ctx.fillRect(-1.3, -9.4, 0.8, 5.6);
+    }
 }
 
 function drawSpear(ctx) {

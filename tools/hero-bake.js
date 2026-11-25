@@ -68,9 +68,11 @@ const OUT = path.resolve(opt("out", ".artifacts/hero-bake"));
 // иначе герой в игре никак не связан с тем, что выбран в панели внешности.
 const LOOK = {
     skin: opt("skin", "#e0b594"),
-    // Тот же ключ --hair задаёт и имя мешка, и цвет — отсюда путаница в пробах.
-    // haircolor перебивает только цвет.
-    hair: opt("haircolor", opt("hair", "#302b29")),
+    // Ключ --hair задаёт и имя мешка, и цвет — отсюда путаница в пробах:
+    // «--hair Hair_Long» красил волосы в строку «Hair_Long». Цветом считается
+    // только то, что похоже на hex; haircolor перебивает всегда.
+    hair: opt("haircolor", /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(opt("hair", "")))
+        ? String(opt("hair")) : "#302b29"),
     coat: opt("coat", "#446d68"),
     pants: opt("pants", "#48473e")
 };
@@ -171,6 +173,8 @@ const PARTS = [
     { file: () => (HAIR ? path.join(ASSETS, "hair", `${HAIR}.glb`) : null), role: "hair", bias: 0.006,
       fit: flag("no-hairfit") ? null : { width: Number(opt("hairwidth", 1.06)), lift: Number(opt("hairlift", 0.012)), faceCut: !flag("no-facecut") } }
 ];
+/** Глаза/брови — по имени мешка, а не по имени конкретного пола. */
+const FEATURE_MESH = { "Face.001": "eyes", Eyes: "eyes", Face: "brows", Eyebrows: "brows" };
 const HEAD_BONES = /^(head|neck_01)$/i;
 // Клипы ищутся по всем подключённым библиотекам: базовый пак даёт походку,
 // Universal Animation Library 2 — рубку дерева, сбор урожая, блок щитом.
@@ -240,7 +244,7 @@ function trackOf(role, matName, meshName) {
     if (role === "hair") return TRACK_OF.hair;
     // Подкладка: всё, что не глаза и не брови, красится кожей. Тканевый
     // костюм супергероя из этой же модели в прорехах смотреться не должен.
-    if (role === "body" && UNDERSUIT) return /eye|brow|teeth/i.test(name) ? 0 : TRACK_OF.skin;
+    if (role === "body" && UNDERSUIT) return /eye|brow|teeth/i.test(`${name} ${mesh}`) ? 0 : TRACK_OF.skin;
     if (role === "clothes") {
         if (/regular|skin/i.test(name)) return TRACK_OF.skin;
         // Обувь — не цвет одежды: её тон и так сидит в общей палитре (boot/leather),
@@ -419,8 +423,11 @@ function collectDrawables(part, scene) {
                 // Глаза и брови рисуются НЕ квантизацией, а отдельным штампом
                 // (см. stampFeatures): в источнике это 0.03 ед. высоты, т. е.
                 // меньше пикселя спрайта.
-                feature: spec.role === "body" && mesh.name === "Face.001" ? "eyes"
-                    : spec.role === "body" && mesh.name === "Face" ? "brows" : null,
+                // Имена мешков лица у полов РАЗНЫЕ: мужская база зовёт их
+                // «Face»/«Face.001», женская — «Eyebrows»/«Eyes». Прежняя
+                // сверка по двум строкам молча лишала женщин штампа: лист
+                // пропекался с пустым овалом вместо лица (претензия п.4).
+                feature: spec.role === "body" ? FEATURE_MESH[mesh.name] || null : null,
                 track: trackOf(spec.role, mat.name, mesh.name),
                 texture: flag("no-tex") ? null : (mat.texture?.buffer ? decodeTexture(mat.texture)
                     : textureFile ? loadTexture(textureFile) : null)

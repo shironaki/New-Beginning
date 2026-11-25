@@ -12,7 +12,15 @@ const boot=()=>{const g=new Game({canvas:new FakeElement('canvas'),hudRoot:new F
 const click=(g,text)=>{const row=g.hud._panelRows.find(r=>r.innerHTML.includes(text));assert.ok(row,text);row.dispatch('click');};
 test('appearance applies only on confirmation, cancel does not mutate the hero',()=>{
  const g=boot(),before=JSON.stringify(g.look);openAppearance(g);click(g,'Женщина');assert.eq(JSON.stringify(g.look),before);click(g,'Отмена');assert.eq(JSON.stringify(g.look),before);
- openAppearance(g);click(g,'Женщина');click(g,'Коса');click(g,'Применить');assert.eq(g.look.gender,'female');assert.eq(g.look.hairStyle,'braid');assert.not(g.look.stubble);
+ openAppearance(g);click(g,'Женщина');click(g,'Собранные');click(g,'Применить');assert.eq(g.look.gender,'female');assert.eq(g.look.hairStyle,'bun');assert.not(g.look.stubble);
+ // Пол и причёска — форма, а не цвет: чипов ровно те стрижки, что пропечены
+ // отдельным листом. «Коса»/«Хвост» остаются принятыми значениями (сохранённые
+ // образы), но чипа у них нет: мешок волос в паке один, и три кнопки под одну
+ // картинку — это ровно та «нет реакции на причёску», за которую блок вернули.
+ openAppearance(g);
+ for(const label of ['Короткие','Длинные','Собранные','Бритые']) assert.ok(g.hud._panelRows.some(r=>r.innerHTML.includes(label)),`нет чипа «${label}»`);
+ assert.ok(!g.hud._panelRows.some(r=>/>Коса</.test(r.innerHTML)),'скрытый псевдоним не должен быть чипом');
+ assert.eq(normalizeLook({hairStyle:'braid'}).hairStyle,'braid','прежний сохранённый образ обязан читаться');
  // Чипы вместо прокрутки: вариант выбирается напрямую, а выбранный подсвечен
  // (aria-pressed) — без этого с телефона не понять, что сейчас стоит.
  openAppearance(g);assert.gt(g.hud._panelRows.filter(r=>r.getAttribute('aria-pressed')==='true').length,6);

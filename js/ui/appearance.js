@@ -11,12 +11,17 @@
  * пучок существуют только сзади, и показывать их «в лицо» значит врать.
  */
 import { DEFAULT_LOOK, drawCharacter } from "../render/character.js";
-import { HERO3D } from "../render/hero3d.js";
+import { HERO3D, hero3dSheet, hero3dSheetId, hero3dSheetInfo, hero3dSheetReady } from "../render/hero3d.js";
 
 export const APPEARANCE = {
     gender: [["male", "Мужчина"], ["female", "Женщина"]],
-    hairStyle: [["short", "Короткие"], ["long", "Длинные"], ["braid", "Коса"],
-        ["ponytail", "Хвост"], ["bun", "Пучок"], ["buzz", "Ёжик"]],
+    // Третьим элементом помечены значения, которые ПРИНИМАЮТСЯ (сохранённые
+    // образы не должны падать на normalizeLook), но чипом не показываются:
+    // пол и причёска берут свой запечённый лист, а пропечены четыре формы.
+    // Обещать «косу», «хвост» и «пучок» тремя разными кнопками — значит врать:
+    // мешок волос в паке на все три один (собранные).
+    hairStyle: [["short", "Короткие"], ["long", "Длинные"], ["bun", "Собранные"],
+        ["buzz", "Бритые"], ["braid", "Коса", true], ["ponytail", "Хвост", true]],
     skin: [["#e0b594", "Светлая"], ["#ba8864", "Смуглая"], ["#80553e", "Тёмная"]],
     hair: [["#302b29", "Тёмные"], ["#825332", "Каштановые"], ["#ba985b", "Светлые"], ["#969b96", "Седые"]],
     coat: [["#446d68", "Хвойный"], ["#785044", "Глина"], ["#526078", "Сумерки"], ["#8e7952", "Песок"]],
@@ -51,7 +56,8 @@ export function randomLook(pick = Math.random) {
     for (const [key, values] of Object.entries(APPEARANCE)) {
         // До 1.0 включительно быть не должно: floor(1*len) = len → undefined.
         const r = Math.max(0, Math.min(0.999999, pick()));
-        out[key] = values[Math.floor(r * values.length)][0];
+        const live = values.filter((v) => !v[2]);            // скрытые псевдонимы не выпадают
+        out[key] = live[Math.floor(r * live.length)][0];
     }
     return normalizeLook(out);
 }
@@ -72,7 +78,8 @@ export function openAppearance(game, back = () => game.hud.closePanel(), initial
         }];
         for (const [key, values] of Object.entries(APPEARANCE)) {
             rows.push({ caption: NAMES[key] });
-            for (const [value, name] of values) {
+            for (const [value, name, hidden] of values) {
+                if (hidden && draft[key] !== value) continue;
                 rows.push({
                     chip: key,
                     label: chipLabel(key, value, name),
@@ -95,11 +102,22 @@ export function openAppearance(game, back = () => game.hud.closePanel(), initial
         // форма одна, а цвета перекраиваются палитрой. Пока лист подключён,
         // причёски и фигура меняют превью и векторного героя, но не сам лист.
         if (HERO3D.enabled && HERO3D.ready) {
-            rows.push({ html: "<p class='panelInfo'>Включён 3D-риг: он перекрашивается по палитре, а причёску и фигуру меняет векторный герой — риг «выкл».</p>" });
+            const info = hero3dSheetInfo();
+            rows.push({ html: "<p class='panelInfo'>3D-риг: пол и причёска берут свой запечённый лист "
+                + `(играет «${info.id}», листов в памяти: ${info.loaded}).`
+                + " Цвета перекраиваются по палитре. Причёска вне списка — это перепекка листа:</p>" });
         }
         rows.push({
             label: initial ? "Начать путь" : "Применить", icon: "✔",
-            action: () => { game.look = normalizeLook(draft); back(); }
+            action: () => {
+                game.look = normalizeLook(draft);
+                // Лист по полу/причёске весит ~600 КБ и грузится по требованию.
+                // Ткнём его здесь, а не в первом кадре: иначе герой «догоняет»
+                // образ с полсекунды после закрытия панели, и это выглядит как
+                // «ничего не поменялось» — ровно претензия п.7.
+                hero3dSheet(game.look);
+                back();
+            }
         });
         if (!initial) rows.push({ label: "Отмена", icon: "✕", action: back });
         game.hud.openPanel(initial ? "Тот, кто вернулся" : "Внешность", rows, "appearance", { locked: initial });
@@ -118,6 +136,11 @@ export function paintPreview(root, look) {
     const ctx = canvas?.getContext?.("2d");
     if (!ctx) return false;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Чужой лист (женский, собранный) весит ~600 КБ и тянется только когда его
+    // выбрали: первый кадр после выбора играет прежним листом. Дорисовываем
+    // ровно один раз — когда лист приехал, и только если его ещё не было.
+    const id = hero3dSheetId(look);
+    if (!hero3dSheetReady(id)) hero3dSheet(look).then((ok) => { if (ok) paintPreview(root, look); });
     const scale = 3.2, baseY = canvas.height - 14;
     ANGLES.forEach(([dir], i) => {
         ctx.save();
