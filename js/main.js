@@ -1285,19 +1285,40 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
         // фигура. Гладкий модуль весит 643 КБ и приходит только по запросу.
         if (style.hero3d !== "grade") {
             const hero3d = await import("./render/hero3d.js");
-            // Лист грузится как запасной кадр. Но его отсутствие НЕ имеет права
-            // ронять запуск: без .catch одна сетевая ошибка здесь = чёрный экран.
-            await hero3d.hero3dSheet(game.look).catch((err) => {
+            /** Заметка в штамп: пишет и в window, чтобы пережить гонку «штамп ещё
+             *  не создан» / «промо уже прилетело». */
+            const note = (txt) => {
+                window.__heroLiveNote = txt;
+                const el = document.getElementById("buildStamp");
+                if (el && txt) el.textContent += txt;
+            };
+            // Ни лист, ни живой слой не ждут в линии запуска. Лист — запасной кадр
+            // (без .catch одна сетевая ошибка здесь = чёрный экран), а three.js с
+            // пакетом рига — 3.6 МБ: ждать их, это подарить мобильному игроку пустой
+            // экран на секунду-другую. Игра стартует листом и «дорастает» до 3D.
+            void hero3d.hero3dSheet(game.look).catch((err) => {
                 hero3d.HERO3D.sheetError = String((err && err.message) || err).slice(0, 160);
                 return false;
             });
             if (style.hero3d === "off") hero3d.HERO3D.enabled = false;
             else {
-                const ok = await hero3d.hero3dQuality(style.hero3d);
-                if (!ok) {
+                void hero3d.hero3dQuality(style.hero3d).then((ok) => {
+                    if (ok) {
+                        const i = hero3d.hero3dLiveInfo ? hero3d.hero3dLiveInfo() : null;
+                        note(style.hero3d === "live"
+                            ? ` · live: готов (${i?.parts} частей · ${i?.clips} клипов · кадров ${i?.frames})` : "");
+                        return;
+                    }
                     console.warn(`[hero3d] режим «${style.hero3d}» недоступен: `
                         + `${hero3d.HERO3D.error || "нет такого режима"} — играет «${hero3d.HERO3D.quality}»`);
-                }
+                    note(` · live: отказ (${hero3d.HERO3D.error || "нет такого режима"})`);
+                }, (err) => {
+                    // Отказ не молчание: причина и в консоли, и в штампе.
+                    hero3d.HERO3D.error = `живой режим упал: ${String((err && err.message) || err).slice(0, 160)}`;
+                    hero3d.HERO3D.live = false;
+                    console.warn("[hero3d]", hero3d.HERO3D.error);
+                    note(` · live: ${hero3d.HERO3D.error}`);
+                });
             }
         }
         // Стиль пропов — оттуда же: props3d=off возвращает процедурные кривые,
@@ -1315,11 +1336,10 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
             // Статика героя спрашивается динамическим импортом: в «hero3d=off»
             // лист на 627 КБ в графе не нужен вовсе, а здесь он и так уже
             // лежит в кэше модулей (его тянет render/character.js).
-            const { HERO3D, hero3dSheetInfo, hero3dLiveInfo } = await import("./render/hero3d.js");
-            const liveInfo = hero3dLiveInfo ? hero3dLiveInfo() : null;
-            const liveStamp = HERO3D.quality === "live" || liveInfo?.ready
-                ? ` · live: ${liveInfo?.ready ? `готов (${liveInfo.parts} частей, ${liveInfo.clips} клипов, отрисовано кадров ${liveInfo.frames}, пропущено ${liveInfo.skipped})` : `отказ: ${liveInfo?.error || HERO3D.error || "?"}`} · образ ${liveInfo?.active || "—"}`
-                : "";
+            const { HERO3D, hero3dSheetInfo } = await import("./render/hero3d.js");
+            // Живой слой поднимается параллельно, поэтому штамп дописывает заметку
+            // сам, когда промис режима завершится (note() выше).
+            const liveStamp = window.__heroLiveNote || "";
             const stamp = document.createElement("div");
             stamp.id = "buildStamp";
             stamp.textContent = `сборка 79 · 3D-пропы: ${st.enabled ? st.kinds : 0} (${st.reason || "ок"})`
