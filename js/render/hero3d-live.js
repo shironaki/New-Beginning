@@ -57,21 +57,29 @@ function decode(index) {
 }
 
 /** Есть ли чем рисовать: WebGL обязателен, без него игра остаётся на листе. */
-function webglContext(canvas) {
+function webglContext(canvas, release = false) {
     for (const kind of ["webgl2", "webgl", "experimental-webgl"]) {
         let ctx = null;
         try { ctx = canvas.getContext(kind); } catch { ctx = null; }
+        // Пробный контекст обязан уходить: браузер держит ~16 живых WebGL-
+        // контекстов, и «проверить, можно ли рисовать» без loseContext само
+        // по себе ломает рисование после нескольких переключений в панели.
+        if (ctx && release && typeof ctx.getExtension === "function" && typeof ctx.getParameter === "function") {
+            try { ctx.getExtension("WEBGL_lose_context")?.loseContext(); } catch { /* уже всё равно */ }
+            return true;
+        }
         // Настоящий WebGL-контекст обязан уметь отвечать на getParameter.
         // 2D-«холст» (в тестовой подставке getContext возвращает что попало) — нет:
         // иначе «среда поддерживает 3D» означает «поддержка есть», а не «есть чем рисовать».
         if (ctx && typeof ctx.getParameter === "function") return ctx;
     }
-    return null;
+    return release ? false : null;
 }
 export function liveSupported() {
     if (typeof document === "undefined" || typeof window === "undefined") return false;
     try {
-        return !!webglContext(document.createElement("canvas"));
+        // Только спросить, не занимая контекст: рисовать будет renderer.
+        return webglContext(document.createElement("canvas"), true) === true;
     } catch { return false; }
 }
 
@@ -99,7 +107,8 @@ export async function initLive() {
     }
     try {
         const canvas = document.createElement("canvas");
-        if (!webglContext(canvas)) throw new Error("браузер не дал WebGL-контекст");
+        const gl0 = webglContext(canvas);
+        if (!gl0) throw new Error("браузер не дал WebGL-контекст");
         canvas.width = CELL.w; canvas.height = CELL.h;
         renderer = new THREE.WebGLRenderer({
             canvas, alpha: true, antialias: false, premultipliedAlpha: false,
@@ -109,7 +118,7 @@ export async function initLive() {
         renderer.setSize(CELL.w, CELL.h, false);
         renderer.setClearColor(0x000000, 0);
         renderer.shadowMap.enabled = false;
-        gl = renderer.getContext();
+        gl = renderer.getContext() || gl0;
         scene = new THREE.Scene();
         // Ортография: игра рисует персонажа без перспективы, и лист собран тем же
         // проективным аппаратом — перспектива сдвинула бы силуэт относительно тени.
