@@ -1252,6 +1252,37 @@ test("живой рендер выбирает позу по состоянию 
     }
 });
 
+test("диагноз live-слоя откатывает на ЛИСТ, а не на пустоту", async () => {
+    // «Нет 3D» и «нет героя» — не одно и то же. Если живой слой сообщает о битой
+    // геометрии, пустом кадре или потерянном контексте, heroSprite обязан отдать
+    // кадр листа; возврат null означал бы векторную заготовку вместо персонажа.
+    const [THREE, live] = await Promise.all([THREE_MOD(), liveMod()]);
+    live.enableForTests(THREE);
+    return withDom(async () => {
+        const hero3d = await import("../js/render/hero3d.js");
+        const was = hero3d.HERO3D.quality;
+        // hero3dLive(true) в этой среде честно откажет (нет WebGL), но именно он
+        // подключает LIVE_MOD — без него heroSprite до живого слоя не доходит.
+        await hero3d.hero3dQuality("grade");
+        await hero3d.hero3dLive(true);
+        const look = { gender: "female", hairStyle: "short", skin: "#ba8864", coat: "#785044", pants: "#3a2f28", hair: "#825332" };
+        const p = { dir: "left", moving: true, gait: 0.5, phase: 1.2, actionTimer: 0, look };
+        const good = hero3d.heroSprite(p, look);
+        assert.ok(good && good.canvas, "лист обязан отдавать кадр в этой среде — иначе проверка ничего не проверяет");
+        // Дирижируем диагнозом: как если бы liveLook/аудит кадра отказались.
+        live.LIVE.audited = true; live.LIVE.reason = "bad-mesh"; live.LIVE.error = "нет весов у 20418 вершин";
+        hero3d.HERO3D.live = true;
+        const back = hero3d.heroSprite(p, look);
+        assert.ok(back && back.canvas, "после отказа live кадр обязан прийти из листа, а не null");
+        assert.ok(back.live !== true, "откатанный кадр не обязан помечать себя живым");
+        assert.eq(hero3d.HERO3D.live, false, "слой обязан выключиться, а не пытаться каждый кадр");
+        assert.ok(/20418/.test(hero3d.HERO3D.error), `причина обязана остаться видимой: «${hero3d.HERO3D.error}»`);
+        live.LIVE.reason = ""; live.LIVE.error = ""; live.LIVE.audited = false;
+        hero3d.HERO3D.live = false; hero3d.HERO3D.error = "";
+        if (was !== "grade") await hero3d.hero3dQuality(was);
+    });
+});
+
 test("живой кадр совпадает с ЛИСТОМ ПО СИЛУЭТУ, а не только якорем", async () => {
     // Якорь — одна точка. Кадр — это весь силуэт: именно по нему видно, что
     // «герой пропал», «сжался в точку», «уехал на полклетки». Сравниваем живой
