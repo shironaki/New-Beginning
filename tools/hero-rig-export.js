@@ -574,6 +574,11 @@ const meta = {
     cell: CELL, pxPerUnit: PX_PER_UNIT, footPad: FOOT, heroPx: CELL.h, bodyUnits: BODY_UNITS,
     modelHeight: MODEL_HEIGHT, pitch: PITCH, target: TARGET, distance: DISTANCE, unit: UNIT,
     footRow: FOOT_ROW, frames: DIRS.map(d => frameFor(d.yaw)), light: LIGHT,
+    // Чернила кадра — тот же `ink` палитры пекаря (первый тон `heroframes.META.palette`
+    // и `INK` в tools/hero-bake.js = [28,22,16]): живой рендер обязан рисовать
+    // обводку теми же чернилами, иначе герой выглядит приклеенным к миру, где у
+    // каждого пропа обводка есть.
+    ink: "#241d18", inkPx: OUTLINE_PX,
     // Позы — тот же список, что у листа: рантайм выбирает позу по label/frames/fps
     // одинаково в обоих режимах, иначе «лист ↔ live» меняло бы ещё и темп шага.
     poses: POSES.filter(x => clips[x.label]).map(x => ({

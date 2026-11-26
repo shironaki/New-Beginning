@@ -1306,7 +1306,7 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
                     if (ok) {
                         const i = hero3d.hero3dLiveInfo ? hero3d.hero3dLiveInfo() : null;
                         note(style.hero3d === "live"
-                            ? ` · live: готов (${i?.parts} частей · ${i?.clips} клипов · кадров ${i?.frames})` : "");
+                            ? ` · live: готов (${i?.parts} частей · ${i?.clips} клипов · кадр ${i?.coverage >= 0 ? `${i.coverage} px` : "ещё не нарисован"})` : "");
                         return;
                     }
                     console.warn(`[hero3d] режим «${style.hero3d}» недоступен: `

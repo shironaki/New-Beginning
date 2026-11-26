@@ -1252,6 +1252,47 @@ test("живой рендер выбирает позу по состоянию 
     }
 });
 
+test("живой кадр совпадает с ЛИСТОМ ПО СИЛУЭТУ, а не только якорем", async () => {
+    // Якорь — одна точка. Кадр — это весь силуэт: именно по нему видно, что
+    // «герой пропал», «сжался в точку», «уехал на полклетки». Сравниваем живой
+    // рендер (скиннинг на CPU = то же, что считает GPU) с кадром листа: покрытие,
+    // габарит, центроид — и покрытие С ОБВОДКОЙ, потому что без чернил герой
+    // выглядит приклеенным к миру, где у каждого пропа обводка есть.
+    const { compare } = await import("../tools/hero-live-raster.js");
+    for (const who of ["male", "female"]) {
+        const res = await compare({ who, style: who === "male" ? "long" : "short" });
+        assert.ok(!res.fail, `${res.look}: ${res.fail && res.fail.bad}`);
+        assert.ok(res.compared >= 4, `сравнено ${res.compared} кадров — мало`);
+        for (const r of res.rows.filter(x => !x.skip)) {
+            assert.ok(r.live > 900, `${r.dir}/${r.label}: живой кадр ${r.live} px — это не герой`);
+            assert.ok(r.covInk > 0.75 && r.covInk < 1.35,
+                `${r.dir}/${r.label}: кадр с обводкой весит ${(r.covInk * 100).toFixed(0)}% от листа`);
+            assert.ok(r.dBox <= 4, `${r.dir}/${r.label}: габарит разъехался на ${r.dBox} px`);
+        }
+    }
+});
+
+test("битая геометрия живого рендера не рисуется точкой, а возвращает лист", async () => {
+    const [THREE, live, hero3d] = await Promise.all([
+        THREE_MOD(), liveMod(), import("../js/render/hero3d.js")
+    ]);
+    live.enableForTests(THREE);
+    const ok = live.liveValidate({ gender: "male", hairStyle: "long" });
+    assert.eq(ok.ok, true, `проверка геометрии: ${ok.error}`);
+    // Тот же тест на поломке: веса обнулены → liveLook обязан отказать, а не молча
+    // сложить меш в одну точку (именно так и выглядел «пропавший герой»).
+    const geo = await import("../js/render/herorig.js");
+    assert.ok(geo.RIG_META.parts["body:male"].meshes.length >= 3, "тело обязано быть из нескольких мешей");
+    const v = Buffer.from(geo.RIG_BLOBS[geo.RIG_META.parts["body:male"].meshes[0].verts], "base64");
+    let weighted = 0;
+    for (let i = 0; i < 646; i += 1) if (v[i * 13 + 12]) weighted += 1;
+    assert.eq(weighted, 646, "у каждой вершины обязан быть вес основной кости (байт 12)");
+    let bones = 0;
+    for (let i = 0; i < 646; i += 1) if (v[i * 13 + 10] < geo.RIG_META.bones.length) bones += 1;
+    assert.eq(bones, 646, "номер кости обязан влезать в скелет");
+    assert.ok(hero3d.HERO3D.quality !== "live" || hero3d.HERO3D.live, "без WebGL живым кадром играть нельзя — quality обязан остаться на листе");
+});
+
 test("отказ живого слоя = лист, а не пустой спрайт (и причина в штампе)", async () => {
     const hero3d = await import("../js/render/hero3d.js");
     const live = await liveMod();

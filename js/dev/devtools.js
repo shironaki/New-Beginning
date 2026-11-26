@@ -377,7 +377,9 @@ export function installDevTools(game, win = window) {
             import("../render/hero3d.js").then((hero3d) => {
                 const q = hero3d.HERO3D.enabled ? hero3d.HERO3D.quality : "off";
                 const links = hero3d.hero3dLinkCount ? hero3d.hero3dLinkCount() : null;
-                heroState.textContent = `активен: ${q}${links === null ? "" : ` · связок ${links}`}`;
+                const live = hero3d.hero3dLiveInfo ? hero3d.hero3dLiveInfo() : null;
+                heroState.textContent = `активен: ${q}${links === null ? "" : ` · связок ${links}`}`
+                    + (live ? ` · live: ${live.ready ? `кадр ${live.coverage >= 0 ? live.coverage : "?"} px, образов ${live.looks}, кадров ${live.frames}, пропущено ${live.skipped}` : `отказ: ${live.error || live.reason}`}` : "");
                 for (const b of heroBtns) b.classList.toggle("on", b.dataset.hero === q);
             });
         }

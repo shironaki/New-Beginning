@@ -7,7 +7,7 @@
  *   • «smooth + женщина = мужская фигура» — лист один, силуэт берётся из него,
  *     перекраска форму не меняет; здесь форма = меш выбранного пола;
  *   • «сквозь одежды видна задница» — там, где нужен буфер глубины, был порядок
- *     слоёв; здесь.depth-test + polygonOffset.
+ *     слоёв; здесь depth-test + polygonOffset.
  * От листа взята только СЕТКА кадра (cell/pxPerUnit/footPad) и проекция:
  * `node tools/hero-rig-export.js --check` сверяет якорь кисти с запечённым листом и
  * требует ≤ 1 px, поэтому переключение «лист ↔ live» не сдвигает ни героя, ни
@@ -24,11 +24,18 @@ const U = 1 / (META.pxPerUnit || 2.4);            // пиксель кадра �
 const CELL = META.cell;
 const TOP = -(CELL.h - META.footPad) * U;
 const M_PER_PX = 1 / META.unit;                   // метры модели на пиксель кадра
+// Сколько пикселей кадра обязан занять герой. Лист даёт ~2 400–2 900; берём с
+// запасом: 300 — это уже «что-то нарисовано», а не мусор из-за битых весов.
+const MIN_COVERAGE = Number(globalThis.process?.env?.HERO_MIN_COVERAGE ?? 300);
 const TAU = Math.PI * 2;
 
 export const LIVE = {
     on: false, ready: false, error: "", reason: "",
-    looks: 0, frames: 0, skipped: 0, active: "", tone: null
+    looks: 0, frames: 0, skipped: 0, active: "", tone: null,
+    // Аудит первого кадра: сколько пикселей кадра реально залилось. Без него
+    // «точка вместо героя» (битые веса, потерянный контекст) выглядит как
+    // «3D работает»: сцена собрана, кадры считаются, а на экране пусто.
+    coverage: -1, audited: false
 };
 
 let THREE = null;
@@ -221,10 +228,15 @@ function buildGeometry(mesh) {
         const nx = view.getInt8(o + 6), ny = view.getInt8(o + 7), nz = view.getInt8(o + 8);
         const len = Math.hypot(nx, ny, nz) || 1;
         nrm[v * 3] = nx / len; nrm[v * 3 + 1] = ny / len; nrm[v * 3 + 2] = nz / len;
-        const lum = view[o + 9] / 255;
+        // У DataView НЕТ доступa по индексу: `view[o+9]` — это undefined, а
+        // undefined в Uint8Array пишется как 0. Позиции и нормали читались
+        // геттерами и были в порядке, а вот яркость, кости и веса молча стали
+        // нулями: меш схлопнулся в одну точку (в кадре — точка у ног вместо
+        // героя). Только геттеры, и проверка силуэта кадра это ловит.
+        const lum = view.getUint8(o + 9) / 255;
         col[v * 3] = lum; col[v * 3 + 1] = lum; col[v * 3 + 2] = lum;
-        skIdx[v * 4] = view[o + 10]; skIdx[v * 4 + 1] = view[o + 11];
-        skWgt[v * 4] = view[o + 12]; skWgt[v * 4 + 1] = 255 - view[o + 12];
+        skIdx[v * 4] = view.getUint8(o + 10); skIdx[v * 4 + 1] = view.getUint8(o + 11);
+        skWgt[v * 4] = view.getUint8(o + 12); skWgt[v * 4 + 1] = 255 - view.getUint8(o + 12);
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
@@ -306,11 +318,55 @@ export function liveLook(look) {
         }
     }
     if (!skeleton) return null;
+    const bad = validateMeshes(meshes, META.bones.length);
+    if (bad) {
+        // Молча рисовать мусор — худший вариант: лучше лист, чем точка у ног.
+        LIVE.error = `живой рендер: ${bad}`;
+        LIVE.reason = "bad-mesh";
+        for (const mesh of meshes) { mesh.geometry.dispose(); mesh.material.dispose(); }
+        return null;
+    }
     root.add(group);
     const entry = { key, who, style, group, meshes, skeleton };
     lookCache.set(key, entry);
     LIVE.looks = lookCache.size;
     return entry;
+}
+
+/**
+ * Проверка собранной геометрии. Нули в весах (например, если `DataView` прочитали
+ * «по индексу» и получили undefined) не падают — они складывают меш в одну точку
+ * у ног, и в браузере это выглядит как «герой пропал». Поэтому считаем сами.
+ */
+function validateMeshes(meshes, boneCount) {
+    let verts = 0, nan = 0, badW = 0, badBone = 0;
+    for (const mesh of meshes) {
+        const g = mesh.geometry;
+        const pos = g.attributes.position.array;
+        const col = g.attributes.color ? g.attributes.color.array : null;
+        const si = g.attributes.skinIndex.array;
+        const sw = g.attributes.skinWeight.array;
+        for (let v = 0, n = pos.length / 3; v < n; v += 1) {
+            verts += 1;
+            if (!Number.isFinite(pos[v * 3]) || !Number.isFinite(pos[v * 3 + 1]) || !Number.isFinite(pos[v * 3 + 2])
+                || (col && !Number.isFinite(col[v * 3]))) nan += 1;
+            const w = sw[v * 4] + sw[v * 4 + 1];
+            if (w < 250 || w > 255) badW += 1;
+            if (si[v * 4] >= boneCount || si[v * 4 + 1] >= boneCount) badBone += 1;
+        }
+    }
+    if (!verts) return "ни одной вершины";
+    if (nan) return `${nan} вершин из ${verts} с NaN в позиции/цвете`;
+    if (badW > verts * 0.02) return `${badW} вершин из ${verts} без веса (скиннинг сложит их в точку)`;
+    if (badBone) return `${badBone} вершин с номером кости вне скелета`;
+    return null;
+}
+/** Наружу — для тестов и панели: что проверки увидели в собранном образе. */
+export function liveValidate(look) {
+    const entry = liveLook(look);
+    if (!entry) return { ok: false, error: LIVE.error || "образ не собран" };
+    const bad = validateMeshes(entry.meshes, META.bones.length);
+    return { ok: !bad, error: bad || "", verts: entry.meshes.length, parts: entry.key };
 }
 
 /** Активный образ один: остальные прячутся, а не рисуются слоями под героем. */
@@ -479,11 +535,25 @@ export function liveFrame(p, look, opts = {}) {
     if (opts.hideHands) hideHands(entry, true);
     renderer.render(scene, camera);
     if (opts.hideHands) hideHands(entry, false);
+    if (gl && gl.isContextLost && gl.isContextLost()) {
+        // Телефон мог забрать контекст (фоновая вкладка, ещё один canvas): молча
+        // рисовать пустоту нельзя — возвращаем лист и говорим почему.
+        LIVE.ready = false;
+        LIVE.error = "WebGL-контекст потерян";
+        LIVE.reason = "context-lost";
+        LIVE.skipped += 1;
+        return null;
+    }
+    if (!auditFrame()) {
+        LIVE.skipped += 1;
+        return null;
+    }
     LIVE.frames += 1;
-    LAST = { entry, frame: pose.frame, label: pose.label, dir: pose.dir, f, canvas: renderer.domElement };
+    const canvas = withInk(renderer.domElement);
+    LAST = { entry, frame: pose.frame, label: pose.label, dir: pose.dir, f, canvas };
     return {
-        canvas: renderer.domElement, dir: pose.dir, label: pose.label,
-        index: Math.floor(pose.frame), pixels: null, wet: null, live: true,
+        canvas, dir: pose.dir, label: pose.label,
+        index: Math.floor(pose.frame), pixels: null, wet: null, live: true, ink: liveInkPx(),
         x: -CELL.w / 2 * U, y: TOP, w: CELL.w * U, h: CELL.h * U,
         grip: () => null,
         hidden: (hand) => liveHidden(entry, f, hand),
@@ -495,6 +565,83 @@ export function liveFrame(p, look, opts = {}) {
  * свои меши рукавиц, и снять их — значит проверить не то. Поэтому только кисти
  * скелета (`*_hand_*` / `hand_l|r`) и пальцы, а не «всё, где есть hand».
  */
+/**
+ * Обводка кадра. У листа она запечена (индекс палитры 59 = `ink`), у пропов —
+ * тоже, а у живого рендера её не было: поэтому герой и выглядел «приклеенным».
+ * Делается без шейдеров: силуэт сдвигается на inkPx по четырём сторонам,
+ * заливается чернилами, а сверху кладётся сам кадр. Нижняя строка при этом
+ * приходит ровно к линии опоры — настолько же, насколько у листа (rowFeet уже
+ * поднят на inkPx пекаря).
+ */
+let inkCv = null;
+/**
+ * Толщина обводки кадра. Наружу — чтобы `tools/hero-live-raster.js` сверял с листом
+ * РОВНО тот силуэт, который рисует withInk: снял или изменил обводку — покрытие
+ * кадра падает следом, и тест это видит.
+ */
+export const liveInkPx = () => (META.ink ? Math.max(1, META.inkPx || 2) : 0);
+function withInk(src) {
+    const px = liveInkPx();
+    // Чернила — свойство КАДРА, а не среды: величину читают и тесты (в node нет
+    // document), а применяем мы её только там, где есть 2D-холст.
+    if (px <= 0 || typeof document === "undefined" || !src) return src;
+    if (!inkCv || inkCv.width !== CELL.w) {
+        inkCv = document.createElement("canvas");
+        inkCv.width = CELL.w; inkCv.height = CELL.h;
+    }
+    const c = inkCv.getContext("2d");
+    if (!c) return src;
+    c.save();
+    c.globalCompositeOperation = "source-over";
+    c.clearRect(0, 0, CELL.w, CELL.h);
+    for (const [dx, dy] of [[-px, 0], [px, 0], [0, -px], [0, px],
+                           [-px, -px], [px, -px], [-px, px], [px, px]]) {
+        c.drawImage(src, dx, dy);
+    }
+    c.globalCompositeOperation = "source-in";
+    c.fillStyle = META.ink;
+    c.fillRect(0, 0, CELL.w, CELL.h);
+    c.globalCompositeOperation = "source-over";
+    c.drawImage(src, 0, 0);
+    c.restore();
+    return inkCv;
+}
+
+/**
+ * Первый (и только он) кадр проверяется по-настоящему: читаем альфу всего кадра и
+ * требуем, чтобы герой в нём был. Это не «тест на GPU в браузере» — это страховка
+ * от того класса поломки, который глазами выглядит как «персонаж пропал»: меши
+ * собраны, кости посчитаны, а пикселей нет.
+ */
+let auditBuf = null;
+function auditFrame() {
+    if (LIVE.audited) return true;
+    if (!gl || !renderer) { LIVE.audited = true; return true; }
+    try {
+        const n = CELL.w * CELL.h;
+        if (!auditBuf) auditBuf = new Uint8Array(n * 4);
+        renderer.render(scene, camera);
+        gl.readPixels(0, 0, CELL.w, CELL.h, gl.RGBA, gl.UNSIGNED_BYTE, auditBuf);
+        let lit = 0;
+        for (let i = 3; i < auditBuf.length; i += 4) if (auditBuf[i] > 8) lit += 1;
+        LIVE.coverage = lit;
+        LIVE.audited = true;
+        if (lit < MIN_COVERAGE) {
+            LIVE.error = `живой кадр пуст: ${lit} пикселей из ${n} (нужно ≥ ${MIN_COVERAGE})`;
+            LIVE.reason = "empty-frame";
+            return false;
+        }
+        return true;
+    } catch (err) {
+        LIVE.audited = true;
+        LIVE.error = `кадр не проверить: ${String((err && err.message) || err).slice(0, 120)}`;
+        LIVE.reason = "audit";
+        return false;
+    }
+}
+/** Сброс аудита — для панели разработчика («перепроверь кадр»). */
+export function liveReaudit() { LIVE.audited = false; LIVE.coverage = -1; LIVE.error = ""; LIVE.reason = ""; }
+
 function hideHands(entry, on) {
     for (const mesh of entry.meshes) {
         const base = mesh.name.split("/").pop();
@@ -559,6 +706,7 @@ export function liveHandAnchor(p, look, hand = "right", extra = {}) {
 export const liveInfo = () => ({
     on: LIVE.on, ready: LIVE.ready, looks: LIVE.looks, frames: LIVE.frames,
     skipped: LIVE.skipped, error: LIVE.error, reason: LIVE.reason, active: LIVE.active,
+    coverage: LIVE.coverage, audited: LIVE.audited, inkPx: liveInkPx(),
     cell: CELL, pxPerUnit: META.pxPerUnit, footPad: META.footPad,
     parts: Object.keys(META.parts).length, clips: Object.keys(META.clips).length,
     source: META.source, tool: META.tool
@@ -587,6 +735,48 @@ export function liveProbe(look, label = "idle", frame = 0, dir = "down", side = 
     const [cx, cy] = cameraPixel(f, fist);
     return { x: u.x, y: u.y, angle: ang, px: pxX, py: pxY, camPx: cx, camPy: cy, meshes: entry.meshes.length };
 }
+/**
+ * Точки ОДИН РАЗ посчитанного скиннинга — в пикселях кадра. Это ровно то, что в
+ * браузере делает GPU (`boneMatrices` = world×boneInverse, веса из атрибутов),
+ * поэтому расхождение силуэта с листом видно и без WebGL. `liveProbe` сверяет
+ * одну точку (кулак), а здесь сверяется ВЕСЬ кадр.
+ */
+export function liveSkinnedPoints(look, label = "idle", frame = 0, dir = "down") {
+    const entry = liveLook(look);
+    const f = frameForDir(dir);
+    if (!entry || !f || !applyFrame(entry, label, frame)) return null;
+    const mats = entry.skeleton.boneMatrices;
+    const xs = [], ys = [], tris = [];
+    for (const mesh of entry.meshes) {
+        if (mesh.visible === false) continue;
+        const g = mesh.geometry;
+        const pos = g.attributes.position.array;
+        const si = g.attributes.skinIndex.array;
+        const sw = g.attributes.skinWeight.array;
+        const idx = g.index ? g.index.array : null;
+        const n = pos.length / 3;
+        const ox = xs.length;
+        for (let v = 0; v < n; v += 1) {
+            let x = 0, y = 0, z = 0;
+            for (let k = 0; k < 2; k += 1) {
+                const w = sw[v * 4 + k] / 255;
+                if (!w) continue;
+                const b = si[v * 4 + k] * 16;
+                const px = pos[v * 3], py = pos[v * 3 + 1], pz = pos[v * 3 + 2];
+                x += w * (mats[b] * px + mats[b + 4] * py + mats[b + 8] * pz + mats[b + 12]);
+                y += w * (mats[b + 1] * px + mats[b + 5] * py + mats[b + 9] * pz + mats[b + 13]);
+                z += w * (mats[b + 2] * px + mats[b + 6] * py + mats[b + 10] * pz + mats[b + 14]);
+            }
+            const [sx, sy] = project(f, [x, y, z]);
+            xs.push(sx); ys.push(sy);
+        }
+        if (idx) for (let t = 0; t < idx.length; t += 3) tris.push(ox + idx[t], ox + idx[t + 1], ox + idx[t + 2]);
+    }
+    return { xs: Float32Array.from(xs), ys: Float32Array.from(ys), tris: Uint32Array.from(tris) };
+}
+/** Пакетный базис кадра — наружу, чтобы инструменты сверяли ту же сетку. */
+export const liveFrameBasis = (dir) => frameForDir(dir);
+
 /** Готовность среды без WebGL-рендерера: сцена/кости/проекция работают и в node. */
 export function enableForTests(three) {
     if (LIVE.ready) return true;

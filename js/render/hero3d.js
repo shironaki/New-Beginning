@@ -503,6 +503,16 @@ export function heroSprite(p, look) {
         try {
             const live = LIVE_MOD.liveFrame(p, look || p.look);
             if (live) return live;
+            const why = LIVE_MOD.LIVE.reason;
+            if (why === "bad-mesh" || why === "empty-frame" || why === "context-lost") {
+                // Битая геометрия, пустой кадр или потерянный контекст: повторять
+                // бессмысленно — выключаем слой и оставляем причину в штампе, иначе
+                // кадр рисовался бы точкой (или пустотой) до конца сессии.
+                HERO3D.live = false;
+                HERO3D.quality = SRC === SOURCES.smooth ? "smooth" : "grade";
+                HERO3D.error = LIVE_MOD.LIVE.error || "живая геометрия не собрана";
+                return null;
+            }
         } catch (err) {
             // Падение живого кадра — не чёрный экран, а возврат на лист: сцена
             // выключается, причина остаётся в штампе. Без этого одна ошибка в

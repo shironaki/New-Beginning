@@ -26,6 +26,7 @@
     "hero:rig": "node tools/hero-rig-export.js",
     "hero:rig:check": "node tools/hero-rig-export.js --check",
     "hero:live": "node tools/hero-live-check.js",
+    "hero:frame": "node tools/hero-live-raster.js",
     "scene": "node tools/scene.js",
     "props3d": "node tools/prop-bake.js --emit js/render/propsprites.js --ppu 1 --colors 10",
     "props:audit": "node tools/props-audit.js",
