@@ -14,11 +14,52 @@ export function paintCookware(ctx, fire, time = 0) {
     if(fire.lit && fire.pot) for(let i=0;i<3;i++) { const y=(time*5+i*5)%17;ctx.globalAlpha=(1-y/17)*.4;ctx.strokeStyle='#eef0dc';ctx.beginPath();ctx.moveTo(i*3-3,-20-y);ctx.quadraticCurveTo(i*3+Math.sin(time+i)*3,-23-y,i*3-3,-26-y);ctx.stroke(); }
     ctx.restore();
 }
-export function paintLoot(ctx, loot) {
+/**
+ * Остатки в разобранном пропаде. Раньше это была кучка из пяти одинаковых
+ * серо-песочных палочек НЕЗАВИСИМО от того, что внутри: из ящика сыпались
+ * доски, а на земле лежал «серый непонятный хлам» (претензия блока 79). Теперь
+ * форма и цвет берутся у самого предмета, а пустой остаток не рисует вообще
+ * ничего — ни тени, ни эллипса «в землю провалилось».
+ */
+const LOOT_FORM = {
+    board:  { w: 15, h: 4, step: 2.2, edge: true },
+    stick:  { w: 13, h: 2, step: 1.8, edge: false },
+    clump:  { w: 4,  h: 3, step: 1.4, edge: false },
+    stone:  { w: 5,  h: 4, step: 1.6, edge: true }
+};
+function lootForm(id) {
+    if (id === 'plank' || id === 'log') return 'board';
+    if (id === 'firewood' || id === 'fiber' || id === 'hay' || id === 'stick') return 'stick';
+    if (id === 'stone' || id === 'ore' || id === 'charcoal' || id === 'ash_dust') return 'stone';
+    return 'clump';
+}
+export function paintLoot(ctx, loot, defOf = null) {
+    const units = (loot || []).reduce((n, s) => n + (s.n || 0), 0);
+    if (!units) return;
+    ctx.save();
     ctx.fillStyle='rgba(12,15,13,.24)';ctx.beginPath();ctx.ellipse(0,1,12,4,0,0,Math.PI*2);ctx.fill();
-    const wood = loot.some(s=>s.id==='firewood'||s.id==='log');
-    for(let i=0;i<Math.min(5,loot.reduce((n,s)=>n+s.n,0));i++) {
-        ctx.fillStyle=wood ? (i%2?'#987549':'#b59862') : '#a99776';
-        ctx.fillRect(-9+(i%2)*3,-3-i*1.5,wood?17:6,3);
+    let i = 0;
+    for (const stack of loot || []) {
+        const form = LOOT_FORM[lootForm(stack.id)];
+        // Цвет — тот же, что у предмета в руке и в ячейке: игрок обязан узнавать
+        // в кучке на земле то, что ему досталось.
+        const def = defOf ? defOf(stack.id) : null;
+        const base = def?.tint || (lootForm(stack.id) === 'board' ? '#9a7448'
+            : lootForm(stack.id) === 'stick' ? '#b59862'
+                : lootForm(stack.id) === 'stone' ? '#8b8b84' : '#a99776');
+        for (let k = 0; k < Math.min(5, stack.n || 0) && i < 8; k += 1, i += 1) {
+            const x = -9 + (i % 2) * 3, y = -3 - Math.floor(i / 2) * form.step - (i % 2) * 0.8;
+            ctx.fillStyle = i % 2 ? base : shadeDown(base);
+            ctx.fillRect(x, y, form.w, form.h);
+            if (form.edge) { ctx.fillStyle='rgba(255,240,210,0.22)'; ctx.fillRect(x, y, form.w, 1); }
+            ctx.fillStyle = 'rgba(20,16,12,0.55)'; ctx.fillRect(x, y + form.h - 1, form.w, 1);
+        }
     }
+    ctx.restore();
+}
+function shadeDown(hex) {
+    const c = String(hex).replace('#','');
+    if (c.length !== 6) return hex;
+    const n = v => Math.max(0, Math.min(255, v)).toString(16).padStart(2,'0');
+    return `#${n(parseInt(c.slice(0,2),16)-22)}${n(parseInt(c.slice(2,4),16)-22)}${n(parseInt(c.slice(4,6),16)-22)}`;
 }

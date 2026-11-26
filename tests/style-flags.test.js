@@ -96,4 +96,11 @@ test("тон кадра приходит из адреса и попадает �
     assert.eq(s.props3dTone, "winter", "сравнение погоды на одном дереве — без пересборки");
 });
 
+test("живой 3D — такой же переключатель, как грейд и гладкий", () => {
+    const s = loadStyle({ hero3d: "grade", props3d: "on" }, "?hero3d=live");
+    assert.eq(s.hero3d, "live", "?hero3d=live обязан читаться: иначе «лист ↔ live» сравнивается только из кода");
+    assert.eq(saveStyle({ hero3d: "live" }).hero3d, "live", "выбор с телефона обязан переживать перезагрузку");
+    assert.ok(styleKey({ hero3d: "live", props3d: "on" }).includes("live"), "меню и штамп показывают одно и то же");
+});
+
 await run("style-flags");

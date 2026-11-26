@@ -745,8 +745,10 @@ function placeStoryProps(zone, rng) {
                 zone.clearTile(x, y);
             }
         }
-        for (let x = hx; x < hx + 7; x += 2) addProp(zone, "burnt_beam", x, hy, { solid: true });
-        for (let x = hx + 1; x < hx + 6; x += 2) addProp(zone, "burnt_beam", x, hy + 4, { solid: true });
+        // Упавшие прогоны — ОДНОЙ линией вдоль фасада, а не шесть плит в
+        // шахматном порядке. Разбросанные по двору тёмные прямоугольники
+        // читались как «какая-то хрень лежит», а не как обвал крыши (блок 79).
+        for (let x = hx + 1; x <= hx + 3; x += 1) addProp(zone, "burnt_beam", x, hy + 3, { solid: true });
         addProp(zone, "hearth_ruin", hx + 3, hy + 2, { solid: true, story: "home_hearth" });
         addProp(zone, "diary", hx + 2, hy + 3, { solid: false, story: "own_diary" });
 
@@ -778,22 +780,31 @@ function placeStoryProps(zone, rng) {
         // крыша, труба, ящик, плетень вдоль двора и телега у калитки. Ставим ПОСЛЕ
         // расчистки лагеря и мимо него: лагерь вычищает тайлы вместе с пропами, и
         // телега, поставленная в (cx-2, cy), просто исчезала под палаткой.
-        for (const [x, y] of [[hx, hy + 1], [hx + 6, hy + 1]]) {
-            if (map.inBounds(x, y)) addProp(zone, "hut_wall", x, y, { solid: true });
+        // Стены — СПЛОШНОЙ ряд (три панели + обломок), иначе две панели в
+        // шести тайлах друг от друга выглядят как «что это за стены на поле».
+        // Крыша стоит над СРЕДНЕЙ из них: панель 56×46 перекрывает соседние и
+        // перестаёт быть «летающей палаткой».
+        for (let x = hx; x <= hx + 2; x += 1) {
+            if (map.inBounds(x, hy + 1)) addProp(zone, "hut_wall", x, hy + 1, { solid: true });
         }
+        if (map.inBounds(hx + 3, hy + 1)) addProp(zone, "ruin_wall", hx + 3, hy + 1, { solid: true });
         // Крыша — НА стене, а не рядом с ней: у панели 6×6 свой центр, и сдвиг на
         // тайл вперёд вешал её в воздухе над пеплом («летающие объекты» из отзыва
         // владельца). lift = высота опоры, `on` — для правила «опоры нет → падаем».
-        if (map.inBounds(hx, hy + 1)) addProp(zone, "hut_roof", hx, hy + 1, {
+        if (map.inBounds(hx + 1, hy + 1)) addProp(zone, "hut_roof", hx + 1, hy + 1, {
             // 46 px = верх стены из propsprites минус скат. Число сверяет
             // tests/visual-world: «поднятая деталь сидит на опоре, а не в воздухе».
             solid: false, size: 0.94, lift: 46, on: "hut_wall"
         });
-        if (map.inBounds(hx + 2, hy - 1)) addProp(zone, "chimney", hx + 2, hy - 1, { solid: true });
+        // Труба — в торец стены (hx+3, hy+1), а не в поле на два тайла выше:
+        // одинокий столб посередине пепелища был вторым «что это летает».
+        if (map.inBounds(hx + 4, hy + 1)) addProp(zone, "chimney", hx + 4, hy + 1, { solid: true });
         if (map.inBounds(hx + 5, hy + 3)) addProp(zone, "crate", hx + 5, hy + 3, { solid: true });
         if (map.inBounds(hx + 8, hy + 3)) addProp(zone, "wagon", hx + 8, hy + 3, { solid: true });
-        for (const [x, y] of [[hx - 3, hy + 5], [hx - 3, hy + 7], [hx - 3, hy + 9]]) {
-            if (map.inBounds(x, y)) addProp(zone, "fence", x, y, { solid: true });
+        // Плетень — сплошная линия (шаг 1), иначе три сегмента через тайл
+        // смотрятся как плавающие в воздухе обрывки с тенью под каждым.
+        for (let y = hy + 5; y <= hy + 8; y += 1) {
+            if (map.inBounds(hx - 3, y)) addProp(zone, "fence", hx - 3, y, { solid: true });
         }
     }
 

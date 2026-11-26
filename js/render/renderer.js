@@ -19,6 +19,7 @@ import { TILE_SIZE, TILES } from "../world/tiles.js";
 import { paintTile, paintSnowGround, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, setWalker, setBreeze, propHeight, propTone, puddleScreenPath, coastReach, SUN } from "./tilesart.js";
 import { drawCharacter, drawSleeping, toolAttachment } from "./character.js";
 import { paintProp3D, paintDebris3D, propSunFor, setPropSun } from "./props3d.js";
+import { HERO3D, hero3dTone } from "./hero3d.js";
 import { LightMap, LIGHT } from "./lighting.js";
 import { bakeTerrain, drawTerrainWater } from "./terrain.js";
 import { drawWetGround } from "./surface.js";
@@ -1083,7 +1084,12 @@ export class Renderer {
         // Тот же свет уходит в запечённые кадры пропов: перекос светотени по
         // граням и блик на мокром. setPropSun сама решает, насколько сильно
         // сдвинулось солнце, чтобы перепечь кадры, — вызов каждый кадр бесплатен.
-        setPropSun(propSunFor(state, SUN));
+        const propSun = propSunFor(state, SUN);
+        setPropSun(propSun);
+        // Живой герой ловит ТОТ ЖЕ свет, что и двор. У листа освещение запечено в
+        // кадр, поэтому вечером он оставался полуденным; у three.js источник
+        // настоящий, и без этой строки герой светился бы сам по себе.
+        if (HERO3D.live) hero3dTone(propSun);
         const ctx = this.ctx;
         ctx.fillStyle = "#0a0c10";
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);

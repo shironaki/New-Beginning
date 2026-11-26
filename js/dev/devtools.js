@@ -357,7 +357,7 @@ export function installDevTools(game, win = window) {
         const speedBtns = [1, 2, 4].map((k) => btn("скорость ×" + k, () => { setSpeed(k); refresh(); }));
         row(noclipBtn, ...speedBtns);
 
-        // ---- стиль героя: грейд / гладкий / вектор. Тот же переключатель, что и
+        // ---- стиль героя: живой 3D / грейд / гладкий / вектор. Тот же переключатель, что и
         // `?hero3d=`, но прямо в панели — с причиной отказа, если модуль не пришёл.
         // Иначе «открыл ?hero3d=smooth, а там пусто» невозможно разобрать: игрок
         // видит тишину вместо ответа.
@@ -381,7 +381,7 @@ export function installDevTools(game, win = window) {
                 for (const b of heroBtns) b.classList.toggle("on", b.dataset.hero === q);
             });
         }
-        const heroBtns = [["grade", "Грейд 3D"], ["smooth", "Гладкий 3D"], ["off", "Вектор"]].map(([mode, name]) => {
+        const heroBtns = [["live", "Живой 3D"], ["grade", "Грейд 3D"], ["smooth", "Гладкий 3D"], ["off", "Вектор"]].map(([mode, name]) => {
             const b = btn(name, () => setHero(mode));
             b.dataset.hero = mode;
             return b;

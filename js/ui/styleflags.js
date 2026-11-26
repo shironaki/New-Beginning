@@ -1,8 +1,8 @@
 /**
  * ui/styleflags.js — переключатели стиля, доступные без адресной строки.
  *
- * До сих пор «3D-пропы» и «риг героя» включались только параметром в URL
- * (?props3d=off, ?hero3d=smooth). На телефоне адресной строки нет — и игрок
+* До сих пор «3D-пропы» и «риг героя» включались только параметром в URL
+ * (?props3d=off, ?hero3d=smooth). Живой 3D — тот же переключатель: ?hero3d=live. На телефоне адресной строки нет — и игрок
  * оставался с тем стилем, который выбрал один раз при запуске. Здесь общий
  * источник правды для всех: параметр адреса > сохранённый выбор > значение по
  * умолчанию. Параметр адреса сознательно главенствует: ссылка сравнения
@@ -18,7 +18,7 @@ const parseQuery = (search) => {
         const props = p.get("props3d"), hero = p.get("hero3d"), tone = p.get("props3dTone");
         if (props === "off" || props === "vector") out.props3d = "off";
         else if (props === "on" || props === "model") out.props3d = "on";
-        if (hero === "off" || hero === "grade" || hero === "smooth") out.hero3d = hero;
+        if (hero === "off" || hero === "grade" || hero === "smooth" || hero === "live") out.hero3d = hero;
         if (tone) out.props3dTone = tone;
     } catch { /* нет URL — нет и переопределения */ }
     return out;

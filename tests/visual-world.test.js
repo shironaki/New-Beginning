@@ -870,6 +870,92 @@ test("в стартовом лагере под ногами героя чист
     assert.ok(near.some(o => o.story === "start_fire"), "костёр пролога обязан остаться у старта");
 });
 
+test("двор читается постройкой, а не разбросанными деталями", async () => {
+    // «Что за стены или чо это, летающая палатка или такая типа крыша?» —
+    // расстановка двора ставила две панели стены в шести тайлах друг от друга,
+    // крышу над ЛЕВОЙ из них, трубу в поле и шесть тёмных прогонов вразброс.
+    // Каждый элемент по отдельности корректен, вместе они читались как мусор.
+    // Правило: ряд стен сплошной, крыша над серединой ряда, труба в торец,
+    // упавшие прогоны одной линией, плетень без дыр.
+    const { generateZone } = await import("../js/world/worldgen.js");
+    const zone = generateZone("ashfall", 1066618561);
+    const objs = zone.objects;
+    const at = (kind) => objs.filter(o => o.kind === kind);
+    const walls = at("hut_wall").sort((a, b) => a.tx - b.tx);
+    assert.ok(walls.length >= 3, `стенный ряд обязан быть сплошным, сейчас панелей: ${walls.length}`);
+    for (let i = 1; i < walls.length; i += 1) {
+        assert.eq(walls[i].tx - walls[i - 1].tx, 1, "между панелями стены не должно быть пустого тайла");
+        assert.eq(walls[i].ty, walls[i - 1].ty, "ряд стены обязан быть прямым");
+    }
+    const roof = at("hut_roof")[0];
+    assert.ok(roof, "во дворе обязана быть крыша");
+    const under = walls.filter(w => Math.abs(w.tx - roof.tx) <= 1 && w.ty === roof.ty);
+    assert.ok(under.length >= 2, `крыша обязана опираться на ряд, а не висеть над одной панелью: ${under.length}`);
+    const chim = at("chimney")[0];
+    assert.ok(chim, "труба во дворе обязательна");
+    // Ряд = целые панели + обломок: труба закрывает именно его конец, а не
+    // стоит в поле. Поэтому «торец» считаем по всем вертикальным частям.
+    const row = [...walls, ...at("ruin_wall")];
+    assert.ok(row.some(w => Math.abs(w.tx - chim.tx) <= 1 && Math.abs(w.ty - chim.ty) <= 1),
+        "труба обязана стоять в торце стены, а не посередине поля");
+    const beams = at("burnt_beam");
+    const xs = beams.map(b => b.tx).sort((a, b) => a - b);
+    for (let i = 1; i < xs.length; i += 1) assert.ok(xs[i] - xs[i - 1] <= 1, "упавшие прогоны обязаны лежать линией, а не шахматным разбросом");
+    const fence = at("fence").map(f => f.ty).sort((a, b) => a - b);
+    assert.ok(fence.length >= 3, "плетень обязан быть линией хотя бы из трёх сегментов");
+    for (let i = 1; i < fence.length; i += 1) assert.eq(fence[i] - fence[i - 1], 1, "в плетне не должно быть дыр");
+});
+
+test("остатки в разобранном ящике выглядят предметом, а не серой кашей", async () => {
+    // «После действия с ящиком появляется какая-то непонятная хрень»:
+    // paintLoot рисовал пять одинаковых палочек независимо от содержимого, и
+    // даже пустой остаток оставлял тёмный эллипс. Теперь форма и цвет берутся у
+    // предмета, а пустота не рисует ничего.
+    const { ShimCanvas } = await import("../tools/canvas-shim.js");
+    const { paintLoot } = await import("../js/render/cookware.js");
+    const { itemDef } = await import("../js/sandbox/items.js");
+    const shot = (loot) => {
+        const cv = new ShimCanvas(40, 24);
+        const ctx = cv.getContext("2d");
+        ctx.translate(20, 18);
+        paintLoot(ctx, loot, itemDef);
+        return cv;
+    };
+    const empty = shot([]);
+    let painted = 0;
+    for (let i = 3; i < empty.data.length; i += 4) if (empty.data[i] > 0) painted += 1;
+    assert.eq(painted, 0, "пустой остаток не должен рисовать ни пикселя");
+    const boards = shot([{ id: "plank", n: 2 }]);
+    let tinted = 0, grey = 0;
+    for (let i = 0; i < boards.data.length; i += 4) {
+        if (boards.data[i + 3] < 8) continue;
+        const r = boards.data[i], g = boards.data[i + 1], b = boards.data[i + 2];
+        if (Math.abs(r - 0x9a) < 46 && Math.abs(g - 0x74) < 46 && Math.abs(b - 0x48) < 46) tinted += 1;
+        if (Math.abs(r - g) < 12 && Math.abs(g - b) < 12 && r > 0x70 && r < 0xc0) grey += 1;
+    }
+    assert.ok(tinted > 12, `доски обязаны быть в тинте предмета, пикселей: ${tinted}`);
+    assert.ok(grey < tinted / 3, `на кучке не должно быть серой массы (серых ${grey} против ${tinted})`);
+    // И эмодзи не врёт: 🪚 — пила, а пилы в мире нет; предмет без `tool` не
+    // имеет права обещать инструмент в хотбаре (претензия «доска, указанная как пила»).
+    const { ITEMS } = await import("../js/sandbox/items.js");
+    const TOOL_EMOJI = new Map([["🪚", "saw"], ["🪓", "axe"], ["⛏️", "pick"], ["🔱", "spear"], ["🎣", "rod"]]);
+    for (const [id, def] of Object.entries(ITEMS)) {
+        const claim = TOOL_EMOJI.get(def.emoji);
+        if (!claim) continue;
+        assert.ok(String(def.tool || "").includes(claim) || id.includes(claim),
+            `«${id}» показывает эмодзи ${def.emoji}, но инструментом ${claim} не является`);
+    }
+    // Тот же обман живёт в списке крафта: материал с иконкой инструмента
+    // читается как «у меня есть пила».
+    const { RECIPES } = await import("../js/sandbox/craft.js");
+    for (const r of RECIPES) {
+        if (r.group === "tool") continue;
+        const claim = TOOL_EMOJI.get(r.emoji);
+        if (!claim) continue;
+        assert.ok(false, `рецепт «${r.id}» (${r.name}) показывает ${r.emoji} — иконку инструмента ${claim} в разделе материалов`);
+    }
+});
+
 test("размер кадра = propHeight: сетка коллизий и силуэт не разъезжаются", () => {
     for (const kind of ["pine", "spruce", "rock", "ore_rock", "hut_wall", "hut_roof", "ruin_wall", "burnt_stump", "chimney", "fence", "crate", "wagon"]) {
         const e = PROP_SPRITES[kind];
@@ -943,17 +1029,18 @@ test("снос опоры на реальном раскладе двора ро
     const walls = zone.objects.filter((o) => o.kind === roof.on
         && Math.abs(o.tx - roof.tx) <= 1 && Math.abs(o.ty - roof.ty) <= 1 && !o.lift);
     assert.ok(walls.length >= 1, "под крышей должна стоять стена");
-    walls[0].depleted = true;
-    assert.ok(unsupportedBy(zone.objects, walls[0]).some((o) => o === roof),
-        "живых опор у крыши не осталось — она обязана попасть в список падения");
-    // А на второй стене (если хижина двухстенная) крыша держится: валим её — и
-    // падение считается заново, уже без обеих стен.
-    if (walls.length > 1) {
-        const before = unsupportedBy(zone.objects, walls[1]).length;
-        assert.ok(!unsupportedBy(zone.objects, walls[1]).includes(roof),
-            "крыша уже в списке падения — её нельзя ронять дважды");
-        assert.ok(before >= 0);
+    // Двор блока 79 — это РЯД стен, поэтому «свалил опору» теперь значит
+    // «свалил все опоры под этой крышей». Пока жива хоть одна панель, крыша
+    // падать не имеет права — это и проверяется по шагам.
+    for (let i = 0; i < walls.length - 1; i += 1) {
+        walls[i].depleted = true;
+        assert.ok(!unsupportedBy(zone.objects, walls[i]).includes(roof),
+            `крыша упала, хотя под ней ещё стоят живые панели (свалено ${i + 1} из ${walls.length})`);
     }
+    const last = walls[walls.length - 1];
+    last.depleted = true;
+    assert.ok(unsupportedBy(zone.objects, last).some((o) => o === roof),
+        "живых опор у крыши не осталось — она обязана попасть в список падения");
 });
 test("запечённый лист уходит на экран блитом 1:1, а не дрожащим даунскейлом", async () => {
     const { fitSheet } = await import("../js/render/character.js");
@@ -1062,6 +1149,123 @@ test("вечером проп отбрасывает падающую тень, 
     assert.gt(evening - noon, 60, `длинная тень должна ложиться вокруг пропа: ${evening} против ${noon} пикселей`);
     assert.eq(noonCalls, 0, "в полдень тени в стороны нет");
     assert.eq(nightCalls, 0, "рассеянный свет чёткой тени не даёт");
+});
+
+/* ══════════════════ живой 3D-риг вместо запечённого листа (блок 79) ══════════════════ */
+/**
+ * Претензия владельца: «Переходи на THREE.js — играть в реальном 3D-рендере, как
+ * в лаборатории, а не в запечённых спрайт-листах с программным растром». Ниже —
+ * проверка того, что живой слой (а) реально собирается, (б) встаёт в ту же сетку
+ * кадра, что и лист (иначе герой и предмет в руке разъезжаются), (в) меняет
+ * ГЕОМЕТРИЮ от пола и причёски, а не только краску, и (г) при отказе возвращает
+ * лист, а не пустоту.
+ */
+const liveMod = () => import("../js/render/hero3d-live.js");
+const THREE_MOD = () => import("../js/vendor/three.module.js");
+
+test("живой режим — штатный: флаг адреса, пункт меню и значение по умолчанию", () => {
+    const flags = fs.readFileSync("js/ui/styleflags.js", "utf8");
+    assert.ok(/hero === "live"/.test(flags), "?hero3d=live обязан разбираться: без этого переключатель только в коде");
+    const menu = fs.readFileSync("js/ui/session.js", "utf8");
+    assert.ok(menu.includes(`["live", "Живой`), "«Вид мира» обязан предлагать живой 3D — на телефоне адресной строки нет");
+    const main = fs.readFileSync("js/main.js", "utf8");
+    assert.ok(/loadStyle\(\{ hero3d: "live"/.test(main), "игра стартует живым рендером: это и есть «переходи на THREE.js»");
+    const hero3d = fs.readFileSync("js/render/hero3d.js", "utf8");
+    assert.ok(/export async function hero3dLive/.test(hero3d), "герой обязан уметь включить live-слой");
+    assert.ok(/HERO3D\.live = false/.test(hero3d), "отказ живого слоя обязан возвращать на лист, а не ронять кадр");
+});
+
+test("живой кадр садится в сетку листа: якорь кисти ≤ 1 px на 4 ракурсах", async () => {
+    const [THREE, live] = await Promise.all([THREE_MOD(), liveMod()]);
+    assert.ok(live.enableForTests(THREE), `сцена не собралась: ${live.LIVE.error}`);
+    const look = { gender: "male", hairStyle: "long", skin: "#e0b594", coat: "#446d68", pants: "#48473e", hair: "#302b29" };
+    const PX = HERO_META.pxPerUnit, CELL = HERO_META.cell, FOOT = HERO_META.footPad;
+    let tested = 0, sum = 0, worst = 0, camWorst = 0;
+    for (const pose of HERO_META.poses) {
+        for (const dir of ["down", "left", "right", "up"]) {
+            const anchors = HERO_META.anchors?.[`${dir}/${pose.label}`]?.r;
+            if (!anchors) continue;
+            for (let f = 0; f < pose.frames; f += 1) {
+                if (!anchors[f]) continue;
+                const p = live.liveProbe(look, pose.label, f, dir, "r");
+                assert.ok(p, `поза «${pose.label}» не отдала пробник — живой рендер без позы`);
+                const d = Math.hypot(p.px - (anchors[f][0] * PX + CELL.w / 2), p.py - (anchors[f][1] * PX + (CELL.h - FOOT)));
+                tested += 1; sum += d; worst = Math.max(worst, d);
+                // Камера обязана рисовать ровно там, где посчитан якорь. Иначе
+                // «спрайт ↔ предмет в руке» разъедутся на полпикселя при повороте.
+                camWorst = Math.max(camWorst, Math.hypot(p.camPx - p.px, p.camPy - p.py));
+            }
+        }
+    }
+    assert.gt(tested, 40, "мало сверенных кадров — тест ничего не проверяет");
+    assert.ok(worst <= 1, `живой кадр не совпадает с листом: худший ${worst.toFixed(2)} px (нужно ≤ 1)`);
+    assert.ok(sum / tested <= 0.5, `среднее расхождение ${((sum / tested)).toFixed(2)} px — сетка кадра поехала`);
+    assert.ok(camWorst <= 0.01, `проекция камеры расходится с формулой кадра на ${camWorst.toFixed(3)} px`);
+});
+
+test("пол и причёска меняют МЕШИ живого рендера, а не краску", async () => {
+    const [THREE, live] = await Promise.all([THREE_MOD(), liveMod()]);
+    live.enableForTests(THREE);
+    const box = (look) => {
+        const e = live.liveLook(look);
+        assert.ok(e, "liveLook не собрал образ");
+        let verts = 0, y0 = Infinity, y1 = -Infinity, x0 = Infinity, x1 = -Infinity;
+        for (const m of e.meshes) {
+            const pos = m.geometry.attributes.position.array;
+            for (let i = 0; i < pos.length; i += 3) {
+                verts += 1;
+                y0 = Math.min(y0, pos[i + 1]); y1 = Math.max(y1, pos[i + 1]);
+                x0 = Math.min(x0, pos[i]); x1 = Math.max(x1, pos[i]);
+            }
+        }
+        return { verts, names: e.meshes.map(m => m.name.split("/")[0]).join(","), h: y1 - y0, w: x1 - x0, key: e.key };
+    };
+    const maleLong = box({ gender: "male", hairStyle: "long" });
+    const femaleLong = box({ gender: "female", hairStyle: "long" });
+    const maleShort = box({ gender: "male", hairStyle: "short" });
+    const femaleShort = box({ gender: "female", hairStyle: "short" });
+    const bald = box({ gender: "female", hairStyle: "bald" });
+    assert.ok(maleLong.key !== femaleLong.key, "образы пола обязаны различаться ключом");
+    assert.ok(maleLong.names !== femaleLong.names, "мужской и женский образ обязаны брать разные меши (иначе «женщина = мужская фигура»)");
+    assert.ok(Math.abs(maleLong.w - femaleLong.w) > 0.02, `плечи не различаются: ${maleLong.w} против ${femaleLong.w}`);
+    assert.ok(Math.abs(maleShort.verts - maleLong.verts) > 100, "стрижка обязана снимать массу волос, а не перекрашивать их");
+    assert.ok(maleLong.verts > bald.verts && femaleLong.verts > bald.verts, "без волос мешей должно быть меньше");
+    assert.ok(Math.abs(femaleShort.w - femaleLong.w) < 1e-6 && femaleShort.verts < femaleLong.verts,
+        "длина волос у женщины: та же фигура, меньше мешей");
+    assert.ok(bald.verts > 0);
+});
+
+test("живой рендер выбирает позу по состоянию актёра — как лист", async () => {
+    const [THREE, live] = await Promise.all([THREE_MOD(), liveMod()]);
+    live.enableForTests(THREE);
+    const pose = (p) => live.livePose(p);
+    assert.eq(pose({ dir: "down", moving: false, actionTimer: 0 }).label, "idle");
+    assert.eq(pose({ dir: "left", moving: true, gait: 0.4 }).label, "walk");
+    assert.eq(pose({ dir: "up", moving: true, gait: 0.9, runBlend: 0.9 }).label, "run");
+    assert.eq(pose({ dir: "down", moving: false, actionTimer: 0.2, actionKind: "chop" }).label, "chop");
+    assert.eq(pose({ dir: "down", moving: false, actionTimer: 0.2, actionKind: "mine" }).label, "mine");
+    assert.eq(pose({ dir: "right", moving: false, fallTimer: 0.4 }).label, "idle",
+        "в падении лист показывал стойку — живой рендер обязан показывать ту же");
+    assert.eq(pose({ dir: "down", moving: false, leftTool: "torch" }).label, "torch");
+    for (const label of ["idle", "walk", "run", "attack", "chop", "mine", "gather", "torch"]) {
+        assert.ok(live.liveClipFrames(label) > 1, `клип «${label}» пуст — позa не сыграет`);
+    }
+});
+
+test("отказ живого слоя = лист, а не пустой спрайт (и причина в штампе)", async () => {
+    const hero3d = await import("../js/render/hero3d.js");
+    const live = await liveMod();
+    assert.eq(hero3d.HERO3D.live, false, "живой слой включается только после успешного initLive");
+    const ok = await hero3d.hero3dLive(true);          // в node нет document → нет и WebGL
+    assert.eq(ok, false, "в node живой рендер обязан честно отказаться");
+    assert.eq(hero3d.HERO3D.live, false);
+    assert.ok(/WebGL/.test(hero3d.HERO3D.error), `отказ обязан быть объяснён: «${hero3d.HERO3D.error}»`);
+    assert.ok(["grade", "smooth"].includes(hero3d.HERO3D.quality), "после отказа играет лист, а не «live»");
+    // Пакет при этом цел: живому слою есть чем собраться в браузере.
+    const info = live.liveInfo();
+    assert.eq(info.parts, 12, "герой обязан прийти целиком: 12 частей (тело, костюм, волосы)");
+    assert.eq(info.clips, 9, "девять клипов — те же позы, что у листа (+sprint)");
+    assert.ok(live.liveSupported() === false, "liveSupported в node без document обязан быть false");
 });
 
 

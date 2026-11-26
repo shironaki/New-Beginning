@@ -1273,13 +1273,24 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
         // Стиль — и героя, и пропов — берётся из одного места: параметр адреса
         // важнее выбора в меню, меню важнее значения по умолчанию. На телефоне
         // адресной строки нет, поэтому то же самое умеет «Вид мира» в меню игры.
-        const style = loadStyle({ hero3d: "grade", props3d: "on" }, window.location.search);
+        // Значение по умолчанию — ЖИВОЙ 3D: герой рисуется three.js-сценой, как в
+        // лаборатории, а не запечённым листом. Это не «смелый» выбор, а выбор с
+        // сеткой безопасности: hero3dLive(false)/отказ WebGL возвращает лист, а
+        // причина отказа печатается в штампе, поэтому «чёрный герой» не бывает
+        // необъяснимым.
+        const style = loadStyle({ hero3d: "live", props3d: "on" }, window.location.search);
         game.style = style;
         // ?hero3d=smooth — тот же 3D-риг, но без пиксельного грейда (14 тонов на
         // дорожку, ни дизеринга, ни обводки); hero3d=off — прежняя векторная
         // фигура. Гладкий модуль весит 643 КБ и приходит только по запросу.
         if (style.hero3d !== "grade") {
             const hero3d = await import("./render/hero3d.js");
+            // Лист грузится как запасной кадр. Но его отсутствие НЕ имеет права
+            // ронять запуск: без .catch одна сетевая ошибка здесь = чёрный экран.
+            await hero3d.hero3dSheet(game.look).catch((err) => {
+                hero3d.HERO3D.sheetError = String((err && err.message) || err).slice(0, 160);
+                return false;
+            });
             if (style.hero3d === "off") hero3d.HERO3D.enabled = false;
             else {
                 const ok = await hero3d.hero3dQuality(style.hero3d);
@@ -1304,16 +1315,25 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
             // Статика героя спрашивается динамическим импортом: в «hero3d=off»
             // лист на 627 КБ в графе не нужен вовсе, а здесь он и так уже
             // лежит в кэше модулей (его тянет render/character.js).
-            const { HERO3D, hero3dSheetInfo } = await import("./render/hero3d.js");
+            const { HERO3D, hero3dSheetInfo, hero3dLiveInfo } = await import("./render/hero3d.js");
+            const liveInfo = hero3dLiveInfo ? hero3dLiveInfo() : null;
+            const liveStamp = HERO3D.quality === "live" || liveInfo?.ready
+                ? ` · live: ${liveInfo?.ready ? `готов (${liveInfo.parts} частей, ${liveInfo.clips} клипов, отрисовано кадров ${liveInfo.frames}, пропущено ${liveInfo.skipped})` : `отказ: ${liveInfo?.error || HERO3D.error || "?"}`} · образ ${liveInfo?.active || "—"}`
+                : "";
             const stamp = document.createElement("div");
             stamp.id = "buildStamp";
-            stamp.textContent = `сборка 78 · 3D-пропы: ${st.enabled ? st.kinds : 0} (${st.reason || "ок"})`
+            stamp.textContent = `сборка 79 · 3D-пропы: ${st.enabled ? st.kinds : 0} (${st.reason || "ок"})`
                 + ` · свет ${st.sun ? `×${st.sun.amp.toFixed(2)}/${st.sun.amb.toFixed(2)}` : "—"}`
                 + ` · тон ${st.tone || "авто"} · ${styleKey(style)}`
                 // Герой в штампе обязателен: все три претензии блока (лицо, пол,
                 // мокрый слой) сидят в его листе, а лист грузится асинхронно.
                 // «Сборка есть, а героя не видно» = лист не доехал.
                 + ` · герой: ${HERO3D.ready ? `${HERO3D.quality} · лист ${hero3dSheetInfo().id}` : "лист не загружен"}`
+                + liveStamp
+                // «Сборка есть, а героя не видно» и «live не включился» обязаны
+                // различаться глазами: в штампе кадры живого рендера, размер пакета
+                // и причина, по которой игра вернулась на лист.
+                + (HERO3D.live ? "" : "")
                 + (HERO3D.error ? ` (${HERO3D.error})` : "")
                 + (HERO3D.sheetError ? ` (лист: ${HERO3D.sheetError})` : "");
             (document.body || document.documentElement).appendChild(stamp);

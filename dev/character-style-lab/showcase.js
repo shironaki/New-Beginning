@@ -1,4 +1,4 @@
-import * as THREE from './vendor/three.module.js';
+import * as THREE from '../../js/vendor/three.module.js';
 import { DEFAULT_LOOK, drawCharacter } from '/game/render/character.js';
 
 const $ = (selector) => document.querySelector(selector);

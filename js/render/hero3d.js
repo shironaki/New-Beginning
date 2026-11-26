@@ -60,6 +60,48 @@ let SRC = bindSource(SOURCES.grade);
 /** Позы, которых у гладкого выхода нет: не пропускать кадр, а честно упростить. */
 const SMOOTH_ALIAS = { run: "walk", attack: "chop", gather: "chop", torch: "idle" };
 
+/**
+ * Живой 3D (three.js) — опциональный слой НАД листом: `hero3dLive(true)` поднимает
+ * WebGL-сцену, и `heroSprite` отдаёт кадр из неё. Лист остаётся источником
+ * геометрии контракта (CELL/footPad/якоря) и запасным кадром: если WebGL или
+ * three.js недоступны, герой рисуется листом, а причина видна в HERO3D.error —
+ * ровно поэтому переход на 3D не может превратиться в чёрный спрайт.
+ */
+let LIVE_MOD = null;
+export async function hero3dLive(on) {
+    if (!on) {
+        HERO3D.live = false;
+        HERO3D.quality = SRC === SOURCES.smooth ? "smooth" : "grade";
+        return false;
+    }
+    if (!LIVE_MOD) {
+        try { LIVE_MOD = await import("./hero3d-live.js"); }
+        catch (err) {
+            HERO3D.error = `живой рендер не подключился: ${String(err && err.message || err).slice(0, 160)}`;
+            HERO3D.live = false;
+            return false;
+        }
+    }
+    const ok = await LIVE_MOD.initLive();
+    HERO3D.live = ok;
+    if (ok) {
+        HERO3D.quality = "live";
+        HERO3D.error = "";
+        LIVE_MOD.liveSun(HERO3D.tone || null);
+    } else {
+        HERO3D.error = LIVE_MOD.LIVE.error || "живой рендер недоступен";
+        HERO3D.quality = SRC === SOURCES.smooth ? "smooth" : "grade";
+    }
+    return ok;
+}
+/** Тон света живого героя — общий с 3D-пропами (см. props3d.resolveTone). */
+export function hero3dTone(tone) {
+    HERO3D.tone = tone || null;
+    if (HERO3D.live && LIVE_MOD) LIVE_MOD.liveSun(tone || null);
+}
+/** Что играет в живом слое — для штампа и панели отладки. */
+export const hero3dLiveInfo = () => (LIVE_MOD ? LIVE_MOD.liveInfo() : null);
+
 /** Готово ли включать спрайтовый режим. `false` у actor (`p.sprite === false`) выключает его точечно. */
 export const HERO3D = {
     enabled: true,
@@ -72,6 +114,10 @@ export const HERO3D = {
     // «?hero3d=smooth → пусто» без этой строки невозможно разобрать: молчаливый
     // откат выглядел как сломанная игра, а не как отсутствующий модуль.
     error: "",
+    // Играет ли живой 3D-слой (three.js). `quality === "live"` без этого флага
+    // значит «режим запрошен, но сцена не поднялась» — и рисуется лист.
+    live: false,
+    tone: null,
     get ready() { return typeof document !== "undefined" && Object.keys(SRC.streams).length > 0; }
 };
 
@@ -81,7 +127,11 @@ export const HERO3D = {
  * падать из-за режима сравнения.
  */
 export async function hero3dQuality(quality) {
-    if (quality === "grade") { SRC = SOURCES.grade; HERO3D.quality = "grade"; return true; }
+    if (quality === "live") return hero3dLive(true);
+    if (quality === "grade") {
+        await hero3dLive(false);
+        SRC = SOURCES.grade; HERO3D.quality = "grade"; return true;
+    }
     if (quality !== "smooth") return false;
     if (!SOURCES.smooth) {
         try {
@@ -447,6 +497,22 @@ export function heroPose(p, src = SRC) {
 /** Спрайт для текущей позы: канвас + геометрия постановки. null — рисовать вектором. */
 export function heroSprite(p, look) {
     if (!HERO3D.enabled || !HERO3D.ready || p.sprite === false) return null;
+    // Живой кадр, если сцена поднялась. null — значит на этом актёре 3D не
+    // сыграет (нет GL, нет позы), и лист закрывает кадр, а не пустота.
+    if (HERO3D.live && LIVE_MOD) {
+        try {
+            const live = LIVE_MOD.liveFrame(p, look || p.look);
+            if (live) return live;
+        } catch (err) {
+            // Падение живого кадра — не чёрный экран, а возврат на лист: сцена
+            // выключается, причина остаётся в штампе. Без этого одна ошибка в
+            // скелете обрушала бы весь кадр (и игру) на глазах у игрока.
+            HERO3D.live = false;
+            HERO3D.quality = SRC === SOURCES.smooth ? "smooth" : "grade";
+            HERO3D.error = `живой кадр упал: ${String(err && err.message || err).slice(0, 160)}`;
+            console.warn("[hero3d]", HERO3D.error);
+        }
+    }
     const src = srcFor(look || p.look);
     const pose = heroPose(p, src);
     const data = decodePose(`${pose.dir}/${pose.label}`, src);
@@ -510,6 +576,15 @@ export function heroSprite(p, look) {
  * предмет в руке берут отсюда координаты, не зная, что герой теперь спрайт.
  */
 export function heroHandAnchor(p, hand = "right", extra = {}) {
+    // В живом режиме якорь считается по той же кости, что отрисовала кадр, — а не
+    // по таблице запекки: иначе предмет в руке ехал бы относительно ладони при
+    // любом изменении позы, которого в листе нет.
+    if (HERO3D.live && LIVE_MOD) {
+        try {
+            const live = LIVE_MOD.liveHandAnchor(p, p.look, hand, extra);
+            if (live) return live;
+        } catch { /* якорь — не причина ронять кадр: рисуем по таблице листа */ }
+    }
     // Только вместе со спрайтом: якорь света и нарисованный предмет обязаны брать
     // координаты из одного источника, иначе огонёк уезжает с ладони (это ловит
     // tests/visual-world.test.js на четырёх ракурсах и в падении).

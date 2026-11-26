@@ -39,7 +39,9 @@ export const RECIPES = [
       out: [["firewood", 4]], needs: [{ id: "log", n: 1 }],
       tool: "axe", work: "chop", time: 2 },
 
-    { id: "plank", name: "Доски", emoji: "🪚", group: "material",
+    // Тот же обман, что и в ITEMS: 🪚 — пила. Материал в списке крафта не имеет
+    // права притворяться инструментом (блок 79, «доска, названная пилой»).
+    { id: "plank", name: "Доски", emoji: "🟫", group: "material",
       out: [["plank", 3]], needs: [{ id: "log", n: 1 }],
       tool: "axe", work: "chop", time: 3.5 },
 

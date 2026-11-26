@@ -16,7 +16,11 @@ export const ITEMS = {
     /* ---- raw resources ------------------------------------------------ */
     firewood:  { name: "Хворост",      emoji: "🪵", stack: 50, tags: ["fuel"], burn: 2100, weight: 0.4 },
     log:       { name: "Бревно",       emoji: "🪵", stack: 20, tags: ["fuel", "build"], burn: 8100, weight: 3 },
-    plank:     { name: "Доска",        emoji: "🪚", stack: 50, tags: ["build"], burn: 3600, weight: 1, hold: "board", tint: "#9a7448"},
+    // Эмодзи — это обещание. 🪚 — пила, а пилы в мире нет: разбитый ящик даёт
+    // доску, и в хотбаре она подписывалась инструментом («в руках доска, которую
+    // хотбар показывает как пилу» — претензия блока 79). У предмета без поля
+    // `tool` эмодзи инструмента быть не может (это держит тест).
+    plank:     { name: "Доска",        emoji: "🟫", stack: 50, tags: ["build"], burn: 3600, weight: 1, hold: "board", tint: "#9a7448"},
     stone:     { name: "Камень",       emoji: "🪨", stack: 50, tags: ["build"], weight: 2, hold: "rock", tint: "#8f8b82"},
     flint:     { name: "Кремень",      emoji: "🔥", stack: 20, tags: ["tool_part", "firestarter"], weight: 0.2, hold: "rock", tint: "#6a6874"},
     fiber:     { name: "Волокно",      emoji: "🌾", stack: 50, tags: ["craft"], weight: 0.1, hold: "sheaf", tint: "#b7a06a"},
