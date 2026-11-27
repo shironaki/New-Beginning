@@ -119,8 +119,8 @@ export class Camera {
             this.shakeTime -= dt;
             const falloff = Math.max(0, this.shakeTime);
             const p = this.shakePower * falloff * 4;
-            this.offsetX = (Math.random() * 2 - 1) * p;
-            this.offsetY = (Math.random() * 2 - 1) * p;
+            this.offsetX = (Math.random() * 2 - 1) * p;   // @nondet: тряска камеры — косметика, в состояние не пишется
+            this.offsetY = (Math.random() * 2 - 1) * p;   // @nondet: тряска камеры — косметика, в состояние не пишется
             if (this.shakeTime <= 0) { this.offsetX = this.offsetY = 0; this.shakePower = 0; }
         }
         return this;

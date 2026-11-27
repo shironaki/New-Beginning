@@ -1,0 +1,41 @@
+{
+  "tests/browser-boot.test.js": [
+    "eval — ловушка запуска собирает функцию из строки и вызывает её в изолированном скоупе: это и есть предмет теста"
+  ],
+  "tools/codecheck.js": [
+    "* — инструмент описывает правила в строках: проверки над ним самим дают только шум"
+  ],
+  "js/vendor/": [
+    "* — вендор (three.js r186) чужой код, править его нельзя"
+  ],
+  "js/render/heroframes.js": [
+    "* — данные пекаря, не код"
+  ],
+  "js/render/heroframes-female.js": [
+    "* — данные пекаря"
+  ],
+  "js/render/heroframes-female-braid.js": [
+    "* — данные пекаря"
+  ],
+  "js/render/heroframes-female-short.js": [
+    "* — данные пекаря"
+  ],
+  "js/render/heroframes-male-braid.js": [
+    "* — данные пекаря"
+  ],
+  "js/render/heroframes-male-short.js": [
+    "* — данные пекаря"
+  ],
+  "js/render/herosmooth.js": [
+    "* — данные пекаря"
+  ],
+  "js/render/herorig.js": [
+    "* — данные пекаря"
+  ],
+  "js/render/propsprites.js": [
+    "* — данные пекаря"
+  ],
+  "js/ui/hud.js": [
+    "innerhtml — HUD собран шаблонами из строк игры (ITEMS, NEED_DEFS); текст сейва в разметку не попадает, проверка на «не известно что» здесь была бы ложной"
+  ]
+}

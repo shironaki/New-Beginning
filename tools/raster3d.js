@@ -78,16 +78,6 @@ export function cameraBasis({ yaw = 0, pitch = 0.28, target = [0, 0.95, 0], dist
     return { eye, fwd, right, up, target };
 }
 
-function toView(basis, cam, p, out) {
-    const dx = p[0] - basis.eye[0];
-    const dy = p[1] - basis.eye[1];
-    const dz = p[2] - basis.eye[2];
-    out[0] = dx * basis.right[0] + dy * basis.right[1] + dz * basis.right[2];
-    out[1] = dx * basis.up[0] + dy * basis.up[1] + dz * basis.up[2];
-    out[2] = -(dx * basis.fwd[0] + dy * basis.fwd[1] + dz * basis.fwd[2]);
-    return out;
-}
-
 const DEFAULT_LIGHT = {
     dir: [-0.42, 0.78, 0.46],      // в пространстве камеры: слева-сверху-от наблюдателя
     color: [1.0, 0.96, 0.88],

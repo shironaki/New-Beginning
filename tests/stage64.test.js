@@ -9,7 +9,7 @@ import { Inventory } from "../js/sandbox/inventory.js";
 import { startPotFromInventory, canReceive } from "../js/survival/cooking-actions.js";
 import { Renderer } from "../js/render/renderer.js";
 import { installDOM, FakeElement } from "./dom-harness.js";
-const dom = installDOM();
+installDOM();   // сам домен и есть цель
 const { Game } = await import("../js/main.js");
 test('dev-сервер не отдаёт исходники из кэша прокси', () => {
     // Смысл ровно один: «правок не видно» ≠ «правок не сделано». Пока .js и .html

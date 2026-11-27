@@ -252,7 +252,7 @@ function push(bytes) {
 }
 const Q16 = 32767;
 
-/** Вершина (13 байт): pos int16×3 · nrm int8×3 · lum u8 · костьA u8 · костьB u8 · вес u8. */
+/** Вершина (13 байт): pos int16×3 · nrm int8×3 · lum u8 · кость A u8 · кость B u8 · вес u8. */
 function packPrim(prim, mapToCanon) {
     const count = prim.count;
     const pos = prim.positions;
@@ -383,7 +383,7 @@ function build() {
         if (!found) { console.warn(`⚠️ клип «${pose.clip}» не найден — поза «${pose.label}» не экспортируется`); continue; }
         const { lib, clip } = found;
         // Длительность — ПОСЛЕДНИЙ ключевой кадр (как `clipDuration` у пекаря), а не
-        // clip.duration: иначе фазы клипа разъезжаются и позa сверяется не с тем кадром.
+        // clip.duration: иначе фазы клипа разъезжаются и поза сверяется не с тем кадром.
         const input = clip?.samplers?.[0]?.input;
         const acc = input === undefined ? null : readAccessor(lib.json, lib.bin, input);
         const duration = ((acc?.count ? acc.array[acc.array.length - 1] : 1) || 1) * 0.98;

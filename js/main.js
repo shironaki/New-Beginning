@@ -70,7 +70,8 @@ function dustColor(def) {
 
 export class Game {
     get isTrial() { return false; }
-    constructor({ canvas, hudRoot, seed = Date.now() & 0xffff } = {}) {
+    constructor({ canvas, hudRoot, seed = Date.now() & 0xffff } = {}) {   // @nondet: новый мир без явного сида стартует с часов; тесты, сцена и реплеи
+        //   всегда передают сид явно — детерминизм там обязателен
         this.bus = new EventBus();
         this.seed = typeof seed === "string" ? hashSeed(seed) : seed;
         this.rng = new RNG(this.seed);
@@ -1045,13 +1046,13 @@ export class Game {
         }
 
         // Ambience: smoke from lit fires, sparks now and then.
-        if (!worldPaused && Math.random() < dt * 6) {
+        if (!worldPaused && Math.random() < dt * 6) {   // @nondet: атмосфера (дым/искры) — косметика, в симуляцию не входит
             for (const obj of this.zone.objects) {
                 if (obj.kind !== "campfire" || obj.removed) continue;
                 const f = this.fires.get(this.fireKey(this.zone, obj));
                 if (f && f.lit) {
                     this.particles.smoke(obj.x, obj.y - 10, 1);
-                    if (Math.random() < 0.3) this.particles.sparks(obj.x, obj.y - 8, 2);
+                    if (Math.random() < 0.3) this.particles.sparks(obj.x, obj.y - 8, 2);   // @nondet: атмосфера (дым/искры) — косметика, в симуляцию не входит
                 }
             }
         }
@@ -1130,8 +1131,8 @@ export class Game {
             if (this._pollenAt <= 0) {
                 this._pollenAt = 1 / P.rate;
                 const warm = Math.abs(hour - 12.5) > 3.5;   // morning and evening light
-                this.particles.pollen(this.player.x + (Math.random() - 0.5) * P.spread,
-                                      this.player.y + (Math.random() - 0.5) * P.spread * 0.7,
+                this.particles.pollen(this.player.x + (Math.random() - 0.5) * P.spread,   // @nondet: пыльца/листва — косметика
+                                      this.player.y + (Math.random() - 0.5) * P.spread * 0.7,   // @nondet: пыльца/листва — косметика
                                       warm);
             }
         }
@@ -1146,7 +1147,7 @@ export class Game {
                     const dx = o.x - this.player.x, dy = o.y - this.player.y;
                     if (dx * dx + dy * dy > G.reach * G.reach) continue;
                     n++;
-                    if (Math.random() < 1 / n) pick = o;      // reservoir sample
+                    if (Math.random() < 1 / n) pick = o;      // reservoir sample  /* @nondet: пыльца/листва — косметика */
                 }
                 if (pick) {
                     const season = this.clock.season.key;
@@ -1164,15 +1165,15 @@ export class Game {
         this._moteAt = (this._moteAt || 0) - dt;
         if (this._moteAt <= 0) {
             this._moteAt = 1 / M.rate;
-            this.particles.mote(this.player.x + (Math.random() - 0.5) * M.spread,
-                                this.player.y + (Math.random() - 0.5) * M.spread * 0.7);
+            this.particles.mote(this.player.x + (Math.random() - 0.5) * M.spread,   // @nondet: ресемпл дерева для листа — косметика
+                                this.player.y + (Math.random() - 0.5) * M.spread * 0.7);   // @nondet: ресемпл дерева для листа — косметика
         }
         this._dropAt = (this._dropAt || 0) - dt;
         if (this._dropAt <= 0) {
-            this._dropAt = (1 / D.rate) * (1 + (Math.random() * 2 - 1) * D.rateVary);
+            this._dropAt = (1 / D.rate) * (1 + (Math.random() * 2 - 1) * D.rateVary);   // @nondet: пылинки и капель в шахте — косметика
             // Pick a floor tile near the hero: a drop needs somewhere to land.
-            const x = this.player.x + (Math.random() - 0.5) * D.spread;
-            const y = this.player.y + (Math.random() - 0.5) * D.spread * 0.7;
+            const x = this.player.x + (Math.random() - 0.5) * D.spread;   // @nondet: пылинки и капель в шахте — косметика
+            const y = this.player.y + (Math.random() - 0.5) * D.spread * 0.7;   // @nondet: пылинки и капель в шахте — косметика
             if (!this.zone.isBlockedTile(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE))) {
                 this.particles.ceilingDrop(x, y - 26);
                 this._pendingDrops = this._pendingDrops || [];

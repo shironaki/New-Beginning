@@ -228,7 +228,7 @@ function buildGeometry(mesh) {
         const nx = view.getInt8(o + 6), ny = view.getInt8(o + 7), nz = view.getInt8(o + 8);
         const len = Math.hypot(nx, ny, nz) || 1;
         nrm[v * 3] = nx / len; nrm[v * 3 + 1] = ny / len; nrm[v * 3 + 2] = nz / len;
-        // У DataView НЕТ доступa по индексу: `view[o+9]` — это undefined, а
+        // У DataView НЕТ доступа по индексу: `view[o+9]` — это undefined, а
         // undefined в Uint8Array пишется как 0. Позиции и нормали читались
         // геттерами и были в порядке, а вот яркость, кости и веса молча стали
         // нулями: меш схлопнулся в одну точку (в кадре — точка у ног вместо
@@ -431,11 +431,7 @@ export function cameraPixel(f, p) {          // тот же порядок ар�
     return [(v.x * 0.5 + 0.5) * CELL.w, (0.5 - v.y * 0.5) * CELL.h];
 }
 
-/* ---------------------------------- позa и кадр ---------------------------------- */
-const DURATION = (label) => {
-    const c = META.clips[label];
-    return c ? (c.frames / c.fps) * 0.98 : 0.5;
-};
+/* ---------------------------------- поза и кадр --------------------------------- */
 /** Какую позу просит состояние актёра — те же правила, что `heroPose` у листа. */
 export function livePose(p) {
     const dir = p.dir === "left" || p.dir === "right" || p.dir === "up" ? p.dir : "down";

@@ -16,7 +16,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const file = (rel) => new URL(`../${rel}`, import.meta.url).href.replace(/^/, "file://").replace("file://" + ROOT, "file://" + ROOT);
 
 const url = (rel) => `file://${path.join(ROOT, rel)}`;
 

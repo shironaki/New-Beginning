@@ -8,7 +8,7 @@ import { checkpoint, resumeSaved, openSessionMenu, sessionTick, bindSessionLifec
 import { snapshotWorld } from "../js/world/persistence.js";
 import { reliefAttachment, reliefView } from "../js/render/relief.js";
 import { toolAttachment } from "../js/render/character.js";
-const dom = installDOM();
+installDOM();   // сам домен и есть цель: `dom` нигде не читался
 const { Game } = await import("../js/main.js");
 const { ReliefTrialGame } = await import("../js/dev/relief-trial.js");
 function boot(seed = 1066618561, Type = Game) {

@@ -1348,7 +1348,6 @@ test("земля в печёном рельефе нарисована, а не 
     // фон»). Мера прямая: соседние точки земли обязаны различаться, а оттенков
     // обязано хватать на ступени тона. На прежнем коде: 0.57 и 3 — тест падает.
     const zone = generateZone("ashfall", 1);
-    const field = zone.terrain;
     const pal = {};
     for (const k of Object.keys(T)) pal[T[k]] = [120, 100, 80];
     const stats = (biome) => {

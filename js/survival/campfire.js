@@ -7,6 +7,7 @@
  * the settlers gather in the evening.
  */
 import { fireExposure } from "./fire-weather.js";
+import { hashSeed } from "../core/rng.js";
 import { burnValue, itemDef } from "../sandbox/items.js";
 import { resolveSpit, resolvePot } from "./cooking.js";
 
@@ -88,7 +89,12 @@ export class Campfire {
         const left = Math.min(burn, this.maxFuel - this.fuel);
         // Fuel carried in the pack is drier than the exposed pile.
         this.damp *= this.fuel / (this.fuel + left);
-        this.pieces.push({ id: itemId, left, total: burn, seed: Math.floor(Math.random() * 1000) });
+        // Сид полена обязано быть выводом состояния, а не Math.random: pieces
+        // уходят в сейв (toJSON), и случайный источник делал бы «тот же сейв —
+        // другие угли». Число только косметическое ( renderer рисует с ним трещины
+        // и нагар), поэтому дешёвый хеш от порядка и количества — то, что нужно.
+        const h = (this.pieces.length * 2654435761 ^ Math.round(this.fuel * 977) ^ hashSeed(itemId)) >>> 0;
+        this.pieces.push({ id: itemId, left, total: burn, seed: h % 1000 });
         this.fuel = Math.min(this.maxFuel, this.fuel + burn);
         if (this.bus) this.bus.emit("fire:fuel", { itemId, fuel: this.fuel, burn });
         return true;

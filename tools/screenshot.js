@@ -16,7 +16,7 @@ const OUT = path.resolve(".artifacts");
 fs.mkdirSync(OUT, { recursive: true });
 
 // A DOM whose canvases are real (software) pixel buffers.
-const dom = installDOM();
+installDOM();   // домен нужен как побочный эффект: `dom` не читался
 const baseCreate = globalThis.document.createElement;
 globalThis.document.createElement = (tag) =>
     (tag === "canvas" ? new ShimCanvas(300, 150) : baseCreate(tag));

@@ -53,13 +53,6 @@ const hero = {
 };
 hero.currentTool = TOOL;
 
-/** Рамка предмета — как её считает рендерер: якорь хвата + поворот по предплечью. */
-function itemRect(p, hand) {
-    const anchor = heroHandAnchor(p, hand, { angle: 0, intensity: 1, follow: true, outward: 0.9, bias: 0 });
-    if (!anchor) return null;
-    return anchor;
-}
-
 function frameFor(dir, pose, index) {
     hero.dir = dir; hero.facing = dir === "left" ? "left" : "right";
     hero.animTime = (index + 0.5) / 8;

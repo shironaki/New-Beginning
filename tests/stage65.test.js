@@ -11,7 +11,7 @@ import { waterIce } from "../js/world/water-state.js";
 import { terrainColour } from "../js/render/terrain.js";
 import { T } from "../js/world/tiles.js";
 import { resumeSaved, openSessionMenu } from "../js/ui/session.js";
-const dom = installDOM();
+installDOM();   // сам домен и есть цель
 const { Game } = await import("../js/main.js");
 function boot() {
     const g = new Game({ canvas: new FakeElement("canvas"), hudRoot: new FakeElement(), seed: 1066618561 });

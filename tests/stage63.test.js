@@ -12,7 +12,7 @@ import { Camera } from "../js/engine/camera.js";
 import { toolAttachment } from "../js/render/character.js";
 import { projectGround } from "../js/render/projected-ground.js";
 import { ShimCanvas } from "../tools/canvas-shim.js";
-const dom = installDOM();
+installDOM();   // сам домен и есть цель: `dom` нигде не читался
 const { Game } = await import("../js/main.js");
 function boot() {
     const g = new Game({ canvas: new FakeElement("canvas"), hudRoot: new FakeElement(), seed: 1066618561 });

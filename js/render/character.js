@@ -129,21 +129,6 @@ function limb(ctx, x0, y0, x1, y1, w0, w1, fill, contour = true) {
 
 /* --- body profile: rows of (y, halfWidth) ------------------------------- */
 
-/** Full outline of a profile. */
-const silhouette = (rows) => [
-    ...rows.map(([y, hw]) => [-hw, y]),
-    ...[...rows].reverse().map(([y, hw]) => [hw, y])
-];
-
-/**
- * A vertical stripe measured inwards from one edge of the profile — this is
- * how the tone bands follow the pinched waist instead of cutting across it.
- * `s` = -1 left edge, +1 right edge; `a`,`b` = insets.
- */
-const stripe = (rows, s, a, b) => [
-    ...rows.map(([y, hw]) => [s * hw - s * a, y]),
-    ...[...rows].reverse().map(([y, hw]) => [s * hw - s * b, y])
-];
 
 /**
  * Two-bone IK: given hip and ankle, where is the knee?

@@ -36,7 +36,7 @@ export class SaveManager {
 
     /** Build the full save object (without writing it). */
     snapshot(meta = {}) {
-        const data = { version: SAVE_VERSION, savedAt: Date.now(), meta, parts: {} };
+        const data = { version: SAVE_VERSION, savedAt: Date.now(), meta, parts: {} };   // @nondet: метка времени сохранения — часы стены, в мир не попадает
         for (const [name, p] of this.providers) {
             data.parts[name] = p.save();
         }

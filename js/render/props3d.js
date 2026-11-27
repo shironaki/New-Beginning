@@ -121,8 +121,12 @@ export function setPropSun(next) {
  * «что включено» для игры, меню и штампа сборки; здесь только приёмник.
  */
 export function setPropTone(tone) {
-    if (PROPS3D.tone === (tone || null)) return false;
-    PROPS3D.tone = tone || null;
+    //TONES — единственный список тонов, который понимает tintPal. Раньше
+    // ?props3dTone=что-угодно молча давало «кадр без тона»: теперь неизвестный
+    // тон снимается, а не притворяется обычным.
+    const want = TONES.includes(tone) ? tone : null;
+    if (PROPS3D.tone === want) return false;
+    PROPS3D.tone = want;
     return true;
 }
 

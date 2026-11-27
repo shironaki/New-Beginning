@@ -46,7 +46,6 @@ async function evaluate(expression, userGesture = false) {
     if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails));
     return r.result.value;
 }
-async function frames() { await evaluate("new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))"); }
 async function screenshot(name) {
     await evaluate("new Promise(r=>setTimeout(r,350))");
     const shot = await send("Page.captureScreenshot", { format: "png" });

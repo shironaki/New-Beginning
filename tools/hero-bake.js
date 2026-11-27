@@ -502,7 +502,6 @@ function renderRaw(scene, anim, { yaw, time = null, clip = null }) {
 
 let BOX = null;
 const UNIT = PX_PER_UNIT * (BODY_UNITS / MODEL_HEIGHT) * SS;   // пикселей большого кадра на метр модели
-const GROUND = (CELL.h - FOOT) * SS;                           // линия стоп в пикселях большого кадра
 
 /** Альфа-габарит большого кадра, в пикселях большого кадра. */
 function frameBox(frame) {
