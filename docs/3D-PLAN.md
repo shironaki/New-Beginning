@@ -51,6 +51,81 @@ HUD и весь текст, иконки и хотбар, полоски/шта�
 разрешении игры текст и интерфейсные формы в 3D только теряют, а кодовая
 отрисовка остаётся единственным способом проверить картинку числом.
 
+## Как пак попадает в репозиторий (и почему не целиком)
+
+Три факта, которые определяют маршрут:
+
+1. **Из песочницы сети нет.** Разрешены только `github.com`,
+   `codeload.github.com`, `api.github.com`, npm и PyPI. `curl
+   https://drive.google.com` и `https://www.dropbox.com` дают `000`.
+2. **Коннектор умеет читать, но не складывать.** Из Google Drive/Dropbox
+   файл приходит либо текстом, либо base64 в ответе инструмента: 6 МБ
+   архива — это ~8 МБ текста. Для одного мелкого файла это терпимо, для
+   пачки — нет. Рабочая область коннектором не пополняется.
+3. **Git не возьмёт огромные файлы ни у меня, ни у вас.** GitHub блокирует
+   отдельный файл > 100 МБ, а артефакт блока Arena ограничен ~128 МБ. В
+   `Dropbox:/Pack` и в Google Drive (`New Beginning/Pack`, 23 архива) четыре
+   архива больше этого порога: Modular Character Outfits 294 МБ, Downtown
+   City 235 МБ, Medieval Village 161 МБ, Universal Base Characters 129 МБ.
+
+Поэтому в репозиторий едет **не пак, а то, что из него поехало в игру**:
+`.gltf + .bin + урезанная baseColor-текстура`. Именно для этого есть
+`tools/pack-import.js`.
+
+### Маршрут A — GitHub-зеркало (работает прямо сейчас, без вас)
+
+CC0-паки Quaternius и KayKit лежат у авторов в репозиториях, и их можно
+выбрать по одному каталогу — sparse-клон скачивает только его:
+
+```
+git clone -q --depth 1 --filter=blob:none --sparse \
+    https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.1 /tmp/kay
+cd /tmp/kay && git sparse-checkout set addons/<пак>/Assets/gltf   # 39 МБ вместо 163
+node tools/pack-import.js --src /tmp/kay/... --size 512 \
+    --out dev/character-style-lab/assets/kaykit --models tent,barrel,... \
+    --note "KayKit «Medieval Hexagon Pack 1.0» (CC0), зеркало github.com/…"
+npm run props3d && npm run props:audit
+```
+
+Целый набор весит в Git сотни килобайт: KayKit-подборка — 256 КБ вместо
+6.4 МБ архива, деревянная деревня — 288 КБ вместо 161 МБ.
+
+Известные зеркала, которые уже пригодны: `KayKit-Game-Assets/*` (10 паков,
+включая Character Pack «Adventures» с 5 ригнутыми мешами и 27 glTF-предметами),
+`J-Ponzo/gltf-medieval-village-megakit` (откуда лежит `village`),
+`J-Ponzo/gltf-universal-animation-library`, `walterpalladino/godot-quaternius-ultimate-stylized-nature`
+(только `.fbx` + 237 МБ текстур — конвейеру не годится).
+
+### Маршрут B — то, чего на GitHub нет (ваши Drive-архивы)
+
+В `Google Drive → New Beginning/Pack` 23 архива. Нужны с толком, но зеркал для
+них я не нашёл, поэтому варианты, по одному на пак:
+
+* **распаковать и приложить к сообщению** loose `.glb`/`.gltf` (вложения
+  попадают в рабочую область) — годится для 10–20 файлов;
+* **залить loose-файлы в отдельный репозиторий на GitHub** (например
+  `new-beginning-assets`, по 20–40 МБ на пак) — я склонирую его так же, как
+  маршрут A, и сам сожму в `dev/…/assets/<пак>/`;
+* **запустить `tools/pack-import.js` у себя** и закоммитить результат — команда
+  ровно та, что в маршруте A, только `--src` указывает на распакованный архив.
+
+Приоритет, если брать не всё: `Ultimate Nature Pack` (23 МБ, 178 типов —
+лес и кусты), `Textured Stylized Trees` (12 МБ), `KayKit_ResourceBits` (8.5 МБ —
+руда, хворост, бочки), `Farm Animals Animated` (7 МБ — живность),
+`Fish Pack Animated` (1 МБ — вода оживает), `Characters_psx_1.2` (61 МБ —
+PSX-текстуры = тот самый пиксельный слой из стадии 5). Не по жанру:
+Downtown City, Realistic Car, Ultimate Gun.
+
+### Что уже проверено на этом маршруте
+
+KayKit «Medieval Hexagon» пришёл, запёкся и … **не подошёл** (таблица и замеры —
+`dev/character-style-lab/assets/kaykit/README.md`): набор рисовался под вид
+сверху на hex-тайл, и на 40-пиксельной фигуре его «палатка» — навес на четырёх
+ножках, а камень — светлая плита. Польза от попытки реальна: атласный пак
+показал, что пекарня трактует координату V «по-юнити» и на любых других
+атласах покрасит моделé цветами соседних плиток. Это починено (см. блок 80.3
+в `docs/CHANGELOG.md`).
+
 ## Облако и внешние ассеты
 
 В `Dropbox:/Pack` лежит 23 архива (Quaternius/KayKit/PSX, от 1 МБ до 294 МБ).

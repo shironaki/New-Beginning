@@ -199,8 +199,16 @@ function rasterTriangle(frame, view, viewN, uv, tex, factor, L, light, i0, i1, i
             if (uv) {
                 const u = w0 * uv[i0 * 2] + w1 * uv[i1 * 2] + w2 * uv[i2 * 2];
                 const v = w0 * uv[i0 * 2 + 1] + w1 * uv[i1 * 2 + 1] + w2 * uv[i2 * 2 + 1];
+                // glTF 2.0 (§3.10): v = 0 — ВЕРХНЯЯ строка изображения, а PNG
+                // декодируется сверху вниз, поэтому никакого флипа тут быть не
+                // должно. Стоял OpenGL-флип (1 - v): на Kenney и Quaternius он был
+                // не виден (у Kenney текстур нет вовсе, а одиночную текстуру
+                // отзеркалить по вертикали — почти та же картинка), но на паке с
+                // общим атласом (KayKit) каждая грань брала цвет соседней плитки:
+                // хвоя дерева — у неба (#007450 → #2797d1), камень — у глиняной
+                // черепицы. Ошибка была именно про цвет, а не про геометрию.
                 const sx = Math.min(w - 1, Math.max(0, Math.floor(u * w)));
-                const sy = Math.min(h - 1, Math.max(0, Math.floor((1 - v) * h)));
+                const sy = Math.min(h - 1, Math.max(0, Math.floor(v * h)));
                 const ti = (sy * w + sx) * 4;
                 if (tex.data[ti + 3] < 24) continue;
                 r = SRGB_TO_LINEAR[tex.data[ti]];

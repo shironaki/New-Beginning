@@ -89,3 +89,26 @@ export function decodePng(buffer) {
 }
 
 export function loadPngFile(file) { return decodePng(fs.readFileSync(file)); }
+
+/**
+ * Перевернуть декодированную текстуру по вертикали.
+ *
+ * Нужен там, где источник хранит UV в OpenGL-конвенции (v = 0 — НИЖНЯЯ строка
+ * изображения): так экспортируются паки Quaternius из Unity-пакетов (набор
+ * «Superhero» для героя и «Medieval Village MegaKit» для построек). Сам
+ * растеризатор сэмплирует по спецификации glTF 2.0 (§3.10: v = 0 — верхняя
+ * строка), поэтому переворот — свойство источника, а не растеризатора: его
+ * объявляет пекарь и делает один раз на текстуру, а не веткой в горячем цикле.
+ * Кэширует результат на самой текстуре, чтобы 420 кадров не переворачивали
+ * одно и то же полотно.
+ */
+export function flipTextureY(tex) {
+    if (!tex || tex.__flippedY) return tex;
+    const ch = Math.max(1, Math.round(tex.data.length / (tex.width * tex.height)));
+    const out = new Uint8Array(tex.data.length);
+    const row = tex.width * ch;
+    for (let y = 0; y < tex.height; y += 1) {
+        out.set(tex.data.subarray((tex.height - 1 - y) * row, (tex.height - 1 - y) * row + row), y * row);
+    }
+    return { width: tex.width, height: tex.height, data: out, __flippedY: true };
+}

@@ -15,7 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { readGltf, readGlb, GltfRig, readMesh, materialInfo, sampleClip, readAccessor } from "./gltf-rig.js";
-import { loadPngFile, decodePng } from "./png-decode.js";
+import { loadPngFile, decodePng, flipTextureY } from "./png-decode.js";
 import { makeFrame, clearFrame, cameraBasis, renderFrame } from "./raster3d.js";
 import { ShimCanvas, encodePNG } from "./canvas-shim.js";
 import { spriteFromPixels, buildPalette } from "../dev/character-style-lab/layers/photopix.js";
@@ -221,14 +221,21 @@ const hexRgb = hex => {
     return [parseInt(c.slice(0, 2), 16), parseInt(c.slice(2, 4), 16), parseInt(c.slice(4, 6), 16)];
 };
 
+// Паки героя и построек экспортированы из Unity, где v растёт снизу вверх, а
+// растеризатор (`tools/raster3d.js`) читает glTF-спецификацию: v = 0 — верхняя
+// строка. Разница ровно в одно переворачивание текстуры, и делать его надо ОДИН
+// раз при загрузке, а не в цикле растеризации: отсюда flipTextureY в кэше.
+// Без него герой пекался «с ног на голову» по текстуре — одежда и лицо были
+// на своих местах только потому, что полотно почти симметрично по строкам, а
+// вот у атласных паков (KayKit) та же ошибка красит хвою цветом неба.
 function decodeTexture(texture) {
     const key = `buffer:${texture.name}`;
-    if (!textureCache.has(key)) textureCache.set(key, decodePng(texture.buffer));
+    if (!textureCache.has(key)) textureCache.set(key, flipTextureY(decodePng(texture.buffer)));
     return textureCache.get(key);
 }
 
 function loadTexture(file) {
-    if (!textureCache.has(file)) textureCache.set(file, loadPngFile(file));
+    if (!textureCache.has(file)) textureCache.set(file, flipTextureY(loadPngFile(file)));
     return textureCache.get(file);
 }
 

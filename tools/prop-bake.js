@@ -29,7 +29,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { readGlb, readGltf, readMesh, materialInfo } from "./gltf-rig.js";
-import { loadPngFile, decodePng } from "./png-decode.js";
+import { loadPngFile, decodePng, flipTextureY } from "./png-decode.js";
 import { makeFrame, cameraBasis, renderFrame } from "./raster3d.js";
 import { ShimCanvas, encodePNG } from "./canvas-shim.js";
 import { paintProp, setSun, propHeight } from "../js/render/tilesart.js";
@@ -46,7 +46,22 @@ const num = (name, dflt) => {
     return v === null || v === true ? dflt : Number(v);
 };
 /** Каталог пака; PACKS объявлен ниже, поэтому резолвим лениво. */
-const packDir = (name) => path.resolve((PACKS[name] || PACKS.kenney));
+const packOf = (name) => PACKS[name] || PACKS.kenney;
+/** Подпись паков в шапке сгенерированного файла: путь + то, что меняло вид. */
+const packSourceNotes = () => Object.fromEntries(Object.entries(PACKS).map(([k, v]) =>
+    [k, v.uvFlip ? `${v.dir} · V перевёрнут (Unity-экспорт)` : v.dir]));
+const packDir = (name) => path.resolve(packOf(name).dir);
+/**
+ * Переворот текстуры по V — см. `flipTextureY` (png-decode) и `PACKS.uvFlip`.
+ * Кэшируется по файлу: у пака одна текстура на много моделéй, и переворачивать
+ * её для каждой было бы 20 копий.
+ */
+const flipCache = new Map();
+const flipV = (tex, key) => {
+    if (!tex) return tex;
+    if (!flipCache.has(key)) flipCache.set(key, flipTextureY(tex));
+    return flipCache.get(key);
+};
 const PX_PER_UNIT = num("ppu", 2.4);                                   // как у героя
 const PITCH = num("pitch", 0.2);
 // 0.7 рад, а не «в анфас»: мир виден под three-quarter, и проп с этого же
@@ -65,9 +80,22 @@ const OUT = String(flag("sheet", null) === null ? ".artifacts/prop-bake.png" : (
  * `y` (дерево: рост = Y) или `max` (бревно, ящик, крыша: длинная ось лежит на земле,
  * и подгонка по Y раздула бы её вдесятеро).
  */
+/**
+ * Паки. `uvFlip` — про способ, каким экспорт хранил V-координату:
+ *   • KayKit (и вообще честный glTF) — v = 0 это ВЕРХ изображения, флип не нужен;
+ *   • Quaternius «Medieval Village MegaKit» пришёл из Unity-пакета, где V растёт
+ *     снизу вверх, поэтому ему нужен переворот — иначе кладка стены берёт цвета
+ *     с кирпичей крыши, а серый камень руины становится тёмно-бурым (сравнение
+ *     побайтовое: без флипа палитра `ruin_wall` [979697 71737a] → [673506 733b0b]).
+ *   • у Kenney текстур нет вовсе (материал = фактор), ему всё равно.
+ * `tools/raster3d.js` сэмплирует по спецификации (без флипа), поэтому флип
+ * делается здесь — переворотом строки纹理 один раз на паке, а не веткой в
+ * растеризаторе, где он снова стал бы «нормой по умолчанию».
+ */
 const PACKS = {
-    kenney: "dev/character-style-lab/assets/kenney",
-    village: "dev/character-style-lab/assets/quaternius/village"
+    kenney: { dir: "dev/character-style-lab/assets/kenney" },
+    village: { dir: "dev/character-style-lab/assets/quaternius/village", uvFlip: true },
+    kaykit: { dir: "dev/character-style-lab/assets/kaykit" }
 };
 const PROP_MODEL = {
     rock: "rock_largeA.glb",
@@ -128,6 +156,19 @@ const PROP_MODEL = {
     // «плетень» превращается в гребёнку колышков.
     fence: { file: "Prop_WoodenFence_Single.gltf", pack: "village", fit: "x", px: 40 },
     crate: { file: "Prop_Crate.gltf", pack: "village", fit: "max", px: 16 },
+    /* KayKit «Medieval Hexagon Pack» (CC0) ПРОБОВАЛИ и не взяли. Пак пришёл
+       GitHub-зеркалом KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0
+       (`tools/pack-import.js`, 15 моделéй + атлас 1024² → 512², 256 КБ), но на
+       листах `--sheet` каждая замена выглядела хуже прежней: «палатка» пака —
+       навес на четырёх ножках (открытый шатёр, в него нельзя «зайти», а
+       история старта на неё и ссылается), сосна — бледный конус вместо
+       ярусной хвои, камень — плоская бетонная плита, куст — горстка света.
+       Причина системная: набор рассчитан на hex-tile вид сверху, где проп =
+       плитка, а не на 40-пиксельную фигурку в изометрии. Каталог остаётся в
+       dev/ как тестовый материал атласной запекки (тест «пекарня читает V по
+       glTF») и как источник деталей для БУДУЩИХ видов (лестница, кадка,
+       бочка, флагшток) — но свой новый вид пропа требует и процедурного
+       кейса в tilesart, иначе при выключенном 3D-слое он будет невидим. */
     // Телега стоит РЯДОМ (ящик, кострище, стена), значит размерить её надо по
   // ширине следа, как стену и забор: «max» даёт 37×23, и телега оказывается
   // МЕНЬШЕ ящика — ровно та претензия, что была к забору до fit:"x".
@@ -292,7 +333,8 @@ function bakeKind(kind) {
         }
         const mat = materialInfo(rig, prim.material, dir, (uri) => path.join(dir, path.basename(decodeURIComponent(uri))));
         const texFile = mat.texture?.file && fs.existsSync(mat.texture.file) ? mat.texture.file : null;
-        const texture = texFile ? loadPng(texFile) : (mat.texture?.buffer ? decodePng(mat.texture.buffer) : null);
+        const textureRaw = texFile ? loadPng(texFile) : (mat.texture?.buffer ? decodePng(mat.texture.buffer) : null);
+        const texture = packOf(pack).uvFlip ? flipV(textureRaw, texFile || mat.texture?.name || "tex") : textureRaw;
         // Текстура сама несёт цвет — красить её поверх фактора пака значит получить
         // кашу: для текстурных материалов factor остаётся как есть.
         let factor = texture ? (mat.factor || [1, 1, 1, 1]) : tintFactor(mat.name, mat.factor);
@@ -580,7 +622,7 @@ if (EMIT) {
  * Не править руками.
  */
 export const PROP_SPRITES = ${JSON.stringify(kinds)};
-export const PROP_META = { pxPerUnit: ${PX_PER_UNIT}, pitch: ${PITCH}, yaw: ${YAW}, baked: "${new Date().toISOString().slice(0, 10)}", source: ${JSON.stringify(PACKS)} };
+export const PROP_META = { pxPerUnit: ${PX_PER_UNIT}, pitch: ${PITCH}, yaw: ${YAW}, baked: "${new Date().toISOString().slice(0, 10)}", source: ${JSON.stringify(packSourceNotes())} };
 `;
     fs.mkdirSync(path.dirname(path.resolve(EMIT)), { recursive: true });
     fs.writeFileSync(EMIT, body);

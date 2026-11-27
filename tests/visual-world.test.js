@@ -22,7 +22,7 @@ import { PROP_SPRITES, PROP_META } from "../js/render/propsprites.js";
 import { installDOM } from "./dom-harness.js";
 import fs from "node:fs";
 import path from "node:path";
-import { cameraBasis } from "../tools/raster3d.js";
+import { cameraBasis, makeFrame, renderFrame } from "../tools/raster3d.js";
 import { META as GRADED_META } from "../js/render/heroframes.js";
 const GRADED_CELL = GRADED_META.cell;
 import { paintProp3D, prop3dStatus, PROPS3D } from "../js/render/props3d.js";
@@ -1249,7 +1249,7 @@ test("живой рендер выбирает позу по состоянию 
         "в падении лист показывал стойку — живой рендер обязан показывать ту же");
     assert.eq(pose({ dir: "down", moving: false, leftTool: "torch" }).label, "torch");
     for (const label of ["idle", "walk", "run", "attack", "chop", "mine", "gather", "torch"]) {
-        assert.ok(live.liveClipFrames(label) > 1, `клип «${label}» пуст — позa не сыграет`);
+        assert.ok(live.liveClipFrames(label) > 1, `клип «${label}» пуст — поза не сыграет`);
     }
 });
 
@@ -1389,6 +1389,39 @@ test("мрак не съедает лепку: floor света = усилени
         assert.gte(a, 0); assert.lte(a, 0.9);
         if (h >= 9 && h <= 16) assert.eq(a, 0, `днём затемнения быть не должно (${h})`);
     }
+});
+
+test("пекарня читает V по glTF: v = 0 — ВЕРХНЯЯ строка текстуры", () => {
+    // glTF 2.0 §3.10: v = 0 — верхняя строка изображения, и PNG декодируется сверху
+    // вниз. Растеризатор когда-то жил по OpenGL-конвенции (брали строку 1 − v), и
+    // на паке «одна моделé — одна текстура» это было не видно: отзеркалить полотно
+    // по вертикали почти то же полотно. На атласе (KayKit «Medieval Hexagon», где
+    // цвета — плитки сетки 16×16) та же ошибка уводила каждую грань в соседнюю
+    // плитку: хвоя дерева красилась цветом неба (#007450 → #2797d1), а серый
+    // камень руины становился тёмно-бурым. Паки, приехавшие из Unity (Quaternius),
+    // переворота требуют, — но он объявлен У ПЕКАРЯ (PACKS.uvFlip в
+    // tools/prop-bake.js, flipTextureY в tools/hero-bake.js), а не в
+    // растеризаторе. Этот тест сторожит границу: общее — спецификация, частное —
+    // привычка конкретного экспортёра.
+    const basis = cameraBasis({ yaw: 0, pitch: 0, target: [0, 0, 0], distance: 6 });
+    const tex = { width: 1, height: 2, data: new Uint8ClampedArray([255, 0, 0, 255, 0, 0, 255, 255]) };
+    const quad = {
+        positions: new Float32Array([-1, 1, 0, 1, 1, 0, 1, -1, 0, -1, -1, 0]),
+        normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
+        uv: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),          // верх меша → v = 0
+        indices: Uint16Array.from([0, 1, 2, 0, 2, 3]), count: 4, texture: tex, factor: [1, 1, 1, 1]
+    };
+    const frame = makeFrame(16, 16);
+    renderFrame(frame, { basis }, [quad], {
+        pxPerUnit: 5,
+        light: { dir: [0, 0, 1], color: [1, 1, 1], intensity: 1, sky: [0.5, 0.5, 0.5], ground: [0.5, 0.5, 0.5], ambient: 0.5 }
+    });
+    const at = (x, y) => { const o = (y * 16 + x) * 4; return [frame.data[o], frame.data[o + 1], frame.data[o + 2]]; };
+    const top = at(8, 4), bottom = at(8, 11);
+    assert.gte(top[0], 200, `верх меша обязан брать НУЛЕВУЮ строку текстуры (${top.join(",")})`);
+    assert.lte(top[2], 40, `красный сверху, а не синий (${top.join(",")})`);
+    assert.gte(bottom[2], 200, `низ обязан брать ПОСЛЕДНЮЮ строку (${bottom.join(",")})`);
+    assert.lte(bottom[0], 40, `синий снизу, а не красный (${bottom.join(",")})`);
 });
 
 await run("visual-world");
