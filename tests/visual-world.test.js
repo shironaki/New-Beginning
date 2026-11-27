@@ -5,7 +5,8 @@ import { T, tileInfo } from "../js/world/tiles.js";
 import { TileMap } from "../js/world/tilemap.js";
 import { TerrainField } from "../js/world/terrain.js";
 import { coastDistances } from "../js/world/coast.js";
-import { seaColour } from "../js/render/terrain.js";
+import { seaColour, terrainColour } from "../js/render/terrain.js";
+import { ambientAt, LIGHT } from "../js/render/lighting.js";
 import { PROPS, requiredTool, rollDrops } from "../js/sandbox/gather.js";
 import { RNG } from "../js/core/rng.js";
 import { torchFlame, paintTorchFlame } from "../js/render/torch.js";
@@ -1340,5 +1341,55 @@ test("отказ живого слоя = лист, а не пустой спра
     assert.ok(live.liveSupported() === false, "liveSupported в node без document обязан быть false");
 });
 
+
+test("земля в печёном рельефе нарисована, а не залита одним тоном", () => {
+    // Кадр 79.2: у terrainColour было две октавы на ±6 ярк. ед. и ни одного
+    // дизера — пол любой зоны выходил закрашенным листом («мир плоский, как
+    // фон»). Мера прямая: соседние точки земли обязаны различаться, а оттенков
+    // обязано хватать на ступени тона. На прежнем коде: 0.57 и 3 — тест падает.
+    const zone = generateZone("ashfall", 1);
+    const field = zone.terrain;
+    const pal = {};
+    for (const k of Object.keys(T)) pal[T[k]] = [120, 100, 80];
+    const stats = (biome) => {
+        const z = biome === "ashfall" ? zone : generateZone(biome, 1);
+        const f = z.terrain;
+        let prev = null, d = 0, dn = 0, mn = 1e9, mx = -1e9;
+        const tones = new Set();
+        for (let y = 0; y < 96; y++) for (let x = 0; x < 96; x++) {
+            const c = terrainColour(f, 300 + x * 2, 400 + y * 2, "autumn", pal);
+            const L = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+            tones.add(c[0] >> 3 << 6 | c[1] >> 3 << 3 | c[2] >> 3);
+            if (x && prev !== null) { d += Math.abs(L - prev); dn++; }
+            prev = L; if (L < mn) mn = L; if (L > mx) mx = L;
+        }
+        return { contrast: d / dn, spread: mx - mn, tones: tones.size };
+    };
+    for (const biome of ["ashfall", "forest", "highland"]) {
+        const s = stats(biome);
+        assert.gte(s.contrast, 2, `${biome}: соседние точки земли различимы (${s.contrast.toFixed(2)})`);
+        assert.gte(s.spread, 32, `${biome}: разброс тона земли (${s.spread.toFixed(0)})`);
+        assert.gte(s.tones, 10, `${biome}: оттенков земли (${s.tones})`);
+    }
+});
+
+test("мрак не съедает лепку: floor света = усиление контраста ночи", () => {
+    // Darkness накладывается multiply-проходом, out = in · G, G = floor + α·tint.
+    // При floor 0.14 весь дневной микро-рельеф сжимался в 1/7 — ночью был «кадар
+    // из пятен». Пол — это то, во что превращается ночной кадр; ниже 0.26 ночи
+    // снова становятся кашей, выше — «сумерки вместо ночи».
+    const deep = ambientAt(0, "clear");
+    const k = Math.min(1 - LIGHT.floor, deep.alpha);
+    const gain = (1 - k) + k * (parseInt(LIGHT.lut[0].hex.slice(3, 5), 16) / 255);
+    assert.gte(LIGHT.floor, 0.26, "ночное усиление яркости");
+    assert.gte(gain, 0.3, `ночной кадр обязан сохранять разницу тонов (G=${gain.toFixed(2)})`);
+    assert.lte(gain, 0.5, `ночь обязана оставаться ночью (G=${gain.toFixed(2)})`);
+    // Ни один час не темнее floor и не светлее «нет затемнения».
+    for (let h = 0; h < 24; h++) {
+        const a = ambientAt(h, "clear").alpha;
+        assert.gte(a, 0); assert.lte(a, 0.9);
+        if (h >= 9 && h <= 16) assert.eq(a, 0, `днём затемнения быть не должно (${h})`);
+    }
+});
 
 await run("visual-world");

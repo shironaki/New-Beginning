@@ -78,8 +78,16 @@ export const LIGHT = {
     /** Caves: dark, but the gallery must still be legible without a torch —
      *  a black screen is not atmosphere, it is a bug report. */
     underground: { hex: "#0c1018", a: 0.54, aTorch: 0.68 },
-    /** Never crush the frame to black: the darkest pixel keeps this much. */
-    floor: 0.14,
+    /**
+     * Never crush the frame to black: the darkest pixel keeps this much.
+     * Это НЕ «яркость ночи», а усиление контраста: мрак накладывается
+     * `multiply`-проходом, `out = in · G`, где G = floor + α·tint. При floor 0.14
+     * вся дневная лепка земли (±12 ярк. ед.) сжималась в ±2 — глаз читал вместо
+     * фактуры ровное пятно, и лагерь в 05:48 на телефоне был «кашей». При 0.30
+     * ночи остаются тёмными (медиана кадра ~40 из 116), но разницу между
+     * тенями, пеплом и сажей видно: tools/frame-metrics.js → «контраст» 0.23 → 0.50.
+     */
+    floor: 0.30,
     /** Below this the buffer is not even built. */
     skip: 0.015,
     /** Baked falloff sprites. */

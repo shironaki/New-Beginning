@@ -8,8 +8,23 @@ import { groundPalette, paintTile, paintSnowGround } from "./tilesart.js";
 import { woodedEdge } from "../world/edges.js";
 import { receivesSnow } from "../world/surface.js";
 const built = new Set([T.PLANK, T.COBBLE, T.FARM, T.FARM_WET]);
+/** Земля, на которой что-то растёт: она ровная и тёплая, не в кляксах.
+ *  Один набор на модуль — раньше этот список пересобирался на каждый пиксель,
+ *  а в запёке их ~200 тысяч на чанк. */
+const LIVING = new Set([T.GRASS, T.MEADOW, T.MOSS, T.PINE_FLOOR, T.GRASS_DRY]);
+/** Открытый грунт: его красят пятнами. Пол и булыжник остаются своими. */
+const OPEN_GROUND = new Set([T.ASH, T.SOOT, T.DIRT, T.MUD, T.SAND, T.GRAVEL, T.STONE,
+    T.GRASS, T.MEADOW, T.PINE_FLOOR, T.GRASS_DRY]);
+/** Выжженное покрытие: свои пятна (уголь, а не перегной) и свой слой мусора. */
+const scorched = new Set([T.ASH, T.SOOT]);
 const parse = (s) => s.startsWith("#") ? [1, 3, 5].map((i) => parseInt(s.slice(i, i + 2), 16)) : s.match(/\d+/g).slice(0, 3).map(Number);
 const clamp = (n) => Math.max(0, Math.min(255, Math.round(n)));
+/** Дешёвый целый шум 0..1: четыре узла решётки, как у valueNoise, не нужны. */
+function hash2(x, y, s = 0) {
+    let n = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(s | 0, 2246822519)) | 0;
+    n = (Math.imul(n ^ (n >>> 13), 1274126177)) | 0;
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+}
 
 /** Continuous optical depth: do not derive colour from the solid/not-solid threshold. */
 export function seaColour(distance) {
@@ -33,8 +48,45 @@ export function terrainColour(field, wx, wy, season, palette) {
     }
     if (sum) { r /= sum; g /= sum; b /= sum; }
     else [r, g, b] = palette[s.id];
-    const grain = field.noise(wx, wy, 7, 81) - 0.5;
-    let tone = grain * 7 + (field.noise(wx, wy, 57, 82) - 0.5) * 5;
+    // Зерно земли. Печёный рельеф получал две октавы на ±6 ярк. ед., тогда как
+    // `paintTile` даёт тайловой земле ±24: из-за этого любой биом выглядел
+    // закрашенным листом. Теперь четыре октавы — патчи, пятна, крупицы, — но
+    // дешёвые: пиксельный шум берётся целочисленным хешем, а не valueNoise
+    // (тот на каждую выборку читает четыре узла решётки), и сдвиг домена —
+    // синусом. Иначе запёк чанка дорожает вдвое, а чанки пекутся на ходу.
+    const living = LIVING.has(s.id);
+    const blotchy = s.id === T.ASH || s.id === T.SOOT || s.id === T.DIRT || s.id === T.MUD;
+    const rocky = s.id === T.STONE;
+    const sandy = s.id === T.SAND || s.id === T.GRAVEL;
+    const amp = blotchy ? 18 : rocky ? 16 : sandy ? 11 : living ? 12 : 10;
+    // Доменный сдвиг: value-noise без него даёт пятно с квадратными углами
+    // (уровневые линии совпадают с осями решётки). Синус дешевле ещё одного
+    // шума, а рваность границы даёт ровно ту же.
+    const warpX = Math.sin(wy * 0.055 + Math.sin(wx * 0.021) * 1.4) * 22;
+    const warpY = Math.sin(wx * 0.047 - Math.sin(wy * 0.019) * 1.4) * 22;
+    const macro = field.noise(wx + warpX, wy + warpY, 57, 82) - 0.5;
+    const meso = field.noise(wx + warpX * 0.5, wy + warpY * 0.5, 21, 83) - 0.5;
+    const patch = field.noise(wx + warpX * 0.25, wy + warpY * 0.25, 9, 85) - 0.5;
+    const grain = field.noise(wx, wy, 6.5, 81) - 0.5;
+    // Ступень с дизером. Непрерывный шум читается «облаками», шум по пикселю —
+    // статикой; пиксель-арт живёт между: плоские тона пятна, а граница ступени
+    // рассыпана в 1 px. Зерно (grain/pix) кванту не подлежит — иначе шуршит.
+    const pix = hash2(wx, wy, 401);
+    const blot = macro * (amp * 0.3) + meso * (amp * 0.42) + patch * (amp * 0.5);
+    const quant = amp * 0.5;
+    let tone = Math.round((blot + (pix - 0.5) * quant * 0.8) / quant) * quant
+        + grain * (amp * 0.18) + (hash2(wx, wy, 84) - 0.5) * (amp * 0.1);
+    if (rocky) {
+        // Камень — это плита, а не песок: у него трещины. Узкая складка по
+        // волне даёт линию разлома, и плита перестаёт быть серой кашей.
+        const seam = Math.abs(Math.sin(wx * 0.062 + Math.sin(wy * 0.031) * 1.9 + field.noise(wx, wy, 40, 86) * 3.4));
+        tone -= Math.max(0, 0.22 - seam) * 150;
+        const seam2 = Math.abs(Math.sin(wy * 0.048 - Math.sin(wx * 0.024) * 1.3 + field.noise(wx, wy, 33, 87) * 2.7));
+        tone -= Math.max(0, 0.16 - seam2) * 120;
+    }
+    // Тон уходит в тепло/холод вместе с пятном, а не отдельно от него.
+    const warm = meso * (living ? 18 : 9);
+    r += warm; g += warm * 0.45; b -= warm * 0.7;
     if (water) {
         if (field.biome === "shore") [r, g, b] = seaColour(s.coast);
         const ice = waterIce(field.map, wx, wy, s.id);
@@ -53,6 +105,35 @@ export function terrainColour(field, wx, wy, season, palette) {
             r += (215 - r) * foam; g += (225 - g) * foam; b += (202 - b) * foam;
         }
     } else {
+        // Пятна материала поверх тайловой маски. Тайл отвечает за «что это»,
+        // пятна — за «какое оно»: сдутый пепел, высыхающий бугор, жирная
+        // земля в понижении. Без этого поляна остаётся одним цветом, и кадр
+        // читается закрашенным фоном, а не нарисованной землёй.
+        const open = OPEN_GROUND.has(s.id);
+        if (open) {
+            // Пятно материала — жёсткое, как мазок кисти: оно либо есть, либо
+            // его нет. Софт-градиент на весь экран читается аэрографом. Пороги
+            // берутся из уже посчитанной macro-октавы — отдельного шума не надо.
+            const drift = macro + 0.5;
+            const paleT = 0.63, deepT = 0.36;
+            // Пляж не может быть в пятнах так же, как пепелище: у песка свои
+            // правила — только светлая грива, и та вдвое слабее.
+            const kStain = scorched.has(s.id) ? 1 : sandy ? 0.4 : living ? 0.85 : 0.7;
+            let pale = (drift > paleT ? 0.22 : 0) * kStain;
+            let deep = (drift < deepT ? 0.2 : 0) * (sandy ? 0.35 : 1);
+            // Граница — зубцом в 1 px по хешу (не по чётности: черёд по чётности
+            // даёт «дверную сетку» на весь кадр — артефакт, за который и ругались).
+            const near = Math.abs(drift - paleT) < 0.05 || Math.abs(drift - deepT) < 0.05;
+            if (near && hash2(wx, wy, 311) > 0.54) pale = Math.max(pale, 0.14 * kStain);
+            else if (near) deep = Math.max(deep, 0.11 * (sandy ? 0.35 : 1));
+            if (pale > 0 || deep > 0) {
+                const [pr, pg, pb] = scorched.has(s.id) ? [216, 205, 184] : living ? [174, 162, 108] : [200, 188, 156];
+                const [nr, ng, nb] = scorched.has(s.id) ? [33, 28, 26] : living ? [36, 52, 29] : [62, 50, 37];
+                r += (pr - r) * pale + (nr - r) * deep;
+                g += (pg - g) * pale + (ng - g) * deep;
+                b += (pb - b) * pale + (nb - b) * deep;
+            }
+        }
         // Actual elevation also affects walking uphill. Hillshade uses the
         // same world-space normal and cannot restart at a chunk edge.
         const elevation = field.shadeElevation || field.elevation;
@@ -108,8 +189,15 @@ export function bakeTerrain(ctx, zone, cx, cy, size, season, inset = 0) {
     }
     ctx.putImageData(pixels, 0, 0);
     // Ground details distributed in world space, never clipped to a tile rim.
-    for (let y = ((3 - oy) % 9 + 9) % 9 - 9; y < size + 9; y += 9) for (let x = ((3 - ox) % 11 + 11) % 11 - 11; x < size + 11; x += 11) {
-        const wx = ox + x, wy = oy + y, v = field.noise(wx, wy, 3, 778);
+    for (let gy = ((3 - oy) % 9 + 9) % 9 - 9; gy < size + 9; gy += 9) for (let gx = ((3 - ox) % 11 + 11) % 11 - 11; gx < size + 11; gx += 11) {
+        // Мусор не сидит на решётке: точка сдвинута по хешу, а плотность
+        // собрана в кучи отдельным низкочастотным шумом. Ровные промежутки
+        // глаз читает как узор, кучи — как землю.
+        const x = gx + (field.noise(gx + 11, gy + 7, 6, 913) - 0.5) * 9;
+        const y = gy + (field.noise(gx + 5, gy + 13, 6, 917) - 0.5) * 9;
+        const wx = Math.round(ox + x), wy = Math.round(oy + y);
+        const v = field.noise(wx, wy, 3, 778);
+        if (field.noise(wx, wy, 34, 781) < 0.4) continue;
         const s = field.sample(wx, wy);
         if (tileInfo(s.id).liquid && !waterIce(zone.map, wx, wy, s.id).broken && waterIce(zone.map, wx, wy, s.id).cover >= 0.55) {
             if (v > 0.75) {
@@ -131,9 +219,32 @@ export function bakeTerrain(ctx, zone, cx, cy, size, season, inset = 0) {
                 ctx.fillStyle = "#b9a57c"; ctx.fillRect(x, y - 0.8, 0.5, 1.6);
             }
         }
-        const living = [T.GRASS, T.MEADOW, T.MOSS, T.PINE_FLOOR, T.GRASS_DRY].includes(s.id);
+        const living = LIVING.has(s.id);
+        // Лесная подстилка: хвоинки и мелкие сучья. Один тёмный квадрат на 11×9 px
+        // читался как грязь; теперь это сетчатый слой из двух тонов.
+        if (s.id === T.PINE_FLOOR && season !== "winter") {
+            ctx.strokeStyle = v > 0.8 ? "rgba(84,66,42,0.5)" : "rgba(40,46,30,0.42)";
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(x - 2, y + v * 2); ctx.lineTo(x + 2, y - v * 2);
+            ctx.moveTo(x - 1, y - 1.6); ctx.lineTo(x + 1.4, y + 2);
+            ctx.stroke();
+            continue;
+        }
         ctx.fillStyle = season === "winter" ? "rgba(242,248,251,0.32)" : living ? "rgba(49,65,28,0.22)" : "rgba(22,21,18,0.14)";
         ctx.fillRect(x + v * 4, y - v * 3, living ? 1 : 2, living ? 2 + v * 2 : 1);
+        // Выжженная земля помнит пожар: угольки и пепельные подтёки. Без них
+        // Пепелище — это ровное серо-коричневое поле, и кадр не читается.
+        if (scorched.has(s.id) && season !== "winter") {
+            if (v > 0.83) {
+                ctx.fillStyle = "rgba(18,16,15,0.62)";
+                ctx.fillRect(x + v * 3, y, 2, 1);
+                ctx.fillRect(x + v * 3 + 1, y + 1, 1, 1);
+            } else if (v > 0.7) {
+                ctx.fillStyle = "rgba(226,216,198,0.22)";
+                ctx.fillRect(x - 2, y + 1, 3, 1);
+            }
+        }
     }
     for (let y = Math.floor(oy / 32) * 32 - oy; y < size; y += 32) for (let x = Math.floor(ox / 32) * 32 - ox; x < size; x += 32) {
         const tx = (ox + x) / 32, ty = (oy + y) / 32, id = zone.map.get(tx, ty);

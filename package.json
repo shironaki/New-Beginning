@@ -35,6 +35,8 @@
     "surface": "node tools/surface-review.js",
     "environment": "node tools/environment-review.js",
     "visual": "node tools/visual-review.js",
+    "frame": "node tools/frame-metrics.js",
+    "frame:check": "node tools/frame-metrics.js --gate",
     "motion": "node tools/motion-review.js",
     "session:review": "node tools/session-review.js",
     "notes:motion": "node tools/notes-motion-review.js",
