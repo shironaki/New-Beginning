@@ -1,0 +1,164 @@
+import { openAppearance } from "./appearance.js";
+import { clearStyle } from "./styleflags.js";
+/** Browser session controls. No automatic overwrite until Continue/New Game
+ * has been explicitly selected; failed loads keep both live state and disk. */
+export function checkpoint(game, quiet = false) {
+    if (game.sessionReady === false) return false;
+    const ok = game.save.write({ day: game.clock.day, zone: game.zone.id });
+    if (!quiet || !ok) game.hud.toast(ok ? "Игра сохранена на этом устройстве" : "Не удалось сохранить. Не закрывайте игру: проверьте хранилище браузера.", ok ? "💾" : "⚠️");
+    game._saveElapsed = 0;
+    return ok;
+}
+export function resumeSaved(game) {
+    const data = game.save.read();
+    if (!data || !game.save.restore(data)) {
+        game.hud.toast("Сохранение не удалось загрузить. Текущая игра и файл не заменены.", "⚠️");
+        return false;
+    }
+    game.sessionReady = true;
+    game.hud.closePanel(true); game.hud.hideStory();
+    game.input.releaseAll(); game.input.consume(); game.touch?.reset();
+    if (!game.player.fallTimer) game.player.mvx = game.player.mvy = 0;
+    game.player.vx = game.player.vy = 0;
+    game.player.gait = game.player.runBlend = game.player.actionTimer = 0;
+    game.player.sleeping = false; game.sleepTarget = null;
+    game.tracks.clear(); game.particles.n = 0; game.interact = null;
+    game.camera.snapTo(game.player.x, game.player.y); game.renderer.invalidate();
+    game._saveElapsed = 0; game._saveDue = false;
+    game.hud.toast(!game.isTrial && !data.parts.world
+        ? "Загружен старый сейв: он не содержал состояние собранных ресурсов." : "Продолжаем с сохранённого места", "💾");
+    return true;
+}
+/**
+ * «Вид мира» — то же, что ?props3d / ?hero3d в адресной строке, но пальцем по
+ * экрану: на телефоне адресной строки нет, и без этого пункта игрок остаётся с
+ * тем стилем, который выбрал однажды при запуске. Выбор запоминается в этом
+ * браузере и применяется без перезагрузки.
+ */
+const STYLE_CHOICES = {
+    props3d: [["on", "Модели из паков (3D-запёк)"], ["off", "Процедурные кривые"]],
+    hero3d: [["live", "Живой 3D (three.js в браузере)"], ["grade", "Пиксельный 3D-риг"],
+             ["smooth", "Гладкий 3D-риг (без грейда)"], ["off", "Векторная фигура"]],
+    props3dTone: [["auto", "Как диктует сезон и погода"], ["plain", "Без тона"], ["autumn", "Осень"],
+                  ["winter", "Зима"], ["wet", "Мокрый"], ["snowwet", "Мокрый снег"]]
+};
+
+function openStyleMenu(g, back) {
+    const style = g.style || {};
+    const current = (key, options) => (options.find(([v]) => (style[key] ?? options[0][0]) === v) || options[0])[1];
+    const rows = [["Пропы", "props3d"], ["Герой", "hero3d"], ["Тон кадра", "props3dTone"]].map(([title, key]) => ({
+        label: `${title}: ${current(key, STYLE_CHOICES[key])}`,
+        action: () => g.hud.openPanel(title, STYLE_CHOICES[key].map(([value, label]) => ({
+            label,
+            action: () => Promise.resolve(g.setStyle({ [key]: value === "auto" ? null : value }))
+                .then(() => openStyleMenu(g, back))
+        })), "style")
+    }));
+    rows.push({ html: "Ссылка со ?props3d=off или ?hero3d=smooth перекрывает этот выбор: сравнение в превью всегда работает как ожидалось." });
+    // Страховка для телефона: если сохранённый вид что-то сломал, чёрный экран
+    // должен иметь выход без консоли и без чистки хранилища руками.
+    rows.push({
+        label: "Забыть сохранённый вид", icon: "⟲", hint: "к значениям по умолчанию",
+        action: () => {
+            clearStyle();
+            const here = globalThis.location;
+            if (here && here.reload) here.reload(); else openStyleMenu(g, back);
+        }
+    });
+    rows.push({ label: "Назад", action: back });
+    g.hud.openPanel("Вид мира", rows, "style");
+}
+
+export function openSessionMenu(game) {
+    const g = game, initial = g.sessionReady === false;
+    g.input.releaseAll(); g.touch?.reset();
+    const rows = [];
+    if (!initial) rows.push({ label: "Продолжить игру", action: () => g.hud.closePanel(true) });
+    if (g.save.has()) rows.push({ label: initial ? "Продолжить сохранение" : "Загрузить сохранение", icon: "💾", action: () => {
+        if (initial) resumeSaved(g);
+        else g.hud.openPanel("Загрузить и заменить текущий прогресс?", [
+            { label: "Да, загрузить", action: () => resumeSaved(g) },
+            { label: "Назад", action: () => openSessionMenu(g) }
+        ], "session");
+    } });
+    if (!initial) rows.push({ label: `Ведущая рука: ${g.inventory.dominant === "left" ? "левая" : "правая"}`, action: () => {
+        g.hud.openPanel("Ведущая рука", [["left", "Левша"], ["right", "Правша"]].map(([side, label]) => ({ label,
+            action: () => { g.inventory.setDominant(side); openSessionMenu(g); }
+        })), "handedness");
+    } });
+    if (!initial) rows.push({ label: "Внешность", action: () => openAppearance(g, () => openSessionMenu(g)) });
+    if (!initial) rows.push({ label: "Вид мира", action: () => openStyleMenu(g, () => openSessionMenu(g)) });
+    if (!initial) rows.push({ label: "Состояние и причины", action: () => g.openCondition() });
+    if (!initial) rows.push({ label: "Сохранить игру", icon: "💾", action: () => checkpoint(g) });
+    if (!g.isTrial) rows.push({ label: "Новая игра", action: () => {
+        g.hud.openPanel("Начать заново? Старый прогресс будет заменён после сохранения.", [
+            { label: "Да, начать заново", action: () => {
+                if (!g.save.restore(g.initialState)) return;
+                g.sessionReady = true; g.hud.closePanel(true); g.hud.hideStory();
+                g.input.releaseAll(); g.tracks.clear(); g.particles.n = 0;
+                g.camera.snapTo(g.player.x, g.player.y); g.renderer.invalidate();
+                openAppearance(g, () => { g.hud.closePanel(true); checkpoint(g); }, true);
+            } },
+            { label: "Назад", action: () => openSessionMenu(g) }
+        ], "session", { locked: initial });
+    } });
+    if (g.viewport) rows.push({ label: "Полный экран", icon: "⛶", action: () => g.viewport.toggleFullscreen() });
+    if (g.viewport) rows.push({ label: "Интерфейс", action: () => {
+        g.hud.openPanel("Интерфейс", [["auto", "Автоматически"], ["desktop", "ПК · клавиатура и мышь"], ["touch", "Сенсорный экран"]].map(([value, label]) => ({ label,
+            action: () => { g.viewport.setControls(value); openSessionMenu(g); }
+        })), "session", { locked: initial });
+    } });
+    rows.push({ html: "Сохранение хранится в этом браузере. На телефоне, ПК, Pages и превью — отдельные хранилища. Перед закрытием нажмите «Сохранить игру»." });
+    if (g.isTrial) rows.push({ label: "День / ночь / дождь / зима", action: () => g.openTrialConditions() });
+    // «Игровой участок рельефа» отсюда убран: переход в рельефные зоны владелец
+    // отменил, а вместе с ссылкой из меню из игры уползал и ?relief=1.
+     g.hud.openPanel("Игра · пауза", rows, "session", { locked: initial });
+}
+export function leaveFor(game, url) {
+    if (!game.isTrial && game.sessionReady === false) {
+        game.hud.toast("Сначала продолжите сохранение или начните новую игру.", "ℹ️"); return false;
+    }
+    if (!game.isTrial && !checkpoint(game)) return false;
+    window.location.href = url;
+    return true;
+}
+export function sessionTick(game, dt, blocked) {
+    if (game.isTrial || game.sessionReady === false) return;
+    if (!blocked) game._saveElapsed = (game._saveElapsed || 0) + dt;
+    if (game._saveDue || game._saveElapsed >= 30) {
+        game._saveDue = false; checkpoint(game, true);
+    }
+}
+export function installSession(game) {
+    game.sessionReady = true;
+    game.initialState = JSON.parse(JSON.stringify(game.save.snapshot()));
+    const bar = document.createElement("nav"); bar.className = "sessionControls";
+    bar.setAttribute("aria-label", "Управление игрой");
+    game.sessionButtons = { bag: game.hud.els.quickBag };
+    for (const [id, label, action] of [
+        ["menu", "☰", () => openSessionMenu(game)],
+        ["journal", "Дневник", () => { game.input.releaseAll(); game.hud.hideStory(); game.openJournal(); }],
+        ["action", "Действие", () => game.input.tap("action")],
+        ["fullscreen", "⛶", () => game.viewport?.toggleFullscreen()]
+    ]) {
+        const b = document.createElement("button"); b.type = "button"; b.textContent = label;
+        b.className = `control-${id}`;
+        b.setAttribute("aria-label", { menu: "Меню игры", bag: "Рюкзак", journal: "Дневник", action: "Действие", fullscreen: "На весь экран" }[id]);
+        b.addEventListener("click", () => { if (id === "menu" || id === "fullscreen" || game.sessionReady !== false) action(); });
+        bar.appendChild(b); game.sessionButtons[id] = b;
+    }
+    game.hud.root.appendChild(bar);
+}
+export function bindSessionLifecycle(game, win, doc) {
+    const suspend = () => {
+        if (game.backgrounded) return;
+        game.backgrounded = true; game.input.releaseAll(); game.touch?.reset();
+        if (!game.isTrial) checkpoint(game, true);
+    };
+    const wake = () => { if (!doc.hidden) { game.backgrounded = false; game.input.releaseAll(); game.touch?.reset(); } };
+    win.addEventListener("blur", suspend);
+    win.addEventListener("focus", wake);
+    win.addEventListener("pagehide", suspend);
+    win.addEventListener("pageshow", wake);
+    doc.addEventListener("visibilitychange", () => doc.hidden ? suspend() : wake());
+}

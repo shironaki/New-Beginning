@@ -7,6 +7,7 @@
  * fire behaviour and mood.
  */
 import { RNG, mixSeeds } from "../core/rng.js";
+import { advanceWet, clampWet } from "./surface.js";
 
 export const WEATHER = {
     clear:  { name: "Ясно",     emoji: "☀️", vis: 1,    wet: 0 },
@@ -33,6 +34,7 @@ export class WeatherSystem {
         this.current = "clear";
         this.tomorrow = "clear";
         this.windAngle = 0;
+        this.groundWet = 0;
         if (clock) this.rollForDay(clock.day, clock.season.key);
         if (bus) {
             bus.on("time:newday", ({ day, season }) => this.rollForDay(day, season));
@@ -66,6 +68,20 @@ export class WeatherSystem {
         return `Завтра: ${t.emoji} ${t.name}`;
     }
 
-    toJSON() { return { current: this.current, tomorrow: this.tomorrow }; }
-    load(d) { if (d) { this.current = d.current || "clear"; this.tomorrow = d.tomorrow || "clear"; } return this; }
+    updateSurface(minutes) {
+        this.groundWet = advanceWet(this.groundWet, minutes, this.current, this.clock?.season.key);
+        return this;
+    }
+
+    toJSON() { return { current: this.current, tomorrow: this.tomorrow, groundWet: this.groundWet, windAngle: this.windAngle }; }
+    load(d) {
+        if (d) {
+            this.windAngle = Number.isFinite(d.windAngle) ? d.windAngle : new RNG(mixSeeds(this.seed, this.clock?.day || 1, 99)).range(0, Math.PI * 2);
+            this.current = d.current || "clear";
+            this.tomorrow = d.tomorrow || "clear";
+            // Old saves predate ground moisture and start dry.
+            this.groundWet = clampWet(d.groundWet);
+        }
+        return this;
+    }
 }

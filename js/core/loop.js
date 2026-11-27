@@ -17,7 +17,7 @@ export class GameLoop {
         this.raf = raf || (typeof requestAnimationFrame !== "undefined"
             ? requestAnimationFrame.bind(globalThis) : null);
         this.now = now || (typeof performance !== "undefined"
-            ? () => performance.now() : () => Date.now());
+            ? () => performance.now() : () => Date.now());   // @nondet: время кадра берётся из часов браузера — это не симуляция, а dt
         this.running = false;
         this.accumulator = 0;
         this.lastTime = 0;

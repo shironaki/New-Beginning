@@ -1,3 +1,5 @@
+import { NoteOutbox } from "./note-outbox.js";
+import { leaveFor } from "../ui/session.js";
 /**
  * dev tools — the owner's control room.
  *
@@ -22,8 +24,8 @@
  *   with the zone, the world coordinates, the in-game time, the weather and a
  *   PNG of exactly what you were looking at. They land in docs/notes/ — in the
  *   repository — so I can read them and fix precisely that.
- *   If the game is not being served by serve.js, the note is downloaded as a
- *   file instead and nothing is lost.
+ *   All reports are first saved locally, then sent. Only a Git receipt marks
+ *   delivery; the local archive remains exportable afterwards.
  */
 
 /** The panel, in numbers. */
@@ -171,7 +173,7 @@ export function installDevTools(game, win = window) {
         if (!state.unlocked) return;
         const ctx = game.renderer.ctx, cam = game.camera;
         if (state.grid) {
-            const T = 32, z = cam.zoom;
+            const T = 32;
             ctx.save();
             ctx.strokeStyle = "rgba(255,255,255,0.14)";
             ctx.lineWidth = 1;
@@ -181,10 +183,13 @@ export function installDevTools(game, win = window) {
                 ctx.beginPath(); ctx.moveTo(Math.round(s.x), 0);
                 ctx.lineTo(Math.round(s.x), game.renderer.canvas.height); ctx.stroke();
             }
-            for (let y = y0; y < cam.y + cam.viewH + T; y += T) {
-                const s = cam.worldToScreen(cam.x, y);
-                ctx.beginPath(); ctx.moveTo(0, Math.round(s.y));
-                ctx.lineTo(game.renderer.canvas.width, Math.round(s.y)); ctx.stroke();
+            for (let y = y0; y < cam.y + cam.viewH + T + (cam.surface?.maxHeight || 0); y += T) {
+                ctx.beginPath();
+                for (let x = cam.x; x <= cam.x + cam.viewW + 8; x += 8) {
+                    const s = cam.worldToScreen(x, y);
+                    if (x === cam.x) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
+                }
+                ctx.stroke();
             }
             ctx.restore();
         }
@@ -251,6 +256,14 @@ export function installDevTools(game, win = window) {
         p.append(el("button", { className: "close", textContent: "✕", title: "закрыть (Ctrl+Shift+D)",
                                 onclick: () => toggle(false) }));
 
+        const relief = el("a", { textContent: "↗ Стенд рельефа: холм и уступ", href: "dev/relief.html", target: "_self" });
+        relief.style.color = "#e2c58e";
+        relief.addEventListener("click", (e) => { e.preventDefault(); leaveFor(game, relief.href); });
+        p.append(relief);
+        // «?relief=1» из адреса игры убран: пилот подменял класс игры и лез в
+        // основное сохранение. Рельеф остался только стендом (ссылка выше).
+        p.append(el("small", { textContent: "Перед переходом основной прогресс сохраняется. Вернувшись, нажмите «Продолжить сохранение»." }));
+
         // ---- time
         add("Время");
         const hourLabel = el("span", { className: "val" });
@@ -305,6 +318,16 @@ export function installDevTools(game, win = window) {
         });
         p.append(windSlider);
 
+        const wetLabel = el("span", { className: "val" });
+        const wetSlider = el("input", { type: "range", min: "0", max: "100", step: "1" });
+        wetSlider.addEventListener("input", () => {
+            game.weather.groundWet = Number(wetSlider.value) / 100;
+            refresh();
+        });
+        p.append(wetLabel, wetSlider);
+        row(btn("Сухо", () => { game.weather.groundWet = 0; refresh(); }),
+            btn("После ливня", () => { game.weather.groundWet = 0.85; refresh(); }));
+
         // ---- zones
         add("Локации");
         const zoneWrap = el("div", { className: "row" });
@@ -333,6 +356,40 @@ export function installDevTools(game, win = window) {
         const noclipBtn = btn("Сквозь стены", () => { setNoclip(!state.noclip); refresh(); });
         const speedBtns = [1, 2, 4].map((k) => btn("скорость ×" + k, () => { setSpeed(k); refresh(); }));
         row(noclipBtn, ...speedBtns);
+
+        // ---- стиль героя: живой 3D / грейд / гладкий / вектор. Тот же переключатель, что и
+        // `?hero3d=`, но прямо в панели — с причиной отказа, если модуль не пришёл.
+        // Иначе «открыл ?hero3d=smooth, а там пусто» невозможно разобрать: игрок
+        // видит тишину вместо ответа.
+        add("Стиль героя");
+        const heroState = el("span", { className: "val" });
+        const setHero = async (mode) => {
+            // Только через стиль игры: тот же путь, что у пункта меню «Вид мира».
+            // Раньше панель писала прямо в HERO3D — выбор в панели исчезал после
+            // перезагрузки, а меню показывало другое значение, чем экран.
+            if (typeof game.setStyle !== "function") { toast("панель не нашла game.setStyle — правку не применить"); return; }
+            await game.setStyle({ hero3d: mode });
+            const hero3d = await import("../render/hero3d.js");
+            if (hero3d.HERO3D.error) toast(`${hero3d.HERO3D.error} — играет ${hero3d.HERO3D.quality}`);
+            refreshHeroState();
+        };
+        function refreshHeroState() {
+            import("../render/hero3d.js").then((hero3d) => {
+                const q = hero3d.HERO3D.enabled ? hero3d.HERO3D.quality : "off";
+                const links = hero3d.hero3dLinkCount ? hero3d.hero3dLinkCount() : null;
+                const live = hero3d.hero3dLiveInfo ? hero3d.hero3dLiveInfo() : null;
+                heroState.textContent = `активен: ${q}${links === null ? "" : ` · связок ${links}`}`
+                    + (live ? ` · live: ${live.ready ? `кадр ${live.coverage >= 0 ? live.coverage : "?"} px, образов ${live.looks}, кадров ${live.frames}, пропущено ${live.skipped}` : `отказ: ${live.error || live.reason}`}` : "");
+                for (const b of heroBtns) b.classList.toggle("on", b.dataset.hero === q);
+            });
+        }
+        const heroBtns = [["live", "Живой 3D"], ["grade", "Грейд 3D"], ["smooth", "Гладкий 3D"], ["off", "Вектор"]].map(([mode, name]) => {
+            const b = btn(name, () => setHero(mode));
+            b.dataset.hero = mode;
+            return b;
+        });
+        row(...heroBtns);
+        p.append(el("div", { className: "hint" }, [heroState]));
 
         // ---- items
         add("Предметы");
@@ -374,10 +431,10 @@ export function installDevTools(game, win = window) {
         const queueLabel = el("span", { className: "val" });
         const sendBtn = btn("Отправить очередь", () => flushQueue(true),
                             "попробовать ещё раз, когда dev-сервер доступен");
-        const saveBtn = btn("Выгрузить файлом", () => downloadQueue(),
+        const saveBtn = btn("Выгрузить все файлом", () => downloadQueue(),
                             "один файл со всеми заметками сразу");
-        const dropBtn = btn("Очистить", () => {
-            if (confirm("Удалить все заметки из очереди?")) { queue.clear(); state.refresh(); }
+        const dropBtn = btn("Очистить доставленные", () => {
+            if (confirm("Удалить локальные копии доставленных заметок? Недоставленные останутся.")) { queue.clearDelivered(); state.refresh(); }
         });
         row(queueLabel);
         row(sendBtn, saveBtn, dropBtn);
@@ -415,6 +472,8 @@ export function installDevTools(game, win = window) {
             hourLabel.textContent = `${game.clock.clockString()}  ${game.clock.season.name}`;
             hourSlider.value = String(Math.round(game.clock.minute));
             dayLabel.textContent = `день ${game.clock.day} · ${game.clock.season.name}`;
+            wetLabel.textContent = `Влажность земли: ${Math.round(game.weather.groundWet * 100)}%`;
+            wetSlider.value = String(Math.round(game.weather.groundWet * 100));
             windLabel.textContent = `ветер ${(game.weather.windAngle * 57.3).toFixed(0)}°`;
             windSlider.value = String(Math.round(game.weather.windAngle * 100));
             freezeBtn.classList.toggle("on", state.freezeWeather);
@@ -427,22 +486,26 @@ export function installDevTools(game, win = window) {
             for (const n of needRows) {
                 n.slider.value = String(Math.round(game.needs[n.key]));
             }
+            if (state.refreshHero) state.refreshHero();
             noclipBtn.classList.toggle("on", state.noclip);
             speedBtns.forEach((b, i) => b.classList.toggle("on", state.speed === [1, 2, 4][i]));
             gridBtn.classList.toggle("on", state.grid);
             hitBtn.classList.toggle("on", state.hitboxes);
             statBtn.classList.toggle("on", state.stats);
             const n = queue.read().length;
-            queueLabel.textContent = n ? `в очереди: ${n}` : "очередь пуста";
+            queueLabel.textContent = `Ожидают Git: ${n} · в архиве: ${queue.all().length}`
+                + (queue.lastError ? ` · ${queue.lastError}` : "")
+                + (queue.picturesDropped ? " · часть кадров снята ради сохранения текста" : "");
             sendBtn.classList.toggle("on", n > 0);
             serverLabel.textContent = state.serverUp === undefined
                 ? "проверяю сервер…"
                 : state.serverUp
-                    ? "✔ dev-сервер на связи — заметки идут прямо в репозиторий"
-                    : "✖ сервера нет (Pages или файл с диска) — заметки копятся в очереди";
+                    ? "Сервер доступен. Доставка — только после подтверждения Git."
+                    : "Нет подтверждённого соединения. Заметки остаются на этом адресе браузера.";
             serverLabel.style.color = state.serverUp ? "#9fd08c" : "#e0a06a";
         }
         state.refresh = refresh;
+        state.refreshHero = refreshHeroState;
         refresh();
         setInterval(() => { if (state.open) refresh(); }, 500);
     }
@@ -486,7 +549,7 @@ export function installDevTools(game, win = window) {
         const sx = (ev.clientX - r.left) * (canvas.width / r.width);
         const sy = (ev.clientY - r.top) * (canvas.height / r.height);
         const cam = game.camera;
-        return { x: cam.x + sx / cam.zoom, y: cam.y + sy / cam.zoom, sx, sy };
+        return { ...cam.screenToWorld(sx, sy), sx, sy };
     }
 
     /**
@@ -539,8 +602,9 @@ export function installDevTools(game, win = window) {
         const send = btn("Отправить", async () => {
             const text = ta.value.trim();
             if (!text) { toast("пустая заметка"); return; }
-            box.remove();
-            await sendNote(spot, text);
+            send.disabled = true;
+            if (await sendNote(spot, text)) box.remove();
+            else send.disabled = false;
         });
         const cancel = btn("Отмена", () => box.remove());
         box.append(el("div", { className: "row", style: "justify-content:flex-end;margin-top:6px" }, [cancel, send]));
@@ -555,23 +619,7 @@ export function installDevTools(game, win = window) {
 
     /* ---- the queue ---------------------------------------------------- */
 
-    const queue = {
-        read() {
-            try { return JSON.parse(localStorage.getItem(DEV.queueKey) || "[]"); }
-            catch { return []; }
-        },
-        write(list) {
-            try { localStorage.setItem(DEV.queueKey, JSON.stringify(list.slice(-DEV.queueMax))); }
-            catch { toast("очередь переполнена — выгрузи её файлом"); }
-        },
-        push(note) {
-            const list = this.read();
-            list.push(note);
-            this.write(list);
-            return list.length;
-        },
-        clear() { localStorage.removeItem(DEV.queueKey); }
-    };
+    const queue = new NoteOutbox(localStorage, DEV.queueKey);
 
     /**
      * Is there anything on the other end that can save a note? Pages cannot,
@@ -581,54 +629,46 @@ export function installDevTools(game, win = window) {
     async function pingServer() {
         try {
             const r = await fetch("/__dev/notes", { headers: { "x-dev-token": state.token } });
-            return r.ok;
+            const data = r.ok ? await r.json() : null;
+            return data?.ok === true && Array.isArray(data.files);
         } catch { return false; }
     }
 
-    /** Try the dev server once. Returns the saved file name, or null. */
+    /** HTTP 200 is not enough: keep the report until Git confirms delivery. */
     async function postNote(note) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
         try {
             const r = await fetch("/__dev/note", {
-                method: "POST",
+                method: "POST", signal: controller.signal,
                 headers: { "content-type": "application/json", "x-dev-token": state.token },
                 body: JSON.stringify(note)
             });
-            if (!r.ok) return null;
-            const j = await r.json();
-            // The server tells us whether the note made it into git; if it
-            // only reached the disk, say so — a sandbox can be wiped.
-            if (j.file && j.pushed === false) toast("заметка сохранена, но НЕ запушена", 4000);
-            return j.file || "ok";
-        } catch { return null; }
+            const receipt = r.ok ? await r.json() : null;
+            state.serverUp = receipt?.ok === true;
+            return receipt;
+        } catch { state.serverUp = false; return null; }
+        finally { clearTimeout(timeout); }
     }
 
-    /** Send everything that is waiting. Quiet when there is nothing to do. */
     async function flushQueue(loud = false) {
-        const list = queue.read();
-        if (!list.length) { if (loud) toast("очередь пуста"); return 0; }
-        const left = [];
-        let sent = 0;
-        for (const note of list) {
-            // eslint-disable-next-line no-await-in-loop — order matters, these are notes
-            const file = await postNote(note);
-            if (file) sent++; else left.push(note);
-        }
-        queue.write(left);
-        if (sent) toast(`отправлено заметок: ${sent}` + (left.length ? `, осталось ${left.length}` : ""));
-        else if (loud) toast("сервер недоступен — заметки ждут в очереди");
+        const sent = await queue.flush(postNote);
+        const left = queue.read().length;
+        if (sent || loud) toast(`Подтверждено в Git: ${sent}. Ожидают отправки: ${left}. Копии — в архиве.`, 5000);
         if (state.refresh) state.refresh();
         return sent;
     }
 
     /** One file with everything in it, instead of a file per note. */
     function downloadQueue() {
-        const list = queue.read();
-        if (!list.length) { toast("очередь пуста"); return; }
-        const bundle = { kind: "minirpg-notes", version: 1, at: new Date().toISOString(), notes: list };
+        const list = queue.all();
+        if (!list.length) { toast("архив пуст"); return; }
+        const bundle = { kind: "minirpg-notes", version: 2, origin: location.origin, at: new Date().toISOString(), notes: list };
         const blob = new Blob([JSON.stringify(bundle)], { type: "application/json" });
         const a = el("a", { href: URL.createObjectURL(blob),
                             download: `notes-${new Date().toISOString().slice(0, 10)}-${list.length}.json` });
         document.body.append(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
         toast(`выгружено заметок: ${list.length} (одним файлом)`);
     }
 
@@ -645,19 +685,24 @@ export function installDevTools(game, win = window) {
             day: game.clock.day, time: game.clock.clockString(),
             season: game.clock.season.key,
             weather: game.weather.current,
+            groundWet: game.weather.groundWet,
             zoom: Number(game.camera.zoom.toFixed(2)),
             seed: game.seed,
+            ui: { mode: game.controlMode, panel: game.hud.panelOpen, objective: game.hud.els.objective.textContent,
+                hands: game.inventory.hands, dominant: game.inventory.dominant, origin: location.origin },
             at: new Date().toISOString(),
             shot: markedShot(spot)
         };
-        const file = await postNote(note);
-        if (file) { toast("заметка сохранена: " + file); return; }
-        // No server (GitHub Pages, a file:// page): the note waits in the
-        // browser instead of landing in Downloads as yet another file.
-        const n = queue.push(note);
-        toast(`сервера нет — заметка ${n} в очереди, выгрузишь одним файлом`);
-        if (state.refresh) state.refresh();
+        if (!queue.push(note)) {
+            toast(queue.lastError, 7000);
+            if (state.refresh) state.refresh();
+            return false; // retain the editor text; never report a failed write as saved
+        }
+        toast("Сохранено в архиве браузера. Ожидает подтверждения Git.", 4000);
+        await flushQueue(true);
+        return true;
     }
+
 
     /* ------------------------------------------------------------ wiring */
 
@@ -665,8 +710,7 @@ export function installDevTools(game, win = window) {
         state.open = on === undefined ? !state.open : on;
         if (state.panel) state.panel.style.display = state.open ? "block" : "none";
         if (state.open && state.refresh) state.refresh();
-        // Opening the panel is a good moment to try the server again: notes
-        // written on Pages get saved the next time you play through serve.js.
+        // Retry this origin only. Notes on Pages/another preview require export/import.
         if (state.open && state.unlocked) {
             pingServer().then((up) => {
                 state.serverUp = up;
@@ -803,16 +847,20 @@ export function installDevTools(game, win = window) {
             : Array.isArray(data.notes) ? data.notes
             : data.text ? [data] : null;
         if (!notes || !notes.length) { toast("в файле нет заметок"); return; }
-        let sent = 0;
         for (const note of notes) {
-            // eslint-disable-next-line no-await-in-loop — a handful of notes, in order
-            if (await postNote(note)) sent++; else queue.push(note);
+            if (!note || typeof note.text !== "string") continue;
+            // Another host's receipt does not prove delivery to this server.
+            const { delivery, ...report } = note;
+            queue.push(report);
         }
-        toast(sent === notes.length
-            ? `принято заметок: ${sent}`
-            : `принято ${sent} из ${notes.length}, остальные в очереди`, 4000);
+        await flushQueue(true);
+        if (queue.lastError) toast(queue.lastError, 7000);
         if (state.refresh) state.refresh();
     });
 
+    const retry = setInterval(() => {
+        if (state.unlocked && queue.read().length) flushQueue(false);
+    }, 30000);
+    retry.unref?.();
     return state;
 }

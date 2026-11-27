@@ -9,7 +9,7 @@
  * you want to change a proportion, a colour or the length of a stride, edit
  * the spec. This file only knows how to paint what the spec describes.
  *
- * Style target: Albion's readable chunk — small head, heavy shoulders, pinched
+ * Style target: an ink-cut travelling figure — small head, heavy shoulders, pinched
  * waist, big hands and boots, three tone bands with a warm rim, and a contour
  * that exists only on the shadow side. Locomotion is distance driven (see
  * entities/player.js) and carries weight: the pelvis swings over the
@@ -17,31 +17,57 @@
  *
  * Body frame: origin between the feet, on the ground; up is negative Y.
  */
+import { drawHead } from "./head.js";
+import { torchFlame, paintTorchFlame } from "./torch.js";
 import { SUN, castShadow } from "./tilesart.js";
-import { BODY, GEAR, TONE, PALETTE, READ, SHADOW, WADE, GAIT, ACTION, clamp01, easeInOutSine, q } from "./charspec.js";
+import { heroSprite, heroHandAnchor } from "./hero3d.js";
+import { ITEMS } from "../sandbox/items.js";
+import { BODY, GEAR, TONE, PALETTE, READ, SHADOW, WADE, GAIT, ACTION, ATTACH, SEX, sexOf, fallPose, clamp01, easeInOutSine, q, shadeHex } from "./charspec.js";
 
 export const DEFAULT_LOOK = {
-    skin: "#e2b48a",
-    hair: "#4a3526",
-    shirt: "#6d7f4a",
-    pants: "#524636",
-    accent: "#8a4b32",       // one accent per figure — sash, flap, trim
+    gender: "male", coat: "#446d68",
+    skin: "#e0b594",
+    hair: "#302b29",
+    shirt: "#899383",
+    vest: "#41524e",
+    pants: "#48473e",
+    accent: "#c9a063",       // one accent per figure — sash, flap, trim
     cloak: null,
     hairStyle: "short",
-    shoulders: true,         // gear as silhouette
-    bracers: true,
-    bootCuff: true,
-    beltFlap: true
+    stubble: true,
+    satchel: true,
+    shoulders: false,         // gear as silhouette
+    bracers: false,
+    bootCuff: false,
+    beltFlap: false
 };
 
-function shadeHex(hex, amount) {
-    const c = hex.replace("#", "");
-    const r = parseInt(c.slice(0, 2), 16), g = parseInt(c.slice(2, 4), 16), b = parseInt(c.slice(4, 6), 16);
-    const f = (v) => Math.max(0, Math.min(255, Math.round(v + amount)));
-    return `rgb(${f(r)},${f(g)},${f(b)})`;
+/**
+ * Tone band of a base colour: band(c, "lit" | "base" | "dark" | "deep").
+ * Сам сдвиг тона переехал в charspec.shadeHex: оттуда же его берёт запекка
+ * спрайтов, чтобы «светлая сторона» у героя и у поселенца была одним числом.
+ */
+/**
+ * Что дальняя рука обязана показать поверх корпуса: предметы со светом. Факел,
+ * спрятанный за телом, превращает ночь в слепое пятно, и «факел виден всегда»
+ * из charspec важнее честной окклюзии. Список берётся из тегов ITEMS, а не из
+ * догадок: добавишь источник света в items.js — он окажется здесь сам.
+ */
+export const LIGHT_ITEMS = new Set(
+    Object.entries(ITEMS).filter(([, it]) => it.tags && it.tags.includes("light")).map(([id]) => id)
+);
+/** Во сколько раз предмет меньше векторного у спрайтового героя: пальцы там короче. */
+export const SPRITE_ITEM_SCALE = 0.92;
+
+/**
+ * Рисовать ли предмет дальней руки ПЕРЕД спрайтом. По умолчанию нет: в профиль
+ * рука уходит за корпус, и клинок поверх груди читается наклейкой. Исключения —
+ * еда у рта и всё, что светит (см. LIGHT_ITEMS).
+ */
+export function farItemInFront(p, farHand, tool) {
+    return p.eatingHand === farHand || (!!tool && LIGHT_ITEMS.has(tool));
 }
 
-/** Tone band of a base colour: band(c, "lit" | "base" | "dark" | "deep"). */
 const band = (hex, name) => shadeHex(hex, TONE[name]);
 
 /* --- primitives ---------------------------------------------------------
@@ -103,21 +129,6 @@ function limb(ctx, x0, y0, x1, y1, w0, w1, fill, contour = true) {
 
 /* --- body profile: rows of (y, halfWidth) ------------------------------- */
 
-/** Full outline of a profile. */
-const silhouette = (rows) => [
-    ...rows.map(([y, hw]) => [-hw, y]),
-    ...[...rows].reverse().map(([y, hw]) => [hw, y])
-];
-
-/**
- * A vertical stripe measured inwards from one edge of the profile — this is
- * how the tone bands follow the pinched waist instead of cutting across it.
- * `s` = -1 left edge, +1 right edge; `a`,`b` = insets.
- */
-const stripe = (rows, s, a, b) => [
-    ...rows.map(([y, hw]) => [s * hw - s * a, y]),
-    ...[...rows].reverse().map(([y, hw]) => [s * hw - s * b, y])
-];
 
 /**
  * Two-bone IK: given hip and ankle, where is the knee?
@@ -141,6 +152,7 @@ function knee(hx, hy, ax, ay, bendDir) {
  * unit tested — this is where the left/right mirror bug lived.
  */
 export function posture(p) {
+    if (p.fallTimer > 0) p = { ...p, gait: 0, runBlend: 0, ax: 0, ay: 0, leanAX: 0, leanAY: 0, actionTimer: 0 };
     const dir = p.dir || "down";
     const phase = (p.phase != null ? p.phase : p.anim) || 0;
     const gaitRaw = clamp01(p.gait != null ? p.gait : (p.moving ? 1 : 0));
@@ -152,10 +164,10 @@ export function posture(p) {
     const back = dir === "up";
     const sideView = dir === "left" || dir === "right";
 
-    // Stride -> swing amplitude. stride/4 units of foot travel per step is
-    // exactly the ground covered per step, so the plant does not slide.
+    // Distance-driven cadence; bound the visual swing by anatomical reach.
     const strideU = (GAIT.strideWalk + (GAIT.strideRun - GAIT.strideWalk) * run) / GAIT.pxPerUnit;
-    const amp = strideU / 4;
+    // Cadence may slow without overextending the legs or pumping the head.
+    const amp = Math.min(3.5, strideU / 4);
     const liftAmp = GAIT.liftWalk + (GAIT.liftRun - GAIT.liftWalk) * run;
     const bobAmp = GAIT.bobWalk + (GAIT.bobRun - GAIT.bobWalk) * run;
 
@@ -163,8 +175,9 @@ export function posture(p) {
     // it the feet swung backwards when the hero walked left.
     const swingN = side * Math.sin(phase) * amp * g;           // near leg, forward+
     const swingF = side * Math.sin(phase + Math.PI) * amp * g; // far leg, antiphase
-    const liftN = Math.max(0, Math.cos(phase)) * liftAmp * g;
-    const liftF = Math.max(0, Math.cos(phase + Math.PI)) * liftAmp * g;
+    const fallen = fallPose(p).amount;
+    const liftN = Math.max(0, Math.cos(phase)) * liftAmp * g + fallen * 3.5;
+    const liftF = Math.max(0, Math.cos(phase + Math.PI)) * liftAmp * g + fallen * 1.4;
 
     // Hips are HIGH when the legs pass under the body, LOW on contact, with an
     // extra dip the instant the heel lands.
@@ -187,7 +200,7 @@ export function posture(p) {
     // How much of the acceleration points the way the hero faces: positive
     // while starting off, negative while braking.
     const fmag = Math.hypot(p.faceX || 0, p.faceY || 0) || 1;
-    const accAlong = ((p.ax || 0) * (p.faceX || 0) + (p.ay || 0) * (p.faceY || 0)) / fmag;
+    const accAlong = ((p.leanAX ?? p.ax ?? 0) * (p.faceX || 0) + (p.leanAY ?? p.ay ?? 0) * (p.faceY || 0)) / fmag;
     const accK = Math.max(-1, Math.min(1, accAlong / GAIT.accelRef));
     const lean = (sideView ? side * GAIT.leanRun * run * g : 0)
                + (sideView ? side * GAIT.leanAccel * accK : 0);
@@ -203,10 +216,97 @@ export function posture(p) {
             : Math.sin(((act - ACTION.windUp) / (1 - ACTION.windUp)) * Math.PI) * ACTION.strikeAmp)
         : 0;
 
-    bob += accLift;                       // head-on: push off / settle back
+    bob += accLift - fallPose(p).crouch;                       // head-on: push off / settle back
+    // Keep each ankle planted without stretching the shin beyond its IK
+    // reach. Previously only the knee target was clamped: the boot was not.
+    const reach = BODY.thigh + BODY.shin - 0.08;
+    for (const [travel, lift] of [[sideView ? swingN + stance : 0, liftN], [sideView ? swingF - stance : 0, liftF]]) {
+        const vertical = Math.sqrt(Math.max(0, reach * reach - travel * travel));
+        bob = Math.min(bob, BODY.hipY - BODY.ankleY + lift + vertical);
+    }
     return { dir, phase, g, run, idle, side, back, sideView, amp,
         swingN, swingF, liftN, liftF, bob, sway, counter, flagX,
         lean, squash, stance, swing };
+}
+
+/** Anatomical hands. RIGHT is screen-left head-on, screen-right from behind;
+ * near in right profile, far in left profile. Never swaps hands for visibility. */
+export function armRig(p, pose = posture(p)) {
+    const { sideView, side, back, bob, counter, lean, swingN, swingF, swing, g, idle } = pose;
+    const make = (x, reach, lift) => {
+        const sx = x + counter + lean, sy = BODY.armY - bob;
+        const ex = sx + reach, ey = sy + BODY.armLen - Math.abs(reach) * 0.25 - lift;
+        return { sx, sy, ex, ey, mx: (sx + ex) / 2 + reach * 0.1, my: (sy + ey) / 2 };
+    };
+    // Плечевой пояс вместе с руками: если у́же только стан, а локти на месте,
+    // получается не женская фигура, а «человек с оторванными плечами».
+    const ax = (BODY.shoulderW / 2 + BODY.armW / 2) * sexOf(p.look).arm;
+    const behind = p.dir === "left" || back;
+    const rest = Math.sin(idle * 1.3) * 0.45 * (1 - g);
+    const rs = p.actionHand === "left" ? 0 : swing, ls = p.actionHand === "left" ? swing : 0;
+    const lr = p.leftTool ? GAIT.armRatioTool : GAIT.armRatio;
+    const right = sideView
+        ? make(behind ? -BODY.farArmX * side : BODY.nearArmX * side,
+            -(behind ? swingF : swingN) * GAIT.armRatioTool + side * rs * 2.2 + rest, Math.max(0, rs) * 1.5)
+        : make(back ? ax : -ax, rest, (back ? 1 : -1) * swingN * GAIT.armRatioTool - rs * 2.2);
+    const left = sideView
+        ? make(behind ? BODY.nearArmX * side : -BODY.farArmX * side,
+            -(behind ? swingN : swingF) * lr + side * ls * 2.2 - rest, Math.max(0, ls) * 1.5)
+        : make(back ? -ax : ax, -rest, (back ? -1 : 1) * swingN * lr - ls * 2.2);
+    // A held far-hand item is carried ahead of the torso in profile, not
+    // buried inside it. This changes reach, NEVER anatomical assignment.
+    if (sideView) for (const hand of ["left", "right"]) {
+        const held = p[hand + "Tool"] || (hand === "right" ? p.tool : null);
+        if (held) { const a = hand === "left" ? left : right;
+            a.ex += side * (hand === (behind ? "right" : "left") ? 6 : 4);
+            a.ey -= 1.8; a.mx = (a.sx + a.ex) / 2; a.my = (a.sy + a.ey) / 2;
+        }
+    }
+    // Eating has a real occupied hand at the mouth; the other item stays held.
+    if (p.eatingHand) {
+        const a = p.eatingHand === "left" ? left : right;
+        a.ex = sideView ? side * 5 : (p.eatingHand === "right" ? -2 : 2);
+        a.ey = BODY.headY + 6 - bob;
+        a.mx = (a.sx + a.ex) / 2 + (p.eatingHand === "right" ? -3 : 3); a.my = (a.sy + a.ey) / 2 + 5;
+    }
+    // A free hand braces the fall; held items remain in their anatomical hand.
+    const brace = fallPose(p).amount;
+    left.ex += side * brace * 3; left.ey -= brace * 3;
+    left.mx = (left.sx + left.ex) / 2; left.my = (left.sy + left.ey) / 2 - brace;
+    return { right, left, behind };
+}
+
+function heldToolAngle(dir, side, swing, hand = "right") {
+    const anatomical = hand === "left" ? -1 : 1;
+    const lean = dir === "up" ? .65 * anatomical : dir === "down" ? -.65 * anatomical : side * .8;
+    return lean - side * swing * 1.9;
+}
+
+/** Shared attachment for sprite and light map, relative to the foot line. */
+export function toolAttachment(p, hand = "right") {
+    const pose = posture(p), rig = armRig(p, pose);
+    const dir = p.dir || "down";
+    const angle = heldToolAngle(dir, pose.side, p.actionHand && p.actionHand !== hand ? 0 : pose.swing, hand);
+    // Спрайтовый герой: кисть уже известна из 3D-рига, и она не совпадает с нашей
+    // векторной рукой. Свет факела и предмет обязаны идти за кадром запекки, иначе
+    // огненная точка живёт своей жизнью на полшага от ладони.
+    const baked = heroHandAnchor(p, hand, {
+        angle,
+        behind: hand === "right" ? rig.behind : !rig.behind
+    });
+    const gx = baked ? baked.x : rig[hand].ex;
+    const gy = baked ? baked.y : rig[hand].ey + BODY.handH / 2 - 0.5;
+    const narrow = pose.sideView ? 1 - GAIT.slantNarrow * Math.abs(p.slant || 0) : 1;
+    const flame = torchFlame(p.idleTime || 0, p.torchWind || 0, p.gait || 0);
+    const localX = flame.x * (dir === "left" ? -1 : 1);
+    let x = (gx + localX * Math.cos(angle) - flame.y * Math.sin(angle)) * narrow;
+    let y = gy + localX * Math.sin(angle) + flame.y * Math.cos(angle);
+    if (p.fallTimer > 0) {
+        const f = fallPose(p), a = f.angle, xx = x;
+        x = xx * Math.cos(a) - y * Math.sin(a);
+        y = xx * Math.sin(a) + y * Math.cos(a) + f.y;
+    }
+    return { x, y, intensity: flame.intensity, gripX: gx, gripY: gy, angle, behind: baked ? baked.behind : (hand === "right" ? rig.behind : !rig.behind) };
 }
 
 /**
@@ -215,6 +315,18 @@ export function posture(p) {
  *                     actionTimer, tool, idleTime }
  */
 export function drawCharacter(ctx, p) {
+    const fall = fallPose(p);
+    if (!(p.fallTimer > 0)) { paintCharacter(ctx, p); return; }
+    ctx.save();
+    // Contact shadow stays on the ground; never rotate it with the body.
+    ctx.fillStyle = "rgba(12,16,17,0.22)"; ctx.beginPath();
+    ctx.ellipse(Math.sin(fall.angle) * 10, 1, 7 + fall.amount * 10, 2.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.translate(0, fall.y); ctx.rotate(fall.angle);
+    paintCharacter(ctx, { ...p, _noShadow: true });
+    ctx.restore();
+}
+function paintCharacter(ctx, p) {
+    ctx.save();
     // A diagonal is drawn as the side view, turned: the body narrows a little
     // and the head leads the travel direction. Cheap, and it stops diagonal
     // movement from looking like the hero is sliding on rails.
@@ -231,7 +343,7 @@ export function drawCharacter(ctx, p) {
     const dir = p.dir || "down";
     const idle = p.idleTime || 0;
 
-    const skin = look.skin, shirt = look.shirt, pants = look.pants;
+    const skin = look.skin, shirt = look.coat || look.shirt, pants = look.pants;
     const leather = PALETTE.leather;
 
     /* ---- contact shadow, under the FEET, not under the sprite ---------- */
@@ -245,6 +357,7 @@ export function drawCharacter(ctx, p) {
     // every prop around him, so he throws the same kind of shadow. The CORE
     // below still sits strictly under the feet — that is what keeps him
     // planted while the cast part stretches away from the light.
+    if (!p._noShadow) {
     ctx.save();
     // In the shallows the water takes the shadow; drawing one under a boot
     // that is underwater reads as a hole in the lake.
@@ -268,6 +381,81 @@ export function drawCharacter(ctx, p) {
     ctx.ellipse(centroid, 0, SHADOW.coreRX * shrink, SHADOW.coreRY * shrink, 0, 0, Math.PI * 2);
     ctx.fill();
 
+    }
+    /* ---- запечённый герой: форма из 3D-рига, а не из примитивов ------- */
+    const sprite = heroSprite(p, look);
+    if (sprite) {
+        const rig = armRig(p);
+        const held = { right: p.rightTool === undefined ? p.tool : p.rightTool, left: p.leftTool || null };
+        const paintItem = (hand, far) => {
+            const tool = held[hand];
+            if (!tool) return;
+            const anchor = heroHandAnchor(p, hand, {
+                angle: heldToolAngle(dir, side, !p.actionHand || p.actionHand === hand ? swing : 0, hand),
+                behind: far,
+                // Инструмент идёт за кистью из кадра; еда и свет — нет: у них свой
+                // сценарий (еда у рта, факел поднятым), завязанный на векторный замах.
+                follow: !!tool && !LIGHT_ITEMS.has(tool) && tool !== "bundle" && p.eatingHand !== hand
+            });
+            if (!anchor) return;
+            // Предмет держат пальцы, а не запястье: у спрайтового героя кисть
+            // занимает несколько пикселей, и векторный клинок в полный размер
+            // выглядит наклейкой поверх руки. Чуть уменьшаем — так он выходит из
+            // кулака, а не лежит поперёк предплечья.
+            ctx.save();
+            ctx.translate(anchor.gripX, anchor.gripY);
+            ctx.scale(SPRITE_ITEM_SCALE, SPRITE_ITEM_SCALE);
+            ctx.translate(-anchor.gripX, -anchor.gripY);
+            drawHeldToolAt(ctx, tool, dir, side, anchor, p, hand);
+            ctx.restore();
+            // …и сразу возвращаем на место кулак. Предмет рисуется поверх
+            // спрайта, поэтому без этого куска он выглядит наклеенным на
+            // тыльную сторону ладони — глаз это замечает мгновенно.
+            const grip = (sprite.grip && !far) ? sprite.grip(hand) : null;
+            // `far` — предмет нарисован ДО спрайта, то есть тело его перекроет
+            // целиком: возвращать под него кисть нечего, только работа лишняя.
+            if (grip) {
+                ctx.imageSmoothingEnabled = false;             // пиксели, не размытие
+                // Тот же лист, что и для тела (включая тонировку) и то же свёрнутое
+                // разрешение: иначе кулак и рука сошлись бы на пиксель разъехавшимися
+                // сетками — на телефоне это выглядит как оторванный рукав.
+                ctx.drawImage(fit.canvas,
+                              Math.round(grip.sx * fit.kx), Math.round(grip.sy * fit.ky),
+                              Math.max(1, Math.round(grip.sw * fit.kx)), Math.max(1, Math.round(grip.sh * fit.ky)),
+                              grip.dx, grip.dy, grip.dw, grip.dh);
+                ctx.imageSmoothingEnabled = true;
+            }
+        };
+        // Порядок «предмет ↔ тело» берётся из кадра. У запекки есть буфер
+        // глубины, поэтому она знает, какая кисть в этом кадре ушла за корпус, а
+        // какая осталась спереди; `rig.behind` (векторная имитация ракурса) знал
+        // только направление взгляда — отсюда и жалоба «спереди предмет за
+        // спиной, сзади вылезает». Еда у рта и свет — как всегда, спереди:
+        // иначе факел гаснет в каждом втором кадре (см. farItemInFront).
+        const farHand = rig.behind ? "right" : "left";
+        const hiddenHand = (hand) => {
+            if (farItemInFront(p, hand, held[hand])) return false;
+            const baked = sprite.hidden ? sprite.hidden(hand) : null;
+            if (baked !== null && baked !== undefined) return baked;
+            return hand === farHand;                           // векторный герой / нет данных
+        };
+        const behind = { right: hiddenHand("right"), left: hiddenHand("left") };
+        // Тонировка погоды считается ДО спрайта: патч кулака рисуется внутри
+        // paintItem, и он обязан видеть тот же слой, что и тело.
+        const tint = heroWeatherTint(p);
+        const sheet = tint ? tintedSheet(sprite.canvas, tint, sprite.pixels, sprite.wet) : sprite.canvas;
+        const fit = fitSheet(ctx, sheet, sprite.w, sprite.h);
+        for (const hand of ["right", "left"]) if (behind[hand]) paintItem(hand, true);
+        ctx.imageSmoothingEnabled = false;         // спрайт 1:1, интерполяция тут = каша
+        ctx.drawImage(fit.canvas, sprite.x, sprite.y, fit.w, fit.h);
+        ctx.imageSmoothingEnabled = true;
+        for (const hand of ["right", "left"]) if (!behind[hand]) paintItem(hand, false);
+        if (p.wading) paintWaterline(ctx, idle);
+        if (turning) ctx.restore();
+        ctx.restore();
+        return;
+    }
+
     /* ---- legs ---------------------------------------------------------- */
     const drawLeg = (hipX, footX, lift, far, bendDir) => {
         const hx = hipX + sway;
@@ -283,7 +471,9 @@ export function drawCharacter(ctx, p) {
         const toe = sideView ? side * BODY.bootToe : 0;
         const bw = sideView ? BODY.bootW : BODY.bootW * 0.74;
         const bx = ax - bw / 2 + toe, by = ay - 0.4;
-        rect(ctx, bx, by, bw, BODY.bootH, far ? PALETTE.bootFar : PALETTE.boot, "all");
+        poly(ctx, [[bx + 0.7, by], [bx + bw - 0.8, by], [bx + bw, by + 1],
+            [bx + bw - 0.3, by + BODY.bootH], [bx + 0.2, by + BODY.bootH], [bx, by + 1]],
+            far ? PALETTE.bootFar : PALETTE.boot);
         rect(ctx, bx, by + BODY.bootH - 0.9, bw, 0.9, far ? PALETTE.soleFar : PALETTE.sole, false);
         // A lit edge on top of the boot and a dark line where it meets the
         // ground: without them the leg and the boot are one brown column.
@@ -300,20 +490,14 @@ export function drawCharacter(ctx, p) {
     };
 
     /* ---- arms: kinematics first, the tool needs the hand --------------- */
-    const armPose = (shoulderX, reach, lift) => {
-        const sx = shoulderX + counter, sy = BODY.armY - bob + lean;
-        const ex = sx + reach, ey = sy + BODY.armLen - Math.abs(reach) * 0.25 - lift;
-        return { sx, sy, ex, ey, mx: (sx + ex) / 2 + reach * 0.1, my: (sy + ey) / 2 };
-    };
-
     const paintHand = (a, far) => {
         // The cuff line: a hand that butts straight onto a sleeve of the same
         // value disappears at this size.
         rect(ctx, a.ex - BODY.armW / 2 - 0.2, a.ey - 1.1, BODY.armW + 0.4, 0.7,
             `rgba(0,0,0,${READ.handEdgeA})`, false);
-        rect(ctx, a.ex - BODY.armW / 2, a.ey - 0.5, BODY.armW, BODY.handH,
-            far ? shadeHex(skin, PALETTE.skinDeep) : shadeHex(skin, PALETTE.skinLit),
-            far ? true : "all");
+        ctx.fillStyle = far ? shadeHex(skin, PALETTE.skinDeep) : shadeHex(skin, PALETTE.skinLit);
+        ctx.beginPath(); ctx.ellipse(a.ex, a.ey + BODY.handH / 2 - 0.5,
+            BODY.armW * 0.49, BODY.handH * 0.57, 0.12, 0, Math.PI * 2); ctx.fill();
         rect(ctx, a.ex - BODY.armW / 2, a.ey - 0.5 + BODY.handH - 0.7, BODY.armW, 0.7,
             PALETTE.ao, false);
     };
@@ -321,8 +505,8 @@ export function drawCharacter(ctx, p) {
     const paintArm = (a, far, hand = true) => {
         const sleeve = far ? shadeHex(shirt, PALETTE.shirtFar) : band(shirt, "deep");
         const skinC = far ? shadeHex(skin, PALETTE.skinDeep) : skin;
-        limb(ctx, a.sx, a.sy, a.mx, a.my, BODY.armW * BODY.sleeveW, BODY.armW, sleeve, "all");
-        limb(ctx, a.mx, a.my, a.ex, a.ey, BODY.armW, BODY.armW * 0.85, skinC, "all");
+        limb(ctx, a.sx, a.sy, a.mx, a.my, BODY.armW * BODY.sleeveW, BODY.armW, sleeve, true);
+        limb(ctx, a.mx, a.my, a.ex, a.ey, BODY.armW, BODY.armW * 0.85, skinC, true);
         if (look.bracers) {                                   // gear: bracer
             const bw = BODY.armW * GEAR.bracerW;
             rect(ctx, a.ex - bw / 2 + (a.mx - a.ex) * 0.1, a.ey - 0.6 - GEAR.bracerH, bw, GEAR.bracerH,
@@ -331,21 +515,19 @@ export function drawCharacter(ctx, p) {
         if (hand) paintHand(a, far);
     };
 
-    // Arms counter-swing the legs: the far arm goes with the NEAR leg. Head-on
-    // the tool is in the right hand, from behind it is on the left, so the free
-    // arm swaps sides too — otherwise the hero loses an arm.
-    const ax0 = BODY.shoulderW / 2 + BODY.armW / 2 - 1.0;      // outside, slight overlap
-    const farArm = sideView
-        ? armPose(-BODY.farArmX * side, -swingF * GAIT.armRatio, 0)
-        : armPose(back ? ax0 : -ax0, 0, (back ? 1 : -1) * swingN * GAIT.armRatio);
-    const toolArm = sideView
-        ? armPose(BODY.nearArmX * side,
-            -swingN * GAIT.armRatioTool + side * swing * 2.2, Math.max(0, swing) * 1.5)
-        : armPose(back ? -ax0 : ax0, 0,
-            (back ? -1 : 1) * swingN * GAIT.armRatioTool - swing * 2.2);
-
-    if (sideView) paintArm(farArm, true);
-    if (p.tool && back) { drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, true); paintHand(toolArm, false); }
+    const rig = armRig(p);
+    const held = { right: p.rightTool === undefined ? p.tool : p.rightTool, left: p.leftTool || null };
+    const paintHeldArm = (hand, far) => {
+        const arm = rig[hand], tool = held[hand];
+        paintArm(arm, far, !tool);
+        if (tool) {
+            const handSwing = !p.actionHand || p.actionHand === hand ? swing : 0;
+            drawHeldTool(ctx, tool, dir, side, handSwing, arm, far, p, hand); paintHand(arm, far);
+        }
+    };
+    const farHand = rig.behind ? "right" : "left";
+    const farInFront = p.eatingHand === farHand || (!sideView && !back);
+    if (!farInFront) paintHeldArm(farHand, true);
 
     if (sideView) {
         drawLeg(-0.9 * side, swingF - stance, liftF, true, side);
@@ -369,40 +551,42 @@ export function drawCharacter(ctx, p) {
     const top = BODY.torsoY - bob;
     const bottom = top + BODY.torsoH;
     const waistY = top + BODY.torsoH * BODY.waistAt;
-    const narrow = sideView ? BODY.shoulderWSide / BODY.shoulderW : 1;
-    const rows = [
-        [top, BODY.shoulderW / 2 * narrow],
-        [waistY, BODY.waistW / 2 * narrow],
-        [bottom, BODY.hipW / 2 * narrow]
-    ];
-    poly(ctx, silhouette(rows), band(shirt, "base"));
-    poly(ctx, stripe(rows, -1, 0, 2.4), band(shirt, "lit"), false);      // sun side
-    poly(ctx, stripe(rows, 1, 0, 2.0), band(shirt, "dark"), false);
-    poly(ctx, stripe(rows, 1, 0, 0.8), band(shirt, "deep"), false);
-    rect(ctx, -rows[0][1], top, rows[0][1] * 2, PALETTE.aoW * 2, PALETTE.ao, false);   // under the collar
-
-    if (back) {
-        rect(ctx, -0.5, top + 1.5, 1, BODY.torsoH - 4, PALETTE.ao, false);            // spine seam
-    } else if (!sideView) {
-        rect(ctx, -2, top, 4, 1.5, band(shirt, "dark"), false);                        // collar
+    const quarter = sideView ? Math.abs(slant) : 0;
+    const narrow = sideView ? (BODY.shoulderWSide + quarter * 2) / BODY.shoulderW : 1;
+    // Женская фигура — не «тот же человек, но тоньше на глазок»: плечи у́же,
+    // талия уже бёдер, подол длиннее. Пол, который ничего не меняет в кадре,
+    // хуже, чем отсутствие пола, — он обесценивает весь редактор.
+    const sex = sexOf(look);
+    const frame = sex.frame;
+    const sw = BODY.shoulderW / 2 * narrow * frame, waist = BODY.waistW / 2 * narrow * sex.waist;
+    const hem = (BODY.hipW / 2 + (sex === SEX.female ? 2.6 : 1)) * narrow * sex.hem;
+    const rows = [[top,sw*.75],[top+2,sw],[waistY,waist],[bottom,hem]];
+    const coat = look.coat || look.vest || shirt;
+    // New silhouette: a short travelling coat, split skirts, layered linen,
+    // high collar and gathered sleeves; no armour wedges/waistcoat geometry.
+    poly(ctx, [[-sw*.65,top], [sw*.65,top], [sw+.5,top+2], [waist+1,waistY],
+        [hem+1,bottom+5], [1.1+flagX*.22,bottom+4], [0,bottom],
+        [-1.4+flagX*.3,bottom+5.5], [-hem-1,bottom+4], [-waist-1,waistY], [-sw-.5,top+2]], coat);
+    poly(ctx,[[-sw*.65,top],[-1.5,top+1],[-1.5,bottom+3],[-hem+.4,bottom+4],[-waist,waistY],[-sw+.3,top+2]],shadeHex(coat,19),false);
+    poly(ctx,[[sw*.7,top+1],[sw+.5,top+2],[waist+1,waistY],[hem+1,bottom+5],[3,bottom+3],[waist-.5,waistY]],shadeHex(coat,-24),false);
+    if (!back) {
+        poly(ctx,[[-2.3,top],[2.3,top],[1.5,bottom-1],[-1.8,bottom-1]],'#c3b89b',false);
+        poly(ctx,[[-3,top],[-.9,top+5],[-3.5,top+3]],shadeHex(coat,-15),false);
+        poly(ctx,[[3,top],[.9,top+5],[3.5,top+3]],shadeHex(coat,27),false);
+        for(let i=0;i<3;i++) { ctx.fillStyle='#645a45';ctx.beginPath();ctx.arc(.2,top+6+i*2.2,.35,0,Math.PI*2);ctx.fill(); }
+    } else { ctx.strokeStyle=shadeHex(coat,-20);ctx.lineWidth=.5;ctx.beginPath();ctx.moveTo(0,top+3);ctx.lineTo(0,bottom+3);ctx.stroke(); }
+    const beltY = bottom - 2;
+    rect(ctx,-waist-1,beltY,waist*2+2,1.4,'#594939',false);
+    rect(ctx,-.8,beltY,1.6,1.4,'#bbab79',false);
+    // Rolled neck scarf and a wind-responsive tail are distinct at game zoom.
+    poly(ctx,[[-3.3,top-.4],[3.1,top-.3],[3.5,top+1.5],[-2.9,top+2.1]],look.accent,false);
+    if(!back) poly(ctx,[[1.3,top+1],[3,top+1],[3.5+flagX*.4,top+7],[1.1+flagX*.3,top+6]],shadeHex(look.accent,-17),false);
+    if(look.satchel) {
+        const sign=back?-1:1;
+        ctx.strokeStyle='#baa178';ctx.lineWidth=1.4;ctx.beginPath();ctx.moveTo(-sw*.65*sign,top+2);ctx.lineTo((hem+1)*sign,bottom);ctx.stroke();
+        poly(ctx,[[hem*sign,bottom-2],[(hem+3.5)*sign,bottom-1],[(hem+3.1)*sign,bottom+4],[(hem-.5)*sign,bottom+3]],'#7c6041',false);
+        ctx.strokeStyle='#c0a77b';ctx.lineWidth=.5;ctx.beginPath();ctx.moveTo(hem*sign,bottom);ctx.lineTo((hem+3.2)*sign,bottom+.5);ctx.stroke();
     }
-
-    // Belt, buckle and the accent flap that trails the pelvis.
-    const beltY = bottom - 2.2;
-    rect(ctx, -rows[2][1] - 0.2, beltY, rows[2][1] * 2 + 0.4, 2.2, PALETTE.belt);
-    rect(ctx, (sideView ? side * 1.8 : 0) - 1.1, beltY + 0.3, 2.2, 1.6, PALETTE.buckle, false);
-    if (look.beltFlap) {
-        const fw = GEAR.flapW;
-        const fx = (sideView ? side * 1.0 : rows[2][1] - fw * 0.35) + flagX * 0.6;
-        rect(ctx, fx - fw / 2, beltY + 1.5, fw, GEAR.flapH, look.accent);
-        rect(ctx, fx - fw / 2, beltY + 1.5, fw * 0.3, GEAR.flapH,
-            shadeHex(look.accent, TONE.lit), false);
-    }
-    if (look.cloak) {
-        poly(ctx, silhouette(rows.map(([y, hw]) => [y + 0.5, hw + 1])), look.cloak);
-    }
-
-    rect(ctx, -rows[0][1], top + 0.5, PALETTE.rimW, BODY.torsoH * 0.55, PALETTE.rim, false);
 
     // Pauldrons go on AFTER the arms, so they cover the shoulder joint — that
     // is what makes gear read as worn instead of glued on.
@@ -416,78 +600,160 @@ export function drawCharacter(ctx, p) {
             [s * (inner - 0.4), top + GEAR.shoulderH + drop * 0.5]
         ], s < 0 ? shadeHex(leather, PALETTE.leatherLit) : leather, "all");
         const out = sw + GEAR.shoulderW * 0.42;
-        // In profile a single compact cap sits on the near shoulder; a slab
-        // across the chest reads as a plank, not as armour.
-        if (sideView) pad(side, -1.0, sw + 0.9, GEAR.shoulderDrop * 0.6);
-        else { pad(-1, sw - 2.6, out, GEAR.shoulderDrop); pad(1, sw - 2.6, out, GEAR.shoulderDrop); }
+        if (sideView) {
+            // In profile the visible cap sits on the near shoulder.
+            pad(side, -1.0, sw + 0.9, GEAR.shoulderDrop * 0.6);
+        } else {
+            pad(-1, sw - 2.6, out, GEAR.shoulderDrop);
+            pad(1, sw - 2.6, out, GEAR.shoulderDrop);
+        }
     };
 
     /* ---- near arm ------------------------------------------------------- */
-    if (!sideView) paintArm(farArm, false);
-    paintArm(toolArm, false, !p.tool);        // with a tool the hand comes later
     paintPauldrons();
 
-    /* ---- head ----------------------------------------------------------- */
-    let headY = BODY.headY - bob;
-    const headH = BODY.headH, headW = BODY.headW;
-    const headX = (sideView ? side * 0.5 : 0) + counter * 0.5;
-    if (turning) headY += GAIT.slantHead * slant;      // look where you are going
-    rect(ctx, -2.2, headY + headH - 0.5, 4.4, 1.6, PALETTE.ao, false);          // neck
-    rect(ctx, headX - headW / 2, headY, headW, headH, skin);
-    rect(ctx, headX + headW / 2 - 1.8, headY + 1, 1.8, headH - 1, shadeHex(skin, PALETTE.skinShade), false);
-    rect(ctx, headX - headW / 2, headY + 1, 1.3, headH - 2, shadeHex(skin, PALETTE.skinLit), false);
-    rect(ctx, headX - headW / 2, headY + 1, PALETTE.rimW, headH - 3, PALETTE.rim, false);
-    if (back) rect(ctx, headX - headW / 2, headY + headH - 2.2, headW, 2.2,
-        shadeHex(skin, PALETTE.skinShade), false);
-
-    const hairDark = shadeHex(look.hair, PALETTE.hairShade);
-    const hairLit = shadeHex(look.hair, PALETTE.hairLit);
-    if (back) {
-        rect(ctx, headX - headW / 2 - 0.5, headY - 1, headW + 1, headH - 1, look.hair);
-        rect(ctx, headX + headW / 2 - 2.2, headY - 1, 2.2, headH - 1, hairDark, false);
-        rect(ctx, headX - headW / 2 + 1, headY - 0.5, 3, 1.2, hairLit, false);
-    } else {
-        rect(ctx, headX - headW / 2 - 0.5, headY - 1, headW + 1, 3.6, look.hair);
-        rect(ctx, headX + headW / 2 - 2.2, headY - 1, 2.2, 3.6, hairDark, false);
-        if (look.hairStyle === "long") {
-            rect(ctx, headX - headW / 2 - 1.2, headY, 1.7, 6.5, look.hair, false);
-            rect(ctx, headX + headW / 2 - 0.5, headY, 1.7, 6.5, look.hair, false);
-        } else {
-            rect(ctx, headX - headW / 2 - 1, headY + 0.5, 1.4, 2.2, look.hair, false);
-            rect(ctx, headX + headW / 2 - 0.4, headY + 0.5, 1.4, 2.2, look.hair, false);
-        }
-        rect(ctx, headX - headW / 2 + 1, headY - 0.5, 2.6, 1, hairLit, false);
-    }
-
-    if (!back) {
-        const blink = (idle % GAIT.blinkEvery) < GAIT.blinkFor;
-        const eyeH = blink ? 0.5 : 1.4, eyeW = 1.4;
-        const eyeY = headY + (blink ? 4.8 : 4);
-        if (dir === "left") {
-            rect(ctx, headX - 3.2, eyeY, eyeW, eyeH, PALETTE.eye, false);
-            rect(ctx, headX - headW / 2 - 0.5, headY + 4, 1, 1.4, shadeHex(skin, PALETTE.skinShade), false);
-            rect(ctx, headX - 3.6, headY + 6.2, 2.2, 0.9, "rgba(0,0,0,0.2)", false);
-        } else if (dir === "right") {
-            rect(ctx, headX + 1.8, eyeY, eyeW, eyeH, PALETTE.eye, false);
-            rect(ctx, headX + headW / 2 - 0.5, headY + 4, 1, 1.4, shadeHex(skin, PALETTE.skinShade), false);
-            rect(ctx, headX + 1.4, headY + 6.2, 2.2, 0.9, "rgba(0,0,0,0.2)", false);
-        } else {
-            rect(ctx, headX - 2.7, eyeY, eyeW, eyeH, PALETTE.eye, false);
-            rect(ctx, headX + 1.3, eyeY, eyeW, eyeH, PALETTE.eye, false);
-            rect(ctx, headX - 0.9, headY + 6.2, 1.8, 0.9, "rgba(0,0,0,0.16)", false);
-        }
-    }
+    /* ---- head: authored silhouette, narrow neck, shaped hair and jaw ---- */
+    drawHead(ctx, {
+        x: (sideView ? side * 0.5 : 0) + counter * 0.5 + Math.sin(idle * 0.65) * 0.35 * (1 - g),
+        y: BODY.headY - bob + (turning ? GAIT.slantHead * slant : 0),
+        dir, slant, look, time: idle
+    });
 
     ctx.restore();
 
-    // Tool in the near hand, in front of the body; the fist closes over the
-    // handle afterwards so the grip reads as a grip and not as a loose block.
-    if (p.tool && !back) {
-        drawHeldTool(ctx, p.tool, dir, side, swing, toolArm, false);
-        paintHand(toolArm, false);
-    }
+    if (farInFront) paintHeldArm(farHand, false);
+    paintHeldArm(rig.behind ? "left" : "right", false);
     // --- the waterline -------------------------------------------------
-    if (p.wading) {
+    if (p.wading) paintWaterline(ctx, idle);
+
+    if (turning) ctx.restore();
+    ctx.restore();
+}
+
+/* --- промокание и иней ----------------------------------------------------
+ * Спрайт — это картинка, а не набор фигур: «ткань потемнела от воды» в ней
+ * нельзя выразить перекраской дорожек (цвет уже запечён в палитру кадра).
+ * Поэтому поверх кадра кладётся ОДИН тонированный слой, удержанный внутри
+ * непрозрачных пикселей спрайта (`source-atop`): мокрая одежда темнее и холоднее,
+ * снег — наоборот, светлее и синее. Ни одного лишнего пикселя за силуэтом не
+ * появляется, и тень на земле, ватерлиния и предмет в руке не трогаются.
+ */
+export const WET = {
+    rainA: 0.44, snowA: 0.14, snowRamp: 0.14, fromWading: 6,  // 6 из 9 секунд TRACK.wetLife — «ещё мокрый»
+    wet: [24, 38, 56], snow: [206, 226, 244]
+};
+
+/** Насколько герой промёрз/промок, 0..1, и каким слоем это рисуется. */
+export function heroWeatherTint(p) {
+    const wet = clamp01((p.wet || 0) / WET.fromWading);
+    const rain = p.weather === "rain" || p.weather === "storm";
+    const snow = p.weather === "snow";
+    const sky = p.underground ? 0 : clamp01(p.groundWet || 0);
+    // Под крыше́й погода героя не касается: в пещере или в доме герой сохнет, а
+    // не темнеет от дождя за стеной. Брод (wet) остаётся — в лужу можно сесть и
+    // под навесом.
+    const open = p.underground ? 0 : 1;
+    const k = Math.max(wet, open * (rain ? 0.35 + 0.5 * sky : 0), open * (snow ? 0.30 + 0.34 * sky : 0));
+    if (k <= 0.02) return null;
+    // Снег поверх дождя — всё равно вода: иней на мокром не держится.
+    const cold = snow && !rain;
+    // Альфа не равна k: при k≈0.3 (пошёл дождь, ещё сухо) слой 0.08 ничего не
+    // показывает, а при k=1 (стоял в воде) 0.40 уже заливает героя синевой.
+    // Поэтому база + надбавка: лёгкая мокрая ткань видна сразу, но потолок тот же.
+    return { k, a: cold ? WET.snowA + WET.snowRamp * k : WET.rainA * (0.55 + 0.45 * k), rgb: cold ? WET.snow : WET.wet };
+}
+
+let tintSheet = null;
+/**
+ * Кадр с мокрой ТКАНЬЮ внутри силуэта. Канвас-скретч переиспользуется.
+ *
+ * Раньше это был один сплошной `fillRect` с `source-atop`: он честно трогал
+ * только непрозрачные пиксели, но трогал их все — и лицо, и руки, и ботинки
+ * становились тёмно-синими. Теперь слой взвешен по записи палитры каждого
+ * пикселя (см. heroWetWeights): ткань мокнет, кожа остаётся кожей.
+ */
+function tintedSheet(canvas, tint, pixels, weights) {
+    if (!canvas || !canvas.width) return canvas;
+    if (!tintSheet || tintSheet.width !== canvas.width || tintSheet.height !== canvas.height) {
+        tintSheet = document.createElement("canvas");
+        tintSheet.width = canvas.width;
+        tintSheet.height = canvas.height;
+    }
+    const c = tintSheet.getContext("2d");
+    if (!pixels || !weights) {                                  // данных о пикселях нет — старый честный слой
+        c.save();
+        c.globalCompositeOperation = "source-over";
+        c.clearRect(0, 0, tintSheet.width, tintSheet.height);
+        c.drawImage(canvas, 0, 0);
+        c.globalCompositeOperation = "source-atop";
+        c.fillStyle = `rgb(${tint.rgb[0]},${tint.rgb[1]},${tint.rgb[2]})`;
+        c.globalAlpha = tint.a;
+        c.fillRect(0, 0, tintSheet.width, tintSheet.height);
+        c.restore();
+        return tintSheet;
+    }
+    c.save();
+    c.clearRect(0, 0, tintSheet.width, tintSheet.height);
+    c.drawImage(canvas, 0, 0);
+    const img = c.getImageData(0, 0, tintSheet.width, tintSheet.height);
+    const d = img.data;
+    for (let i = 0, n = d.length / 4; i < n; i += 1) {
+        const o = i * 4;
+        if (d[o + 3] < 8) continue;                             // пустота кадра не тонируется
+        const a = tint.a * ((weights[pixels[i]] || 0) / 255);
+        if (a <= 0.002) continue;
+        d[o] += (tint.rgb[0] - d[o]) * a;
+        d[o + 1] += (tint.rgb[1] - d[o + 1]) * a;
+        d[o + 2] += (tint.rgb[2] - d[o + 2]) * a;
+    }
+    c.putImageData(img, 0, 0);
+    c.restore();
+    // Канвас один и тот же, содержимое — новое на каждый кадр. Любой, кто кэширует
+    // производное от листа (см. fitSheet), обязан это заметить.
+    tintSheet.__rev = (tintSheet.__rev || 0) + 1;
+    return tintSheet;
+}
+
+/* --------------------- запечённый лист → экран без дыр --------------------- */
+
+const FIT_CACHE = new Map();
+let FIT_SEQ = 0;
+
+/**
+ * «Одежда просвечивается» — это не палитра и не дизеринг, а способ, каким лист
+ * попадает на экран. Запечён он в 101×113, а в мир уходит в ~42 единицы; когда
+ * коэффициент экрана не целый (телефон: dpr 2 · zoom 1.6), nearest-neighbour
+ * выбрасывает каждый второй столбец — и там, где единственными пикселями были
+ * пиксели рубахи, остаётся дыра, сквозь которую видно землю. Поэтому перед
+ * уменьшением лист сворачивается фильтром ровно до экранного размера, а блит
+ * снова делает 1:1: пиксели остаются пикселями, дыр не возникает.
+ */
+export function fitSheet(ctx, sheet, dwWorld, dhWorld) {
+    const plain = { canvas: sheet, w: dwWorld, h: dhWorld, kx: 1, ky: 1 };
+    const t = ctx && ctx.getTransform ? ctx.getTransform() : null;
+    const dev = t ? Math.hypot(t.a, t.b) || 0 : 0;      // экранных пикселей на единицу мира
+    if (!dev || !sheet || !sheet.width) return plain;
+    const dw = Math.round(dwWorld * dev), dh = Math.round(dhWorld * dev);
+    if (!(dw > 0 && dh > 0) || dw >= sheet.width || dh >= sheet.height) return plain;
+    const seq = sheet.__fitSeq === undefined ? (sheet.__fitSeq = ++FIT_SEQ) : sheet.__fitSeq;
+    const key = `${seq}:${sheet.__rev || 0}:${dw}x${dh}`;
+    let small = FIT_CACHE.get(key);
+    if (!small) {
+        if (FIT_CACHE.size > 64) FIT_CACHE.clear();
+        if (typeof document === "undefined" || !document.createElement) return plain;
+        small = document.createElement("canvas");
+        small.width = dw; small.height = dh;
+        const c = small.getContext("2d");
+        c.imageSmoothingEnabled = true;                 // единственный раз, где нужно сглаживание
+        c.drawImage(sheet, 0, 0, sheet.width, sheet.height, 0, 0, dw, dh);
+        FIT_CACHE.set(key, small);
+    }
+    return { canvas: small, w: dw / dev, h: dh / dev, kx: dw / sheet.width, ky: dh / sheet.height };
+}
+
+
+/** Ватерлиния: кольцо на поверхности, вода поверх ботинок, пена у тела. */
+function paintWaterline(ctx, idle) {
         const t = idle * WADE.breatheHz;
         const grow = 1 + Math.sin(t) * (WADE.breathe / WADE.ringRX);
         ctx.globalAlpha = 1;
@@ -508,26 +774,32 @@ export function drawCharacter(ctx, p) {
         ctx.beginPath();
         ctx.ellipse(0, WADE.lineY, WADE.rx, WADE.ry, 0, 0, Math.PI * 2);
         ctx.stroke();
-    }
-
-    if (turning) ctx.restore();
 }
 
 /**
  * Draw the held tool at the hand. `dir` decides which side of the body the
  * grip sits on; the tool is rotated around the grip when swinging.
  */
-function drawHeldTool(ctx, tool, dir, side, swing, arm, behind) {
+/**
+ * Предмет в запечённой точке хвата (3D-спрайт): графика та же, что у поселенцев,
+ * якорь — из позиции кости кисти на этом кадре.
+ */
+export function drawHeldToolAt(ctx, tool, dir, side, anchor, pose = {}, hand = "right") {
+    drawHeldTool(ctx, tool, dir, side, 0, { ex: anchor.x, ey: anchor.y - BODY.handH / 2 + 0.5 },
+        anchor.behind, { ...pose, toolAngle: anchor.angle, noMirror: anchor.noMirror }, hand);
+}
+
+function drawHeldTool(ctx, tool, dir, side, swing, arm, behind, pose = {}, hand = "right") {
     // The grip IS the hand of the tool arm — passing a fixed GRIP_Y used to
     // leave the knife floating next to a second, phantom hand.
     const gx = arm.ex, gy = arm.ey + BODY.handH / 2 - 0.5;
-    const lean = dir === "up" ? -0.35 : dir === "down" ? 0.3 : side * 0.45;
-    const angle = lean - side * swing * 1.9;
+    const angle = pose.toolAngle !== undefined ? pose.toolAngle : heldToolAngle(dir, side, swing, hand);
 
     ctx.save();
     ctx.translate(gx, gy);
     ctx.rotate(angle);
-    if (dir === "left") ctx.scale(-1, 1);          // mirror so tools face forward
+    // Зеркало нужно векторной руке; запечённый угол ракурс уже учитывает.
+    if (!pose.noMirror && (dir === "left" || (hand === "left" && (dir === "up" || dir === "down")))) ctx.scale(-1, 1);
     if (behind) ctx.globalAlpha = 0.9;
 
     const id = typeof tool === "string" ? tool : (tool.tool || tool.id || "");
@@ -535,12 +807,39 @@ function drawHeldTool(ctx, tool, dir, side, swing, arm, behind) {
     switch (id) {
         case "axe": drawAxe(ctx, itemId.includes("iron")); break;
         case "pick": drawPick(ctx); break;
-        case "knife": ctx.scale(BODY.knifeScale, BODY.knifeScale); drawKnife(ctx); break;
+        case "knife":
+            // Уровень оружия обязан быть ВИДЕН. Каменный нож рисовался стальным
+            // клинком — отсюда «четыре одинаковых деревянных ножа» в левой руке:
+            // стек, берестяная оправа и белая полоса блика были у него общие с
+            // железным, и различить предметы в кадре было нельзя.
+            ctx.scale(BODY.knifeScale, BODY.knifeScale);
+            drawKnife(ctx, typeof tool === "string" ? 1 : (tool.tier ?? (itemId.includes("iron") ? 2 : 1)));
+            break;
         case "spear": drawSpear(ctx); break;
         case "rod": drawRod(ctx); break;
         case "hoe": drawHoe(ctx); break;
-        case "torch": drawTorch(ctx); break;
-        default: drawGeneric(ctx); break;
+        case "torch": drawTorch(ctx, pose); break;
+        case "pot":
+            ctx.fillStyle="#53635f";ctx.beginPath();ctx.ellipse(0,-4,4,3,0,0,Math.PI*2);ctx.fill();
+            ctx.strokeStyle="#a1b0a8";ctx.lineWidth=.6;ctx.beginPath();ctx.arc(0,-5,3,Math.PI,0);ctx.stroke();break;
+        case "book":
+            ctx.fillStyle="#5b3e2e";ctx.fillRect(-3,-6,6,7);ctx.fillStyle="#c6b994";ctx.fillRect(-2,-5,4,5);break;
+        case "bundle":
+            ctx.rotate(-angle); // horizontal bundle balanced across the forearm
+            for (let i = 0; i < Math.min(5, tool.n || 1); i++) {
+                ctx.fillStyle = i % 2 ? "#80603c" : "#a68652";
+                ctx.fillRect(-9 + i % 2, -4 - i * 1.5, 18, 2);
+                ctx.fillStyle = "#dac090"; ctx.fillRect(7 + i % 2, -4 - i * 1.5, 2, 2);
+            }
+            ctx.fillStyle = "#574b34"; ctx.fillRect(-1, -4 - Math.min(5,tool.n || 1)*1.5, 2, 10); break;
+        case "food":
+            // Еда — тот же принцип: если у предмета есть своя форма в руке, она
+            // и рисуется (рыба, ломоть, гриб); эллипс остаётся для «неопознанного».
+            if (typeof tool === "object" && tool.hold) { drawCarried(ctx, tool.hold, tool.tint, tool.n || 1); break; }
+            ctx.fillStyle = itemId === "berry" ? "#555984" : itemId.includes("tea") ? "#b3aa88" : "#b18b54";
+            ctx.beginPath(); ctx.ellipse(0, -2, itemId === "berry" ? 1.4 : 2.6, itemId === "berry" ? 1.2 : 2.2, 0, 0, Math.PI * 2); ctx.fill(); break;
+        default: drawCarried(ctx, typeof tool === "string" ? null : tool.hold,
+                             typeof tool === "string" ? null : tool.tint, tool.n || 1); break;
     }
 
     // No hand here: the fist is part of the arm and is painted by the caller
@@ -588,23 +887,46 @@ function drawPick(ctx) {
     ctx.fillRect(4.4, -10.2, 2, 1);
 }
 
-function drawKnife(ctx) {
+function drawKnife(ctx, tier = 2) {
     // A short blade in the fist: handle through the hand, blade above it.
-    ctx.fillStyle = "#5a3f26";
+    const stone = tier <= 1;
+    ctx.fillStyle = stone ? "#6a4a2c" : "#5a3f26";      // рукоять: дерево / кость+кожа
     ctx.fillRect(-1.1, -2.6, 2.2, 5);
-    ctx.fillStyle = "#3c2a19";
+    ctx.fillStyle = stone ? "#4a3320" : "#3c2a19";
     ctx.fillRect(-1.1, -2.6, 0.8, 5);
-    ctx.fillStyle = "#6d5536";                   // guard
+    if (stone) {
+        // Обмотка: на каменном ноге держит пластина, а не всадной хвост.
+        ctx.fillStyle = "#8a6f45";
+        ctx.fillRect(-1.6, -3.4, 3.2, 0.7);
+        ctx.fillRect(-1.6, -1.2, 3.2, 0.7);
+    }
+    ctx.fillStyle = stone ? "#7d6b4a" : "#6d5536";      // guard
     ctx.fillRect(-2, -3.6, 4, 1.2);
-    ctx.fillStyle = "#c9ced6";                   // blade
+    ctx.fillStyle = stone ? "#54565c" : "#c9ced6";      // blade: кремень / сталь
     ctx.beginPath();
-    ctx.moveTo(-1.3, -3.6); ctx.lineTo(1.3, -3.6);
-    ctx.lineTo(1.5, -9.6); ctx.lineTo(0, -11.4); ctx.lineTo(-1.3, -9.2);
+    if (stone) {
+        // Сколотая пластина: неровное лезвие, без зеркальной полосы.
+        ctx.moveTo(-1.4, -3.6); ctx.lineTo(1.4, -3.6);
+        ctx.lineTo(1.1, -7.4); ctx.lineTo(1.7, -8.6); ctx.lineTo(0.4, -11.1);
+        ctx.lineTo(-0.9, -9.4); ctx.lineTo(-1.5, -6.2);
+    } else {
+        ctx.moveTo(-1.3, -3.6); ctx.lineTo(1.3, -3.6);
+        ctx.lineTo(1.5, -9.6); ctx.lineTo(0, -11.4); ctx.lineTo(-1.3, -9.2);
+    }
     ctx.closePath(); ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.75)";
-    ctx.fillRect(0.3, -10, 0.8, 6);
-    ctx.fillStyle = "rgba(0,0,0,0.2)";
-    ctx.fillRect(-1.3, -9.4, 0.8, 5.6);
+    if (stone) {
+        ctx.fillStyle = "#7a7d86";                       // блик по гребню скола
+        ctx.beginPath();
+        ctx.moveTo(-0.4, -4.4); ctx.lineTo(0.8, -10.2); ctx.lineTo(0.2, -10.2);
+        ctx.lineTo(-0.9, -5.2); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "rgba(0,0,0,0.28)";
+        ctx.fillRect(-1.5, -6.2, 0.7, 2.6);
+    } else {
+        ctx.fillStyle = "rgba(255,255,255,0.75)";
+        ctx.fillRect(0.3, -10, 0.8, 6);
+        ctx.fillStyle = "rgba(0,0,0,0.2)";
+        ctx.fillRect(-1.3, -9.4, 0.8, 5.6);
+    }
 }
 
 function drawSpear(ctx) {
@@ -643,30 +965,235 @@ function drawHoe(ctx) {
     ctx.fillRect(-0.8, -13.6, 6.4, 0.6);
 }
 
-function drawTorch(ctx) {
-    ctx.fillStyle = "#5e4228";
-    ctx.fillRect(-1.3, -11, 2.6, 13);
-    ctx.fillStyle = "#3f2c18";
-    ctx.fillRect(0.4, -11, 0.9, 13);
-    ctx.fillStyle = "#2a211a";                  // pitch-soaked rag
-    ctx.fillRect(-2.2, -13.5, 4.4, 3);
-    ctx.fillStyle = "rgba(255,120,40,0.85)";
-    ctx.beginPath();
-    ctx.moveTo(-2.6, -13); ctx.quadraticCurveTo(0, -22, 2.6, -13);
-    ctx.quadraticCurveTo(0, -11.5, -2.6, -13);
-    ctx.closePath(); ctx.fill();
-    ctx.fillStyle = "rgba(255,220,140,0.9)";
-    ctx.beginPath();
-    ctx.moveTo(-1.2, -13.5); ctx.quadraticCurveTo(0, -18.5, 1.2, -13.5);
-    ctx.quadraticCurveTo(0, -12.6, -1.2, -13.5);
-    ctx.closePath(); ctx.fill();
+function drawTorch(ctx, pose) {
+    ctx.fillStyle = "#5e4228"; ctx.fillRect(-1.2, -11, 2.4, 13);
+    ctx.fillStyle = "#95704a"; ctx.fillRect(-1.2, -10, 0.7, 9);
+    ctx.fillStyle = "#302b22"; ctx.fillRect(-2.1, -13.5, 4.2, 3.2);
+    paintTorchFlame(ctx, pose.idleTime || 0, pose.torchWind || 0, pose.gait || 0);
 }
 
-function drawGeneric(ctx) {
-    ctx.fillStyle = "#6a5a44";
-    ctx.fillRect(-1.2, -8, 2.4, 10);
-    ctx.fillStyle = "#8a7a60";
-    ctx.fillRect(-2.4, -10.5, 4.8, 3);
+/**
+ * Предмет в руке, у которого нет собственного орудия: кремень, моток, связка
+ * травы. Прежний drawGeneric рисовал палку с шишкой для всех сорока id, и по
+ * руке было невозможно понять, что именно принёс герой, — а рука и есть
+ * единственный экран «в руках у меня вот это». Форма берётся из `hold`
+ * (ITEMS), цвет — из `tint`: рендерер знает девять форм, а не сорок предметов.
+ * Все они держатся за низ (0,0) и растут вверх, как топор и нож, поэтому
+ * хват, поворот замаха и патч кулака работают для них бесплатно.
+ */
+const CARRY_SCALE = {
+    rock: 0.75, crystal: 0.82, sheaf: 0.92, coil: 0.9, board: 0.95,
+    roll: 0.92, vessel: 0.9, trinket: 0.52, lump: 0.7
+};
+const CARRY_INK = "rgba(16,14,12,0.62)";    // обводка силуэта: без неё уголь тонет в штанах
+/** Словарь форм руки: у items.js нет права на выдуманный `hold`, он проверяется тестом. */
+export const CARRY_SHAPES = Object.keys({
+    rock: 1, crystal: 1, sheaf: 1, coil: 1, board: 1, roll: 1, vessel: 1,
+    trinket: 1, lump: 1, haunch: 1, fillet: 1, fungal: 1, root: 1, dish: 1, jar: 1
+});
+
+function drawCarried(ctx, shape, tint, n = 1) {
+    const base = tint || "#8a7a60";
+    const dark = shadeHex(base, -34), lite = shadeHex(base, 26), glint = shadeHex(base, 58);
+    const fat = n >= 5 ? 1.18 : n >= 2 ? 1.08 : 1;   // охапка чуть крупнее одного камня
+    // Натуральный размер. Камень размером с голову читается как булыжник-орудие,
+    // но герой с ним выглядит карликом, поэтому у каждой формы свой коэффициент:
+    // безделушку видно только когда она почти с ладонь, доску — когда она косая.
+    const k = CARRY_SCALE[shape] || 0.78;
+    ctx.scale(k, k);
+    ctx.lineJoin = "round";
+    switch (shape) {
+        case "rock": {                                 // сколотый кусок: грань + блик
+            ctx.fillStyle = dark;
+            ctx.beginPath();
+            ctx.moveTo(-3.4 * fat, 0.4); ctx.lineTo(-3.9 * fat, -3.6 * fat); ctx.lineTo(-1.2 * fat, -6.6 * fat);
+            ctx.lineTo(2.6 * fat, -6.1 * fat); ctx.lineTo(3.9 * fat, -2.2 * fat); ctx.lineTo(1.9 * fat, 0.6);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.55; ctx.stroke();   // силуэт держится на фоне одежды
+            ctx.fillStyle = base;
+            ctx.beginPath();
+            ctx.moveTo(-1.2 * fat, -6.6 * fat); ctx.lineTo(2.6 * fat, -6.1 * fat); ctx.lineTo(1.1 * fat, -2.4 * fat);
+            ctx.lineTo(-2.3 * fat, -3.1 * fat);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = glint; ctx.lineWidth = 0.5;
+            ctx.beginPath(); ctx.moveTo(-0.6 * fat, -6.1 * fat); ctx.lineTo(1.6 * fat, -4.1 * fat); ctx.stroke();
+            break;
+        }
+        case "crystal": {                               // огранка: два треугольника разной яркости
+            ctx.fillStyle = base;
+            ctx.beginPath();
+            ctx.moveTo(0, -9.4 * fat); ctx.lineTo(2.7 * fat, -4.2 * fat); ctx.lineTo(1.1 * fat, 0.4);
+            ctx.lineTo(-1.4 * fat, 0.2); ctx.lineTo(-2.6 * fat, -4.8 * fat);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.5; ctx.stroke();
+            ctx.fillStyle = glint; ctx.globalAlpha = 0.75;
+            ctx.beginPath(); ctx.moveTo(0, -9.4 * fat); ctx.lineTo(2.7 * fat, -4.2 * fat); ctx.lineTo(0.2, -3.4 * fat);
+            ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+            ctx.strokeStyle = dark; ctx.lineWidth = 0.4;
+            ctx.beginPath(); ctx.moveTo(0, -9.4 * fat); ctx.lineTo(0.2, -3.4 * fat); ctx.stroke();
+            break;
+        }
+        case "sheaf": {                                 // связка стеблей с метёлками
+            const stalks = 4;
+            ctx.strokeStyle = dark; ctx.lineWidth = 1.3;
+            for (let i = 0; i < stalks; i += 1) {
+                const dx = (i - (stalks - 1) / 2) * 1.5 * fat;
+                ctx.beginPath(); ctx.moveTo(dx * 0.35, 0.4); ctx.lineTo(dx, -7.6 * fat); ctx.stroke();
+            }
+            ctx.fillStyle = lite;
+            for (let i = 0; i < stalks; i += 1) {
+                const dx = (i - (stalks - 1) / 2) * 1.5 * fat;
+                ctx.beginPath(); ctx.ellipse(dx, -8.4 * fat, 0.85, 1.7, dx * 0.08, 0, Math.PI * 2); ctx.fill();
+            }
+            ctx.fillStyle = "#5c4a30";                   // перевязка
+            ctx.fillRect(-3.1 * fat, -2.9, 6.2 * fat, 1.3);
+            break;
+        }
+        case "coil": {                                   // моток: витки + хвост
+            ctx.fillStyle = "rgba(20,17,14,0.5)";        // подложка: витки иначе сливаются с курткой
+            ctx.beginPath(); ctx.ellipse(0, -5, 4.2 * fat, 3.4 * fat, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = base; ctx.lineWidth = 1.6;
+            for (let i = 0; i < 3; i += 1) {
+                ctx.beginPath();
+                ctx.ellipse(0, -4 - i * 0.7, (3.6 - i * 0.7) * fat, (2.5 - i * 0.5) * fat, 0, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            ctx.strokeStyle = dark; ctx.lineWidth = 0.8;
+            ctx.beginPath(); ctx.moveTo(2.6, -2.4); ctx.lineTo(3.6, 1.4); ctx.stroke();
+            ctx.fillStyle = "#5c4a30";
+            ctx.fillRect(-0.7, -6.4, 1.4, 4.6);
+            break;
+        }
+        case "board": {                                  // доска: торцы и волокна
+            ctx.fillStyle = base;
+            ctx.beginPath();
+            ctx.moveTo(-2.6 * fat, 0.6); ctx.lineTo(-3.4 * fat, -9.4 * fat); ctx.lineTo(3.4 * fat, -10 * fat);
+            ctx.lineTo(2.6 * fat, 0);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.55; ctx.stroke();
+            ctx.fillStyle = dark;
+            ctx.fillRect(-3.4 * fat, -9.4 * fat, 6.8 * fat, 1.1);
+            ctx.strokeStyle = lite; ctx.lineWidth = 0.4;
+            for (let i = -1; i <= 1; i += 1) {
+                ctx.beginPath(); ctx.moveTo(i * 1.5, -0.4); ctx.lineTo(i * 1.6 - 0.3, -9.4 * fat); ctx.stroke();
+            }
+            break;
+        }
+        case "roll": {                                   // скатанная ткань/спальник
+            ctx.fillStyle = base;
+            ctx.beginPath(); ctx.ellipse(0, -4.6, 3.1 * fat, 4.6 * fat, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.55; ctx.stroke();
+            ctx.strokeStyle = dark; ctx.lineWidth = 0.7;
+            ctx.beginPath(); ctx.ellipse(0, -4.6, 1.8 * fat, 2.6 * fat, 0, 0.4, 5.2); ctx.stroke();
+            ctx.fillStyle = "#5c4a30";
+            ctx.fillRect(-3.4 * fat, -5.6, 6.8 * fat, 1.4);
+            ctx.fillStyle = lite;
+            ctx.beginPath(); ctx.ellipse(-1.1, -7.8, 1.2, 0.7, -0.3, 0, Math.PI * 2); ctx.fill();
+            break;
+        }
+        case "vessel": {                                 // бурдюк: горло + пробка + ремень
+            ctx.fillStyle = base;
+            ctx.beginPath(); ctx.ellipse(0, -3.8, 3.2 * fat, 4 * fat, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.55; ctx.stroke();
+            ctx.fillStyle = dark;
+            ctx.fillRect(-1, -9.2 * fat, 2, 2.6);
+            ctx.fillStyle = "#6a5236";
+            ctx.fillRect(-1.4, -10.2 * fat, 2.8, 1.3);
+            ctx.strokeStyle = dark; ctx.lineWidth = 0.6;
+            ctx.beginPath(); ctx.moveTo(-3.1, -5.4); ctx.quadraticCurveTo(0, -3.2, 3.1, -5.4); ctx.stroke();
+            break;
+        }
+        case "trinket": {                                // кольцо с биркой (ключ, монета)
+            ctx.strokeStyle = base; ctx.lineWidth = 1.1;
+            ctx.beginPath(); ctx.arc(0, -7.4 * fat, 2, 0, Math.PI * 2); ctx.stroke();
+            ctx.fillStyle = lite;
+            ctx.fillRect(-1.1, -5.8 * fat, 2.2, 5.4 * fat);
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.45;
+            ctx.strokeRect(-1.1, -5.8 * fat, 2.2, 5.4 * fat);
+            ctx.fillStyle = dark;
+            ctx.fillRect(0.4, -2.2, 1.6, 0.9);
+            break;
+        }
+        case "haunch": {                                 // кусок мяса на кости
+            ctx.fillStyle = base;
+            ctx.beginPath(); ctx.ellipse(-0.4, -4.2, 3.3 * fat, 2.8 * fat, -0.2, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.5; ctx.stroke();
+            ctx.fillStyle = "#e7dccb";                    // кость
+            ctx.beginPath(); ctx.ellipse(2.7, -6.4, 1.5, 1, 0.6, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = lite;                         // жир
+            ctx.beginPath(); ctx.ellipse(-1.6, -5.4, 1.5, 0.7, -0.4, 0, Math.PI * 2); ctx.fill();
+            break;
+        }
+        case "fillet": {                                 // рыба: тело, плавник, хвост
+            ctx.fillStyle = base;
+            ctx.beginPath();
+            ctx.moveTo(-3.6 * fat, -4.2); ctx.quadraticCurveTo(0.4, -8.4, 3.4 * fat, -4.6);
+            ctx.quadraticCurveTo(0.4, -1.2, -3.6 * fat, -4.2);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.5; ctx.stroke();
+            ctx.fillStyle = dark;                          // хвост
+            ctx.beginPath(); ctx.moveTo(-3.4 * fat, -4.2); ctx.lineTo(-5.6 * fat, -6.4); ctx.lineTo(-5.4 * fat, -2.2);
+            ctx.closePath(); ctx.fill();
+            ctx.fillStyle = glint;                         // бок
+            ctx.beginPath(); ctx.ellipse(0.6, -5.2, 1.6, 0.7, -0.2, 0, Math.PI * 2); ctx.fill();
+            break;
+        }
+        case "fungal": {                                 // гриб: шляпка + ножка
+            ctx.fillStyle = lite;
+            ctx.fillRect(-0.9, -4.4, 1.8, 4.6);
+            ctx.fillStyle = base;
+            ctx.beginPath(); ctx.ellipse(0, -4.8, 3.2 * fat, 2.3 * fat, 0, Math.PI, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(0, -4.8, 3.2 * fat, 1.1 * fat, 0, 0, Math.PI); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.5;
+            ctx.beginPath(); ctx.ellipse(0, -4.8, 3.2 * fat, 2.3 * fat, 0, Math.PI, Math.PI * 2); ctx.stroke();
+            ctx.fillStyle = "rgba(255,250,240,0.5)";
+            ctx.beginPath(); ctx.ellipse(-1.2, -5.8, 0.8, 0.5, 0, 0, Math.PI * 2); ctx.fill();
+            break;
+        }
+        case "root": {                                   // корнеплод: репка с ботвой
+            ctx.fillStyle = base;
+            ctx.beginPath(); ctx.ellipse(0, -3.6, 2.6 * fat, 3.2 * fat, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.5; ctx.stroke();
+            ctx.fillStyle = dark;
+            ctx.beginPath(); ctx.moveTo(-0.7, -0.8); ctx.lineTo(0.7, -0.8); ctx.lineTo(0, 1.8); ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = "#6d8a4a"; ctx.lineWidth = 0.8;
+            for (let i = -1; i <= 1; i += 1) {
+                ctx.beginPath(); ctx.moveTo(0, -6.2); ctx.quadraticCurveTo(i * 1.6, -8, i * 2.4, -9.4); ctx.stroke();
+            }
+            break;
+        }
+        case "dish": {                                   // миска (или лепёшка на ладони)
+            ctx.fillStyle = base;
+            ctx.beginPath(); ctx.ellipse(0, -3.4, 3.8 * fat, 2.4 * fat, 0, Math.PI, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = dark;
+            ctx.beginPath(); ctx.ellipse(0, -3.4, 3.8 * fat, 1.4 * fat, 0, 0, Math.PI); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.5;
+            ctx.beginPath(); ctx.ellipse(0, -3.4, 3.8 * fat, 2.4 * fat, 0, Math.PI, Math.PI * 2); ctx.stroke();
+            ctx.fillStyle = lite;                          // содержимое
+            ctx.beginPath(); ctx.ellipse(0, -3.6, 2.5 * fat, 0.9, 0, 0, Math.PI * 2); ctx.fill();
+            break;
+        }
+        case "jar": {                                    // банка с крышкой (варенье, отвар)
+            ctx.fillStyle = base;
+            ctx.beginPath(); ctx.ellipse(0, -4.4, 2.6 * fat, 3.4 * fat, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.5; ctx.stroke();
+            ctx.fillStyle = "#6a5236";
+            ctx.fillRect(-2.1, -8.4 * fat, 4.2, 1.4);
+            ctx.fillStyle = "rgba(255,250,240,0.42)";
+            ctx.fillRect(-1.4, -6.6, 1, 3.4);
+            break;
+        }
+        default: {                                       // комок в ладони (смола, зола)
+            ctx.fillStyle = base;
+            ctx.beginPath(); ctx.ellipse(0, -3.4, 3.2 * fat, 2.9 * fat, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = CARRY_INK; ctx.lineWidth = 0.55; ctx.stroke();
+            ctx.fillStyle = dark;
+            ctx.beginPath(); ctx.ellipse(0.9, -2.4, 2.1, 1.4, 0.3, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = glint; ctx.globalAlpha = 0.6;
+            ctx.beginPath(); ctx.ellipse(-1.1, -4.6, 1, 0.6, -0.4, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+    }
 }
 
 /** Sleeping hero: a bedroll lump with zzz, drawn inside the tent. */

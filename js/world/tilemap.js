@@ -7,6 +7,7 @@
  * is what lets a 96×72 zone with thousands of tiles run at 60 fps on Canvas 2D
  * without a single dependency.
  */
+import { waterIce } from "./water-state.js";
 import { T, TILE_SIZE, tileInfo, isSolidTile, tileSpeed } from "./tiles.js";
 
 export const CHUNK = 16;
@@ -32,16 +33,27 @@ export class TileMap {
 
     set(x, y, id) {
         if (!this.inBounds(x, y)) return this;
+        const previous = this.data[this.index(x, y)];
         this.data[this.index(x, y)] = id;
+        this.revision = (this.revision || 0) + 1;
+        // Coast distances can propagate beyond a neighbouring chunk.
+        if (!!tileInfo(previous).liquid !== !!tileInfo(id).liquid) this.markAllDirty();
         this.markDirtyAt(x, y);
         return this;
     }
 
     /** Tile under a world-unit position. */
-    at(wx, wy) { return this.get(Math.floor(wx / this.tileSize), Math.floor(wy / this.tileSize)); }
+    at(wx, wy) { return this.terrain ? this.terrain.sample(wx, wy).id : this.get(Math.floor(wx / this.tileSize), Math.floor(wy / this.tileSize)); }
 
-    solidAt(wx, wy) { return isSolidTile(this.at(wx, wy)); }
-    speedAt(wx, wy) { return tileSpeed(this.at(wx, wy)); }
+    solidAt(wx, wy) {
+        const id = this.at(wx, wy);
+        if (id === T.DEEP && waterIce(this, wx, wy, id).walkable) return false;
+        return isSolidTile(id);
+    }
+    speedAt(wx, wy) {
+        const id = this.at(wx, wy), ice = waterIce(this, wx, wy, id);
+        return ice.walkable || (id === T.WATER && ice.cover >= 0.55) ? 1 : tileSpeed(id);
+    }
     infoAt(wx, wy) { return tileInfo(this.at(wx, wy)); }
 
     chunkKey(cx, cy) { return cy * this.chunksX + cx; }
@@ -49,11 +61,11 @@ export class TileMap {
     markDirtyAt(x, y) {
         const cx = Math.floor(x / CHUNK), cy = Math.floor(y / CHUNK);
         this.dirtyChunks.add(this.chunkKey(cx, cy));
-        // Neighbouring chunks may blend across the seam (autotiling).
-        if (x % CHUNK === 0 && cx > 0) this.dirtyChunks.add(this.chunkKey(cx - 1, cy));
-        if (y % CHUNK === 0 && cy > 0) this.dirtyChunks.add(this.chunkKey(cx, cy - 1));
-        if (x % CHUNK === CHUNK - 1 && cx < this.chunksX - 1) this.dirtyChunks.add(this.chunkKey(cx + 1, cy));
-        if (y % CHUNK === CHUNK - 1 && cy < this.chunksY - 1) this.dirtyChunks.add(this.chunkKey(cx, cy + 1));
+        // Bilinear natural contours also cross diagonal chunk boundaries.
+        for (const dx of [-1, 0, 1]) for (const dy of [-1, 0, 1]) {
+            const nx = Math.floor((x + dx) / CHUNK), ny = Math.floor((y + dy) / CHUNK);
+            if (nx >= 0 && ny >= 0 && nx < this.chunksX && ny < this.chunksY) this.dirtyChunks.add(this.chunkKey(nx, ny));
+        }
         return this;
     }
 

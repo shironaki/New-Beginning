@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Персонаж: четыре способа рисовки</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<main class="shell">
+  <header class="hero">
+    <div><p class="eyebrow">ИЗОЛИРОВАННЫЙ СТЕНД · PRODUCTION НЕ ИЗМЕНЁН</p>
+      <h1>Как может выглядеть герой</h1>
+      <p class="intro">Четыре самостоятельных способа рисовки: от текущего Canvas до ручного пиксельного спрайта и объёмной модели. Общие контролы синхронизируют позу, направление и предметы в руках.</p>
+    </div><span class="scope">Выбираем стиль и технологию</span>
+  </header>
+  <section class="controls" aria-label="Параметры сравнения">
+    <div class="control"><small>Состояние</small><div class="row"><button data-motion="idle" aria-pressed="true">Покой</button><button data-motion="walk">Шаг</button><button data-motion="run">Бег</button></div></div>
+    <div class="control"><small>Взгляд</small><div class="row"><button data-direction="up" aria-label="Со спины">↑</button><button data-direction="left" aria-label="Влево">←</button><button data-direction="down" aria-label="Спереди" aria-pressed="true">↓</button><button data-direction="right" aria-label="Вправо">→</button></div></div>
+    <label class="control"><small>Предметы в руках</small><select id="equipment"><option value="none">Руки свободны</option><option value="right">Правая · топор</option><option value="left">Левая · топор</option><option value="both" selected>Правая · топор / левая · свет</option></select></label>
+    <span id="status" role="status">Покой · спереди · предметы синхронизированы</span>
+  </section>
+
+  <section class="grid" aria-label="Варианты рендеринга персонажа">
+    <article class="card">
+      <header><span class="num">01</span><div><h2>Canvas 2D · базовый силуэт игры</h2><small>JavaScript · production renderer, без изменений</small></div><b class="tag">контроль</b></header>
+      <div class="view view-canvas"><canvas id="currentCanvas" aria-label="Текущий персонаж игры"></canvas><span class="hint">production renderer</span></div>
+      <p>Текущая рисовка игры — базовая точка сравнения, не новый арт-концепт.</p>
+      <div class="swatches" aria-label="Палитра текущего рендера"><span>ПАЛИТРА</span><i title="хвоя" style="--swatch:#446d68"></i><i title="лён" style="--swatch:#899383"></i><i title="земля" style="--swatch:#48473e"></i><i title="охра" style="--swatch:#c9a063"></i><i title="кожа" style="--swatch:#e0b594"></i></div>
+      <ul><li>Движение, ракурсы и предметы уже входят в игровой рендер.</li><li>Минимальный риск интеграции и без новых app-зависимостей.</li><li class="muted">Сохраняет геометрический Canvas-стиль.</li></ul>
+    </article>
+
+    <article class="card">
+      <header><span class="num">02</span><div><h2>Лесной путник · рисованный SVG</h2><small>SVG/XML · CSS rig · JavaScript</small></div><b class="tag">слои</b></header>
+      <div class="view view-svg">
+        <svg viewBox="68 15 145 280" role="img" aria-label="Оригинальный рисованный персонаж на SVG">
+          <defs><linearGradient id="coat" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#a35d43"/><stop offset="1" stop-color="#49332e"/></linearGradient><linearGradient id="linen" x2="0" y2="1"><stop stop-color="#e0d3b4"/><stop offset="1" stop-color="#8f947e"/></linearGradient><linearGradient id="leather" x2="1" y2="1"><stop stop-color="#a47a4e"/><stop offset="1" stop-color="#49372d"/></linearGradient></defs>
+          <ellipse cx="140" cy="285" rx="48" ry="10" fill="#101710" opacity=".55"/>
+          <g id="svgFigure">
+            <path d="M107 112Q91 151 96 211L79 258Q108 270 141 258L186 264L177 199Q190 149 173 112Z" fill="#384a40" stroke="#282a25" stroke-width="4"/>
+            <g id="svgFarLeg"><path d="M115 190Q133 188 138 220L136 256L112 257L110 222Z" fill="#353a35" stroke="#292822" stroke-width="4"/><path d="M108 250H140L144 271H106Z" fill="#5a4937" stroke="#292822" stroke-width="4"/></g>
+            <g id="svgNearLeg"><path d="M142 190Q164 188 169 221L166 257H140L138 221Z" fill="#4c4b3e" stroke="#292822" stroke-width="4"/><path d="M137 250H169L177 271H135Z" fill="#76563d" stroke="#292822" stroke-width="4"/></g>
+            <g id="svgTorso"><path d="M103 105Q139 91 176 105L188 133L176 194Q140 207 100 192L91 133Z" fill="url(#linen)" stroke="#292722" stroke-width="5"/><path d="M106 106L139 105V195L101 191L94 133Z" fill="url(#coat)" stroke="#292722" stroke-width="4"/><path d="M143 105L172 106L185 133L175 194L143 196Z" fill="#74463b" stroke="#292722" stroke-width="4"/><path d="M125 98Q139 92 154 99L164 109L157 123L141 131L125 120L119 108Z" fill="#e8ddc5" stroke="#40352d" stroke-width="3"/><path d="M123 104Q140 99 159 105M123 110Q140 106 158 112M129 117Q143 120 154 115" fill="none" stroke="#b6aa90" stroke-width="2" stroke-linecap="round"/><path d="M127 101Q139 97 151 101" fill="none" stroke="#fff0d5" stroke-width="2"/><path d="M104 151Q139 161 180 149L177 160Q137 173 102 162Z" fill="#44362d" stroke="#292722" stroke-width="3"/><rect x="135" y="154" width="12" height="10" rx="2" fill="#c6a46c"/><g id="svgChest"><path d="M110 112L168 188" stroke="#382d28" stroke-width="8"/><path d="M110 111L168 187" stroke="#ac8050" stroke-width="3"/><path d="M157 172Q177 170 181 191L165 203L150 191Z" fill="url(#leather)" stroke="#332c25" stroke-width="3"/></g><g id="svgTailoring" class="svgTailoring" fill="none" stroke-linecap="round"><path d="M102 166Q120 173 136 168" stroke="#d18b60" stroke-width="2"/><path d="M105 172L107 185M169 164L174 179" stroke="#392c2a" stroke-width="2"/><path d="M116 140L127 143M119 146L130 149" stroke="#d2b16f" stroke-width="2"/><circle cx="122" cy="141" r="1.8" fill="#d8b779" stroke="none"/><circle cx="125" cy="149" r="1.8" fill="#d8b779" stroke="none"/><path d="M159 185L172 190L165 198" stroke="#c59a62" stroke-width="2"/></g><g id="svgPack" style="display:none"><path d="M116 119Q140 106 163 121L167 165Q141 179 115 162Z" fill="#71543b" stroke="#2b2821" stroke-width="4"/><path d="M116 124Q139 137 164 124" fill="none" stroke="#c29b63" stroke-width="5"/></g></g>
+            <g id="svgRightArm"><path d="M105 116L89 126L78 180L87 211L101 210L105 180L120 139Z" fill="url(#coat)" stroke="#2b2924" stroke-width="5"/><path d="M95 120Q97 105 112 103L127 110L125 124L112 132L98 128Z" fill="#52634f" stroke="#292b27" stroke-width="4"/><path d="M101 116Q109 108 118 110L122 115L107 119Z" fill="#89947b"/><path d="M95 125Q108 132 122 124" fill="none" stroke="#bc9b63" stroke-width="2"/><path d="M83 175L98 178L96 194L82 191Z" fill="url(#leather)" stroke="#342b27" stroke-width="3"/><path d="M84 179L97 182" stroke="#c19a62" stroke-width="2"/><path d="M82 199Q89 195 98 202L96 218Q87 223 80 215Z" fill="#c9926c" stroke="#43332a" stroke-width="3"/></g>
+            <g id="svgLeftArm"><path d="M174 115L190 126L200 176L192 205L178 205L178 178L162 140Z" fill="#8b5947" stroke="#2b2924" stroke-width="5"/><path d="M169 114L181 108L193 116L196 127L184 134L171 128Z" fill="url(#leather)" stroke="#302924" stroke-width="4"/><path d="M174 117L182 113L190 118" fill="none" stroke="#c4a06b" stroke-width="2"/><path d="M183 175L198 172L198 190L185 194Z" fill="#635443" stroke="#342b27" stroke-width="3"/><path d="M185 179L197 177" stroke="#b49a6b" stroke-width="2"/><path d="M185 198Q193 194 201 200L201 215Q192 221 184 214Z" fill="#c9926c" stroke="#43332a" stroke-width="3"/></g>
+            <g id="svgHead"><path id="svgFace" d="M117 47Q123 31 142 34Q163 34 167 51L164 75Q159 91 141 93Q122 89 117 74Z" fill="#b87f60" stroke="#312a26" stroke-width="4"/><g id="svgHairFront"><path d="M114 54Q109 37 130 29Q153 24 168 40L169 53L156 47L145 42L135 52L120 55Z" fill="#302925" stroke="#221f1c" stroke-width="4"/><path d="M117 42Q128 31 147 33M121 48Q135 39 154 39M145 32Q158 34 164 44" fill="none" stroke="#60484a" stroke-width="3" stroke-linecap="round"/><path d="M117 52L131 46L140 38" fill="none" stroke="#221f1c" stroke-width="4" stroke-linecap="round"/></g><path id="svgHairBack" style="display:none" d="M114 50Q117 29 142 29Q166 29 169 51L167 78Q156 92 141 95Q124 91 114 77Z" fill="#302925" stroke="#221f1c" stroke-width="4"/><g id="svgFaceFeatures"><path d="M122 55Q128 51 135 54" fill="none" stroke="#362a27" stroke-width="3"/><path d="M146 54Q153 51 160 56" fill="none" stroke="#362a27" stroke-width="3"/><g id="svgFarEye"><path d="M123 61Q128 57 134 61Q129 66 123 61Z" fill="#eadcc0"/><circle cx="129" cy="61" r="2" fill="#527a72"/></g><path d="M146 61Q152 57 159 62Q153 66 146 61Z" fill="#f0dfc3"/><circle cx="153" cy="61" r="2" fill="#527a72"/><path d="M141 62L138 73L145 74" fill="none" stroke="#8d5d4b" stroke-width="2"/><path d="M134 81Q143 85 152 80" fill="none" stroke="#744d3c" stroke-width="2.5"/><path d="M126 78Q141 88 159 76L156 87Q141 95 129 88Z" fill="#744b3d" opacity=".78"/></g></g>
+            <g id="svgAxeRight" style="display:none"><path d="M0 0V54" stroke="#523d2c" stroke-width="7"/><path d="M1 4L25 0L23 22L2 20Z" fill="#bcc2b8" stroke="#3a3730" stroke-width="3"/></g>
+            <g id="svgAxeLeft" style="display:none"><path d="M0 0V54" stroke="#523d2c" stroke-width="7"/><path d="M0 4L-24 0L-21 21L0 20Z" fill="#bcc2b8" stroke="#3a3730" stroke-width="3"/></g>
+            <g id="svgLight" style="display:none"><path d="M0 0V-13M-7 -13H7V10H-7Z" fill="#d29a49" stroke="#43342a" stroke-width="3"/><path d="M0 -11Q-4 -5 2 -2Q-2 3 1 7" fill="none" stroke="#fff0b3" stroke-width="3"/></g>
+          </g>
+        </svg>
+      </div>
+      <p>Авторские векторные слои и отдельные конечности; детали одежды легко менять.</p>
+      <div class="swatches" aria-label="Палитра лесного путника"><span>ПАЛИТРА</span><i title="мох" style="--swatch:#52634f"></i><i title="терракота" style="--swatch:#a35d43"></i><i title="лён" style="--swatch:#e0d3b4"></i><i title="кожа" style="--swatch:#a47a4e"></i><i title="теплое золото" style="--swatch:#c79a55"></i></div>
+      <ul><li>Чётко масштабируется и не требует внешнего движка.</li><li>SVG удобно подгонять под одежду/снаряжение.</li><li class="muted">Качественные профили и спина требуют отдельных форм.</li></ul>
+    </article>
+
+    <article class="card">
+      <header><span class="num">03</span><div><h2>Страж Пепелища · пиксельный спрайт</h2><small>Canvas 2D · 64×96 · кластерная палитра</small></div><b class="tag">пиксель-арт</b></header>
+      <div class="view view-pixel"><canvas id="pixelCanvas" width="64" height="96" aria-label="Оригинальный детализированный пиксельный персонаж"></canvas><span class="hint">масштаб без сглаживания</span></div>
+      <p>Стиль деталей вдохновлён присланным образцом: волосы, складки шарфа, металл и кожа. Персонаж оригинальный, под игру.</p>
+      <div class="swatches" aria-label="Палитра пиксельного странника"><span>ПАЛИТРА</span><i title="чернильный контур" style="--swatch:#29262a"></i><i title="сланцевая сталь" style="--swatch:#737b77"></i><i title="шарф" style="--swatch:#e4dcc4"></i><i title="кожа" style="--swatch:#7c4938"></i><i title="уголёк" style="--swatch:#a94a36"></i></div>
+      <ul><li>Покой, шаг, бег и предметы — синхронно с остальными карточками.</li><li>Кластеры пикселей дают собственный читаемый силуэт.</li><li class="muted">Перед production нужны отдельные игровые ракурсы и позы.</li></ul>
+    </article>
+
+    <article class="card">
+      <header><span class="num">04</span><div><h2>Low-poly персонаж · Three.js</h2><small>WebGL · процедурная 3D-геометрия</small></div><b class="tag experimental">эксперимент</b></header>
+      <div class="view view-three"><canvas id="threeCanvas" aria-label="Самодельный low-poly персонаж"></canvas><span id="threeFallback" hidden>WebGL недоступен в этом браузере</span></div>
+      <p>Объёмная модель собрана из геометрий в коде — без готовых GLB, стоковых паков и перекрашенных копий.</p>
+      <ul><li>Ракурс поворачивается вместе с направлением движения.</li><li>Можно присоединять одежду и предметы к суставам.</li><li class="muted">Самый дорогой маршрут: WebGL, риг, память и мобильная проверка.</li></ul>
+    </article>
+  </section>
+
+  <section class="decision"><div><p class="eyebrow">ПОСЛЕ ПРОСМОТРА</p><h2>Сравниваем не только картинку</h2></div><p><b>Проще всего внедрить:</b> текущий Canvas. <b>Легче менять одежду:</b> SVG. <b>Своя пиксельная айдентика:</b> sprite art. <b>Объёмная подача:</b> Three.js. Godot/GDScript или Unity/C# потребовали бы переносить часть игры, а не только героя. Пока ни один вариант не принят и не подключён.</p><p class="next"><b>После твоего выбора</b><span>Доработаю выбранное направление отдельно: игровые пропорции, ракурсы, анимацию и удержание предметов. Интеграция — только после отдельного решения.</span></p></section>
+  <footer><span>Изолированный стенд · собственные формы · без случайной генерации</span><span>Код игры не меняется этим сравнением</span></footer>
+</main>
+<script type="module" src="./showcase.js"></script>
+</body>
+</html>

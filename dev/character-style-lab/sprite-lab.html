@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Путешественник · интерактивный Canvas-риг</title>
+  <link rel="stylesheet" href="./sprite-lab.css">
+</head>
+<body>
+<main class="lab-shell">
+  <header class="lab-header">
+    <div class="header-copy">
+      <p class="eyebrow">ИЗОЛИРОВАННЫЙ ИНТЕРАКТИВНЫЙ СТЕНД · CANVAS 2D</p>
+      <h1>Путешественник<br><span>из выбранного образа</span></h1>
+      <p class="intro">Утверждённый концепт задаёт внешность: оливковая куртка, светлая рубаха, шарф и кожаное снаряжение. Справа — не картинка, а один игровой риг: повороты, движение, слои одежды и отдельный предмет в каждой руке.</p>
+      <nav class="nav-links" aria-label="Другие стенды">
+        <a href="./index.html">← Слойная студия</a>
+        <a href="./comparison.html">Старая галерея вариантов ↗</a>
+        <a href="./gandalf-sheet.html">Листовой плеер (gandalf-пак) ↗</a>
+        <a href="./hero3d.html">3D-риг Quaternius ↗</a>
+        <a href="./gandalf-pack.html">Оригинальный пак 80×64 ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="toolbar" aria-label="Параметры игрового персонажа">
+    <div class="control">
+      <small>Движение</small>
+      <div class="segments">
+        <button data-motion="idle" aria-pressed="true">Покой</button>
+        <button data-motion="walk">Шаг</button>
+        <button data-motion="run">Бег</button>
+      </div>
+    </div>
+    <div class="control">
+      <small>Направление</small>
+      <div class="segments directions">
+        <button data-direction="down" aria-label="Спереди" aria-pressed="true">↓</button>
+        <button data-direction="left" aria-label="Влево">←</button>
+        <button data-direction="up" aria-label="Со спины">↑</button>
+        <button data-direction="right" aria-label="Вправо">→</button>
+      </div>
+    </div>
+    <label class="control lead-control">
+      <small>Ведущая рука</small>
+      <select id="spriteLeadHand"><option value="right" selected>Правая · стандарт</option><option value="left">Левая</option></select>
+    </label>
+    <div class="control">
+      <small>Стиль спрайта</small>
+      <div class="segments">
+        <button data-style="pixel" aria-pressed="true">Пиксель</button>
+        <button data-style="vector" aria-pressed="false">Гладкий</button>
+      </div>
+    </div>
+    <div class="moisture-control">
+      <label for="spriteWetness"><small>Сырость ткани <b id="spriteWetnessLabel">8%</b></small></label>
+      <input id="spriteWetness" type="range" min="0" max="100" value="8">
+      <div class="range-ends"><span>Сухо</span><label class="dry-toggle"><input id="spriteDrying" type="checkbox"><span class="switch"></span>Сушить</label><span>Мокро</span></div>
+    </div>
+    <span id="spriteStatus" class="status" role="status">Покой · спереди · влажность 8%</span>
+  </section>
+
+  <section class="variant-grid" aria-label="Выбранный визуальный ориентир и игровой персонаж">
+    <article class="variant-card reference-card">
+      <header class="card-heading">
+        <span class="number">01</span>
+        <div><p class="eyebrow">ВЫБРАННЫЙ ХУДОЖЕСТВЕННЫЙ ЭТАЛОН</p><h2>Вот каким должен быть герой</h2></div>
+      </header>
+      <div class="sprite-stage reference-stage">
+        <img src="./sprites/hero-refined-art-clean.png" alt="Путешественник в зелёной куртке, со светлой рубахой, рюкзаком, топором и факелом">
+        <span class="stage-tag">СИЛУЭТ · ПАЛИТРА · СНАРЯЖЕНИЕ</span>
+      </div>
+      <div class="variant-note">
+        <span class="swatch-row" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <p><b>Это художественный эталон, не подмена рига.</b> Силуэт, материалы, лицо и палитра заданы выбранной иллюстрацией.</p>
+      </div>
+    </article>
+
+    <article class="variant-card layered-card">
+      <header class="card-heading">
+        <span class="number">02</span>
+        <div><p class="eyebrow">ПОЛНОЦЕННЫЙ ИНТЕРАКТИВНЫЙ РИГ</p><h2>Игровой Canvas-персонаж</h2></div>
+        <span class="badge layer-badge">одежда по слоям</span>
+      </header>
+      <div class="sprite-stage layered-stage">
+        <canvas id="layersCanvas" aria-label="Игровой риг путешественника с направлениями, движением, одеждой и предметами в руках"></canvas>
+        <span class="stage-tag">ТЕЛО → ТКАНЬ → КОЖА → ПРЕДМЕТЫ</span>
+        <span class="stage-state" id="layerState">DOWN · IDLE</span>
+      </div>
+      <div class="variant-note">
+        <span class="swatch-row alt-swatches" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <p><b>Управление действует на этот риг.</b> Позы считает слоемый Canvas-риг, а переключатель «Пиксель / Гладкий» показывает его то пиксель-арт-проходом (ограниченная палитра, дизеринг, контур и тёплый свет от факела), то гладкими векторами. Проверяй силуэт в четырёх направлениях, шаге и беге; снимай одежду и независимо меняй предмет в каждой руке.</p>
+      </div>
+    </article>
+  </section>
+
+  <section class="wardrobe-panel">
+    <div class="wardrobe-intro">
+      <p class="eyebrow">ИЗМЕНЕНИЯ СРАЗУ ВИДНЫ НА ИГРОВОМ РИГЕ</p>
+      <h2>Настрой персонажа</h2>
+      <p>Сними верхний слой или рюкзак; оставь руки свободными либо назначь им разные предметы. Правая рука ведущая по умолчанию, леворукость переключается выше.</p>
+    </div>
+    <fieldset class="garment-controls">
+      <legend>Слои одежды и экипировки</legend>
+      <label><input type="checkbox" data-garment="shirt" checked><span class="chip linen"></span>Рубаха</label>
+      <label><input type="checkbox" data-garment="trousers" checked><span class="chip trousers"></span>Штаны</label>
+      <label><input type="checkbox" data-garment="coat" checked><span class="chip coat"></span>Куртка + плечевые элементы</label>
+      <label><input type="checkbox" data-garment="scarf" checked><span class="chip scarf"></span>Шарф</label>
+      <label><input type="checkbox" data-garment="boots" checked><span class="chip boots"></span>Сапоги</label>
+      <label><input type="checkbox" data-garment="cloak"><span class="chip cloak"></span>Плащ</label>
+      <label><input type="checkbox" data-garment="pack" checked><span class="chip pack"></span>Рюкзак / сумка</label>
+    </fieldset>
+    <fieldset class="hand-controls">
+      <legend>Независимые предметы в руках</legend>
+      <label><span>Правая рука</span><select id="spriteRightItem"><option value="axe" selected>Топор</option><option value="torch">Факел</option><option value="none">Свободна</option></select></label>
+      <label><span>Левая рука</span><select id="spriteLeftItem"><option value="torch" selected>Факел</option><option value="axe">Топор</option><option value="none">Свободна</option></select></label>
+    </fieldset>
+  </section>
+
+  <footer>
+    <span>Только исследовательский стенд · production-рендерер и игровые данные не подключены.</span>
+    <a href="./comparison.html">Открыть сохранённую галерею стилей ↗</a>
+  </footer>
+</main>
+<script type="module" src="./sprites/main.js"></script>
+</body>
+</html>

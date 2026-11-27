@@ -42,6 +42,7 @@ export function makeContext(canvas) {
     const gradient = { addColorStop() {} };
     ctx.createRadialGradient = () => gradient;
     ctx.createLinearGradient = () => gradient;
+    ctx.createImageData = (w, h) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h });
     ctx.getImageData = (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h });
     return ctx;
 }
@@ -116,6 +117,10 @@ export class FakeElement {
     removeAttribute(name) { delete this.attrs[name]; }
 
     appendChild(child) { this.children.push(child); child.parentElement = this; return child; }
+    // У живого DOM есть и append, и prepend — ловушка из index.html и HUD
+    // пользуются именно ими, без псевдонимов тест ругался бы на харнесс.
+    append(...kids) { for (const k of kids) if (k) this.appendChild(k); }
+    prepend(...kids) { for (const k of kids.reverse() || []) if (k) this.children.unshift(k); }
     removeChild(child) { this.children = this.children.filter((c) => c !== child); return child; }
     remove() { if (this.parentElement) this.parentElement.removeChild(this); }
     get firstChild() { return this.children[0] || null; }
@@ -161,7 +166,11 @@ export function installDOM() {
         },
         removeEventListener: () => {},
         dispatch: (t, ev) => { for (const fn of listeners.get(t) || []) fn(ev); },
-        localStorage: new Map()
+        localStorage: new Map(),
+        // Адрес есть у любого браузера, а у окна теста его не было — и
+        // bootstrap, который читает `window.location.search`, нельзя было
+        // исполнить headless. Пустой поиск = «параметров нет».
+        location: { search: "", hash: "", href: "http://localhost/", reload() { win.__reloaded = (win.__reloaded || 0) + 1; } }
     };
 
     globalThis.document = doc;

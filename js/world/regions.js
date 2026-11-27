@@ -176,7 +176,6 @@ export const START_ZONE = "ashfall";
 
 export function zoneDef(id) { return ZONES[id] || null; }
 export function biomeDef(key) { return BIOMES[key] || BIOMES.meadow; }
-export function allZoneIds() { return Object.keys(ZONES); }
 
 /** Total walkable tiles authored in the valley — used in docs and tests. */
 export function valleyTileCount() {

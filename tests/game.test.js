@@ -1,3 +1,4 @@
+import { collect, reach } from "./carry-fixture.js";
 /**
  * tests — the real Game object, booted against a fake DOM.
  *
@@ -36,11 +37,14 @@ test("the game constructs with a world, a hero and a HUD", () => {
     assert.ok(g.inventory.has("knife"));
 });
 
-test("the opening narration appears and pauses the world", () => {
+test("opening narration does not pause survival", () => {
     const g = boot();
     g.start();
+    assert.eq(g.hud.panelOpen, "appearance");
+    g.hud._panelRows.find(r=>r.innerHTML.includes("Начать путь")).dispatch("click");
     assert.ok(g.hud.isStoryOpen, "the prologue text should be on screen");
-    assert.ok(g.paused);
+    assert.not(g.paused);
+    const time = g.clock.minute; g.update(1); assert.gt(g.clock.minute,time);
     g.hud.hideStory();
     assert.not(g.paused, "closing the story must resume the game");
 });
@@ -156,11 +160,12 @@ test("a key with no auto-repeat is never cut off", () => {
     assert.not(g.input.pressed("down"));
 });
 
-test("number keys switch the hotbar slot", () => {
+test("number keys open the corresponding anatomical hand", () => {
     const g = boot();
     key(dom.win, "Digit2", true);
     g.update(1 / 60);
-    assert.eq(g.inventory.activeSlot, 1);
+    assert.eq(g.hud.panelOpen, "hand");
+    assert.ok(g.hud.els.panelTitle.textContent.includes("Правая"));
 });
 
 test("the hero is never teleported while walking", () => {
@@ -193,6 +198,7 @@ test("E on firewood picks it up and shows a floating number", () => {
     g.interact = g.findInteractable();
     assert.eq(g.interact, wood, "the prop under the cursor was not detected");
     g.doInteract();
+    assert.eq(g.inventory.count("firewood"), before); collect(g,wood);
     assert.gt(g.inventory.count("firewood"), before, "nothing was picked up");
     assert.ok(wood.removed);
     assert.gt(g.particles.count, 0, "no feedback particles");
@@ -207,13 +213,14 @@ test("a tree refuses bare hands and yields to an axe", () => {
     g.doInteract();
     assert.not(tree.removed, "chopped a tree with bare hands");
     g.inventory.add("axe_stone", 1);
-    for (let i = 0; i < 10 && !tree.removed; i++) { g.interact = tree; g.doInteract(); }
+    for (let i = 0; i < 10 && !tree.removed; i++) { g.interact = tree; g.doInteract(); collect(g,tree); }
     assert.ok(tree.removed, "an axe should fell it");
     assert.gt(g.inventory.count("charcoal") + g.inventory.count("log") + g.inventory.count("firewood"), 0);
 });
 
 test("the campfire panel opens, takes fuel, lights and cooks", () => {
     const g = boot();
+    g.weather.current = "clear";
     const fireObj = g.zone.objects.find((o) => o.kind === "campfire");
     assert.ok(fireObj);
     g.inventory.add("firewood", 5);
@@ -249,7 +256,7 @@ test("reading the burnt diary raises its story flag and advances the prologue", 
     const diary = g.zone.objects.find((o) => o.kind === "diary");
     g.interact = hearth; g.doInteract();
     assert.ok(g.story.hasFlag("home_hearth"));
-    g.interact = diary; g.doInteract();
+    reach(g,diary); g.interact = diary; g.doInteract(); collect(g,diary);
     assert.ok(g.story.hasFlag("own_diary"));
     assert.eq(g.story.current.id, "firewood");
     assert.ok(g.inventory.has("diary_burnt"));
@@ -260,6 +267,8 @@ test("eating restores hunger and removes the item", () => {
     g.needs.food = 40;
     g.inventory.add("meat_roast", 1);
     g.eat("meat_roast");
+    assert.eq(g.needs.food, 40);
+    g.update(1);
     assert.gt(g.needs.food, 60);
     assert.not(g.inventory.has("meat_roast"));
 });

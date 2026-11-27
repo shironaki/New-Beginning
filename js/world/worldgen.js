@@ -7,13 +7,19 @@
  * except at the links declared in regions.js. Same seed → same valley, in the
  * browser and in tests.
  */
+import { installPlayableRelief } from "./playable-relief.js";
 import { RNG, mixSeeds, hashSeed, fbm2D, valueNoise2D } from "../core/rng.js";
 import { T, TILE_SIZE, tileInfo } from "./tiles.js";
+import { edgeScenery } from "./edges.js";
+import { TerrainField } from "./terrain.js";
 import { TileMap } from "./tilemap.js";
 import { ZONES, BIOMES, biomeDef, zoneDef } from "./regions.js";
 import { propDef } from "../sandbox/gather.js";
 
 const BORDER = 2;
+
+/** Биомы, где камень лежит на поверхности осыпью (см. PROPS.scree). */
+const SCREE_BIOMES = new Set(["ashfall", "ruins"]);
 
 /** Ground palettes: [dry/low, main, lush/high] per biome ground key. */
 const GROUND_SETS = {
@@ -289,7 +295,7 @@ export function generateZone(zoneId, worldSeed = 1) {
             }
             if (hgt < biome.water * 0.55) tile = T.DEEP;
             else if (hgt < biome.water) tile = T.WATER;
-            else if (hgt > 0.80 && biome.rocks > 0.1) tile = T.CLIFF;
+            else if (hgt > (def.biome === "highland" || def.biome === "pass" ? 0.69 : 0.80) && biome.rocks > 0.1) tile = T.CLIFF;
             else if (hgt > 0.72 && biome.rocks > 0.1) tile = T.STONE;
             else if (wet < 0.36) tile = ground[0];
             else if (wet > 0.64) tile = ground[2];
@@ -311,7 +317,25 @@ export function generateZone(zoneId, worldSeed = 1) {
     makePortals(zone);
     scatterProps(zone, rng, biome);
     placeStoryProps(zone, rng);
+    restoreCoast(zone);
+    // Final topology first; otherwise the border overwrites the shallow rim.
+    // Do this after scattering so existing land loot is not rerolled.
+    if (def.biome === "shore") {
+        deepenWater(zone, seed);
+        // Smoothing must not turn the first wet cell next to land into a
+        // deep hole, particularly at narrow spits and the outer border.
+        for (let y = 0; y < map.h; y++) for (let x = 0; x < map.w; x++) {
+            if (map.get(x, y) !== T.DEEP) continue;
+            if ([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) =>
+                map.inBounds(x + dx, y + dy) && !tileInfo(map.get(x + dx, y + dy)).liquid)) {
+                map.data[y * map.w + x] = T.WATER;
+            }
+        }
+    }
+    zone.terrain = map.terrain = new TerrainField(map, seed, def.biome);
+    zone.edgeScenery = edgeScenery(zone, seed);
     pickSpawn(zone, rng);
+    installPlayableRelief(zone);
 
     map.markAllDirty();
     return zone;
@@ -473,6 +497,13 @@ function carveMainPath(zone, rng) {
                     const px = x + ox, py = y + oy;
                     if (!map.inBounds(px, py)) continue;
                     const cur = map.get(px, py);
+                    // Restore AFTER prop generation: old islands/loot keep
+                    // their original seeded rolls, not a different RNG stream.
+                    if (def.biome === "shore") {
+                        zone._shoreOriginal ||= new Map();
+                        const index = py * def.w + px;
+                        if (!zone._shoreOriginal.has(index)) zone._shoreOriginal.set(index, cur);
+                    }
                     if (cur === T.DEEP || cur === T.WATER) { map.data[py * def.w + px] = T.PLANK; continue; } // a plank crossing
                     if (cur === T.CLIFF) { map.data[py * def.w + px] = T.GRAVEL; continue; }
                     if (Math.abs(ox) + Math.abs(oy) <= 1) map.data[py * def.w + px] = pathTile;
@@ -480,6 +511,36 @@ function carveMainPath(zone, rng) {
             }
         }
     }
+}
+
+/** Undo the old synthetic causeway without rerolling any island's loot. */
+function restoreCoast(zone) {
+    if (!zone._shoreOriginal) return;
+    const { map } = zone;
+    for (const [i, id] of zone._shoreOriginal) {
+        const tx = i % map.w, ty = Math.floor(i / map.w);
+        // The authored doorway is kept; the route across the sea is not.
+        if (tx < BORDER + 1 || ty < BORDER + 1 || tx >= map.w - BORDER - 1 || ty >= map.h - BORDER - 1) continue;
+        map.data[i] = id;
+    }
+    // Anything generated on the old causeway is washed onto the nearest
+    // real bank. Do not discard loot just because its support disappeared.
+    for (const o of zone.objects) {
+        if (!tileInfo(map.get(o.tx, o.ty)).liquid || o.kind === "reed") continue;
+        let best = null, distance = Infinity;
+        for (let ty = BORDER + 1; ty < map.h - BORDER - 1; ty++) for (let tx = BORDER + 1; tx < map.w - BORDER - 1; tx++) {
+            const d = (tx - o.tx) ** 2 + (ty - o.ty) ** 2;
+            if (d >= distance || !zone.isFree(tx, ty)) continue;
+            best = { tx, ty }; distance = d;
+        }
+        if (!best) continue;
+        const radius = o.block;
+        zone.removeSolid(o);
+        o.x += (best.tx - o.tx) * TILE_SIZE; o.y += (best.ty - o.ty) * TILE_SIZE;
+        o.tx = best.tx; o.ty = best.ty;
+        if (radius > 0) zone.addSolid(o, radius);
+    }
+    delete zone._shoreOriginal;
 }
 
 /**
@@ -629,8 +690,18 @@ function scatterProps(zone, rng, biome) {
                 const ore = (oreCountry && rng.chance(0.42))
                     ? rng.weighted([["copper", 5], ["iron", 3], ["coal", 4], ["gem", 1]])
                     : null;
-                addProp(zone, ore ? "ore_rock" : "rock", x, y, {
-                    variant: rng.int(0, 2), ore, hp: ore ? 5 : 3, yields: ore || "stone"
+                // В выжженных землях часть валунов рассыпается в осыпь: голыми
+                // руками оттуда берётся камень на первое орудие. Без этого
+                // каменный век замкнут — кирка требует камень, камень требует
+                // кирку. Один и тот же камень, но втрое меньше за удар.
+                // Хеш от клетки, а не rng: последовательность генератора не
+                // сдвигается, и весь остальной мир (а с ним и сиды, и сейвы)
+                // остаётся прежним. Плюс осыпь привязана к месту — валун на
+                // этом холме рассыпается всегда, а не по настроению броска.
+                const crumbled = !ore && def.biome !== "shore" && SCREE_BIOMES.has(def.biome)
+                    && (((x * 73856093) ^ (y * 19349663)) >>> 5) % 100 < 38;
+                addProp(zone, def.biome === "shore" ? "beach_pebbles" : ore ? "ore_rock" : crumbled ? "scree" : "rock", x, y, {
+                    variant: rng.int(0, 2), ore, hp: def.biome === "shore" || crumbled ? 1 : ore ? 5 : 3, yields: ore || "stone"
                 });
                 continue;
             }
@@ -674,8 +745,10 @@ function placeStoryProps(zone, rng) {
                 zone.clearTile(x, y);
             }
         }
-        for (let x = hx; x < hx + 7; x += 2) addProp(zone, "burnt_beam", x, hy, { solid: true });
-        for (let x = hx + 1; x < hx + 6; x += 2) addProp(zone, "burnt_beam", x, hy + 4, { solid: true });
+        // Упавшие прогоны — ОДНОЙ линией вдоль фасада, а не шесть плит в
+        // шахматном порядке. Разбросанные по двору тёмные прямоугольники
+        // читались как «какая-то хрень лежит», а не как обвал крыши (блок 79).
+        for (let x = hx + 1; x <= hx + 3; x += 1) addProp(zone, "burnt_beam", x, hy + 3, { solid: true });
         addProp(zone, "hearth_ruin", hx + 3, hy + 2, { solid: true, story: "home_hearth" });
         addProp(zone, "diary", hx + 2, hy + 3, { solid: false, story: "own_diary" });
 
@@ -693,9 +766,46 @@ function placeStoryProps(zone, rng) {
         zone.campSite = { tx: cx, ty: cy };
         addProp(zone, "tent", cx - 2, cy, { solid: true, story: "start_tent" });
         addProp(zone, "campfire", cx + 1, cy, { solid: false, story: "start_fire", fuel: 0 });
-        addProp(zone, "firewood", cx + 1, cy + 1, { solid: false, amount: 2 });
+        // Дрова у костра — да, но НЕ под ногами: стартовая точка это (cx, cy+1),
+        // и кучка в (cx+1, cy+1) лежала вплотную к спрайту героя. На 40-пиксельной
+        // фигуре это выглядело как «странный предмет под ногами» (претензия п.6),
+        // а не как поленница. Уводим на тайл дальше; вторая кучка стояла через
+        // два тайла и её не трогаем.
+        addProp(zone, "firewood", cx + 2, cy + 1, { solid: false, amount: 2 });
         addProp(zone, "firewood", cx, cy - 1, { solid: false, amount: 2 });
         zone.spawnHint = { tx: cx, ty: cy + 1 };
+
+        // Что уцелело от дома — уже не нарисованный отрезок, а деталь из пака
+        // (Quaternius «Medieval Village MegaKit», CC0): обломок стены с наличником,
+        // крыша, труба, ящик, плетень вдоль двора и телега у калитки. Ставим ПОСЛЕ
+        // расчистки лагеря и мимо него: лагерь вычищает тайлы вместе с пропами, и
+        // телега, поставленная в (cx-2, cy), просто исчезала под палаткой.
+        // Стены — СПЛОШНОЙ ряд (три панели + обломок), иначе две панели в
+        // шести тайлах друг от друга выглядят как «что это за стены на поле».
+        // Крыша стоит над СРЕДНЕЙ из них: панель 56×46 перекрывает соседние и
+        // перестаёт быть «летающей палаткой».
+        for (let x = hx; x <= hx + 2; x += 1) {
+            if (map.inBounds(x, hy + 1)) addProp(zone, "hut_wall", x, hy + 1, { solid: true });
+        }
+        if (map.inBounds(hx + 3, hy + 1)) addProp(zone, "ruin_wall", hx + 3, hy + 1, { solid: true });
+        // Крыша — НА стене, а не рядом с ней: у панели 6×6 свой центр, и сдвиг на
+        // тайл вперёд вешал её в воздухе над пеплом («летающие объекты» из отзыва
+        // владельца). lift = высота опоры, `on` — для правила «опоры нет → падаем».
+        if (map.inBounds(hx + 1, hy + 1)) addProp(zone, "hut_roof", hx + 1, hy + 1, {
+            // 46 px = верх стены из propsprites минус скат. Число сверяет
+            // tests/visual-world: «поднятая деталь сидит на опоре, а не в воздухе».
+            solid: false, size: 0.94, lift: 46, on: "hut_wall"
+        });
+        // Труба — в торец стены (hx+3, hy+1), а не в поле на два тайла выше:
+        // одинокий столб посередине пепелища был вторым «что это летает».
+        if (map.inBounds(hx + 4, hy + 1)) addProp(zone, "chimney", hx + 4, hy + 1, { solid: true });
+        if (map.inBounds(hx + 5, hy + 3)) addProp(zone, "crate", hx + 5, hy + 3, { solid: true });
+        if (map.inBounds(hx + 8, hy + 3)) addProp(zone, "wagon", hx + 8, hy + 3, { solid: true });
+        // Плетень — сплошная линия (шаг 1), иначе три сегмента через тайл
+        // смотрятся как плавающие в воздухе обрывки с тенью под каждым.
+        for (let y = hy + 5; y <= hy + 8; y += 1) {
+            if (map.inBounds(hx - 3, y)) addProp(zone, "fence", hx - 3, y, { solid: true });
+        }
     }
 
     if (def.id === "ruins") {
@@ -713,6 +823,19 @@ function placeStoryProps(zone, rng) {
                     if (edge && rng.chance(0.55)) addProp(zone, "ruin_wall", x, y, { solid: true, variant: rng.int(0, 2) });
                 }
             }
+            // Из конструктора собираем то, чего процедурная отрисовка не давала:
+            // уцелевший угол с крышей и трубой. Две детали на фундамент — и это
+            // уже «дом», а не «прямоугольник из сажи».
+            const hasWall = map.inBounds(bx, by) && rng.chance(0.7);
+            if (hasWall) addProp(zone, "hut_wall", bx, by, { solid: true });
+            // Крыша только над стеной: «уцелел угол — уцелела и крыша» читается,
+            // а висящая в воздухе панель читается как баг.
+            if (hasWall) addProp(zone, "hut_roof", bx, by, { solid: false, size: 0.9, lift: 46, on: "hut_wall" });
+            if (map.inBounds(bx + 3, by - 1) && rng.chance(0.5)) addProp(zone, "chimney", bx + 3, by - 1, { solid: true });
+            if (map.inBounds(bx + bw - 1, by + bh - 2) && rng.chance(0.45)) {
+                addProp(zone, "crate", bx + bw - 1, by + bh - 2, { solid: true });
+            }
+            if (map.inBounds(bx - 2, by + 1) && rng.chance(0.35)) addProp(zone, "wagon", bx - 2, by + 1, { solid: true });
             if (rng.chance(0.6)) addProp(zone, "chest_old", bx + 1, by + 1, { solid: true, looted: false });
         }
     }

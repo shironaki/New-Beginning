@@ -68,9 +68,10 @@ export const TILES = {
 export function tileInfo(id) { return TILES[id] || TILES[T.VOID]; }
 export function isSolidTile(id) { return tileInfo(id).solid === true; }
 export function tileSpeed(id) { return tileInfo(id).speed; }
+/** Вода ли это — единственный вопрос, который задают тайлу при сортировке и
+ * прирезке берега. Раньше тот же тест писали inline в tilesart, и `isShallow`
+ * был вторым ответом на него же; оба сравнялись здесь. */
 export function isLiquid(id) { return tileInfo(id).liquid === true; }
-/** Water you can stand in: the shallows, not the deep. */
-export function isShallow(id) { const t = tileInfo(id); return t.liquid === true && t.solid === false; }
 
 /** World units per tile. Everything positional is in world units. */
 export const TILE_SIZE = 32;

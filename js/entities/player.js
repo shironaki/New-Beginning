@@ -6,8 +6,9 @@
  * terrain + prop solidity, so a pine actually stops you.
  */
 import { moveAndCollide } from "../world/tilemap.js";
+import { ICE } from "../world/surface.js";
 import { TILE_SIZE } from "../world/tiles.js";
-import { GAIT, MOVE, approach } from "../render/charspec.js";
+import { GAIT, MOVE, STAMINA, approach } from "../render/charspec.js";
 
 export const DIRS = ["down", "left", "right", "up"];
 
@@ -15,6 +16,7 @@ export class Player {
     constructor({ x = 0, y = 0, bus = null } = {}) {
         this.x = x; this.y = y;
         this.vx = 0; this.vy = 0;       // measured, after collision
+        this.leanAX = 0; this.leanAY = 0; // filtered physical acceleration, visual only
         this.ax = 0; this.ay = 0;       // wanted acceleration, from the model
         this.mvx = 0; this.mvy = 0;     // wanted velocity carried between frames
         this.radius = 9;
@@ -38,8 +40,15 @@ export class Player {
         this.runBlend = 0;       // 0 walking .. 1 running, blended
         this.moving = false;
         this.running = false;
+        this.sprintLocked = false;
+        this.iceCarry = 0; this.onIce = false;
+        this.fallDirX = 1; this.fallDirY = 0;
         this.actionTimer = 0;    // tool swing animation
         this.actionKind = null;
+        this.fallTimer = 0;
+        this.slipCooldown = 0;
+        this.slipDistance = 0;
+        this.slipChecks = 0;
         this.sleeping = false;
         this.name = "Странник";
     }
@@ -98,29 +107,46 @@ export class Player {
         return this;
     }
 
-    _step(dt, axis, zone, { speedFactor = 1, wantRun = false } = {}) {
+    _step(dt, axis, zone, { speedFactor = 1, wantRun = false, surfaceAt = null } = {}) {
         if (this.actionTimer > 0) this.actionTimer = Math.max(0, this.actionTimer - dt);
         if (this.sleeping) {
-            this.moving = false;
+            this.moving = this.running = false;
+            this.updateLean(dt, 0, 0);
             this.ax = this.ay = 0;
             this.gait = approach(this.gait, 0, dt, GAIT.blendWalk);
             this.runBlend = approach(this.runBlend, 0, dt, GAIT.blendRun);
             return this;
         }
 
+        const sprintRequested = wantRun;
+        this.slipCooldown = Math.max(0, this.slipCooldown - dt);
+        if (this.fallTimer > 0) {
+            this.fallTimer = Math.max(0, this.fallTimer - dt);
+            axis = { x: 0, y: 0 }; wantRun = false;
+        }
+        const surface = surfaceAt ? surfaceAt(this.x, this.y) : null;
+        const icy = !!surface?.ice;
+        this.onIce = icy;
+        this.iceCarry = icy ? ICE.edgeMemory : Math.max(0, this.iceCarry - dt);
+        const slick = icy || this.iceCarry > 0;
         const mag = Math.hypot(axis.x, axis.y);
         this.moving = mag > 0.01;
 
-        // Sprint costs stamina; walking and standing restore it.
-        const canRun = wantRun && this.stamina > 6 && mag > 0.6;
+        // Separate stop/resume thresholds prevent 70 Hz run/walk chatter at
+        // exhaustion. Retrying also requires an actual key release.
+        if (!sprintRequested) this.sprintLocked = false;
+        else if (this.stamina <= (this.running ? MOVE.sprintStop : MOVE.sprintResume)) this.sprintLocked = true;
+        // Exhaustion latches until Shift is released: no automatic bursts
+        // every time a small reserve happens to recover under a held key.
+        const canRun = wantRun && !this.sprintLocked && mag > 0.6;
         this.running = canRun;
-        if (canRun) this.stamina = Math.max(0, this.stamina - 16 * dt);
-        else this.stamina = Math.min(this.maxStamina, this.stamina + (this.moving ? 7 : 14) * dt);
+        if (canRun) this.stamina = Math.max(0, this.stamina - STAMINA.drain * dt);
+        else this.stamina = Math.min(this.maxStamina, this.stamina + (this.moving ? STAMINA.walkRecovery : STAMINA.idleRecovery) * dt);
 
         // Analogue magnitude scales speed; sprint overrides the top end.
         const base = canRun ? this.runSpeed : this.walkSpeed;
         const terrain = zone ? zone.map.speedAt(this.x, this.y) : 1;
-        const speed = base * Math.min(1, mag) * speedFactor * terrain;
+        const speed = base * Math.min(1, mag) * speedFactor * terrain * (surface?.slope || 1) * (icy ? ICE.speed : 1);
 
         // --- mass ---------------------------------------------------------
         // The hero accelerates towards the wanted velocity instead of
@@ -131,6 +157,9 @@ export class Player {
         const slippery = terrain < MOVE.slipBelow;
         let tau = this.moving ? MOVE.tauStart : MOVE.tauStop * (slippery ? MOVE.slipStop : 1);
         if (this.moving && (this.mvx * wantX + this.mvy * wantY) < 0) tau = MOVE.tauTurn;
+        const turningHard = this.moving && (this.mvx * wantX + this.mvy * wantY) < 0;
+        if (slick) tau = this.moving ? (turningHard ? ICE.tauTurn : ICE.tauMove) : ICE.tauStop;
+        if (this.fallTimer > 0) tau = slick ? ICE.tauFallen : ICE.tauFallenDry;
         // Exact integration of dv/dt = (want - v)/tau over the frame, both
         // for the velocity and for the ground it covers. Euler would make the
         // ramp depend on the frame rate, and 30 FPS would walk a different
@@ -151,6 +180,7 @@ export class Player {
             this.mvx = this.mvy = 0;
             this.vx = this.vy = 0;
             this.ax = this.ay = 0;
+            this.updateLean(dt, 0, 0);
             this.settle(dt);
             return this;
         }
@@ -193,20 +223,51 @@ export class Player {
         // matches the ground under it: no skating, no legs lagging the torso.
         const moved = Math.hypot(this.x - x0, this.y - y0);
         this.dist += moved;
-        this.advance(dt, moved, canRun);
+        if (icy && this.slipCooldown <= 0 && (canRun || turningHard)) {
+            this.slipDistance += moved;
+            if (this.slipDistance >= ICE.checkDistance) {
+                this.slipDistance -= ICE.checkDistance;
+                // Deterministic chance per distance, not per render frame.
+                this.slipChecks++;
+                const roll = ((Math.imul(this.slipChecks, 1103515245) + 12345) >>> 0) / 4294967296;
+                if (roll < (turningHard ? ICE.chanceTurn : ICE.chanceRun)) {
+                    this.fallTimer = ICE.fallTime; this.slipCooldown = ICE.cooldown;
+                    const v = Math.hypot(this.mvx, this.mvy) || 1;
+                    this.fallDirX = this.mvx / v; this.fallDirY = this.mvy / v;
+                    this.stamina = Math.max(0, this.stamina - ICE.staminaCost);
+                    this.actionTimer = 0; this.running = false;
+                    if (this.bus) this.bus.emit("player:slipped", {});
+                }
+            }
+        } else if (!icy) this.slipDistance = 0;
+        if (this.fallTimer > 0) {
+            this.gait = approach(this.gait, 0, dt, 0.12);
+            this.runBlend = approach(this.runBlend, 0, dt, GAIT.blendRun);
+        } else this.advance(dt, moved, canRun);
 
-        this.vx = (this.x - x0) / dt; this.vy = (this.y - y0) / dt;
+        const vx = (this.x - x0) / dt, vy = (this.y - y0) / dt;
+        // Contact resolution must not kick the torso back and forth. Filter
+        // ACTUAL acceleration at the fixed physics step, never in the painter.
+        this.updateLean(dt, (vx - this.vx) / dt, (vy - this.vy) / dt);
+        this.vx = vx; this.vy = vy;
         return this;
+    }
+
+    updateLean(dt, ax, ay) {
+        const blend = 1 - Math.exp(-dt / GAIT.leanAccelTau);
+        const limit = (v) => Math.max(-GAIT.accelRef, Math.min(GAIT.accelRef, v));
+        this.leanAX += (limit(ax) - this.leanAX) * blend;
+        this.leanAY += (limit(ay) - this.leanAY) * blend;
     }
 
     /**
      * Distance-driven walk cycle.
      * One full cycle = `stride` pixels of ground, so the swing amplitude
-     * declared in charspec cancels the ground travel exactly.
+     * declared in charspec is capped to keep the legs within IK reach.
      */
     advance(dt, moved, running) {
         this.runBlend = approach(this.runBlend, running ? 1 : 0, dt, GAIT.blendRun);
-        this.gait = approach(this.gait, 1, dt, GAIT.blendWalk);
+        this.gait = approach(this.gait, Math.min(1, moved / dt / MOVE.strideFullSpeed), dt, GAIT.blendWalk);
         const stride = GAIT.strideWalk + (GAIT.strideRun - GAIT.strideWalk) * this.runBlend;
         const step = (moved / stride) * Math.PI * 2;
         const cap = GAIT.cadenceCap * Math.PI * 2 * dt;      // no sewing machine
@@ -252,6 +313,33 @@ export class Player {
         return 0.75;
     }
 
-    toJSON() { return { x: this.x, y: this.y, dir: this.dir, stamina: this.stamina, name: this.name }; }
-    load(d) { if (d) Object.assign(this, d); return this; }
+    toJSON() { return { x: this.x, y: this.y, dir: this.dir, stamina: this.stamina, name: this.name, faceX: this.faceX, faceY: this.faceY, slant: this.slant,
+        slipDistance: this.slipDistance, slipChecks: this.slipChecks, slipCooldown: this.slipCooldown, fallTimer: this.fallTimer,
+        sprintLocked: this.sprintLocked, fallDirX: this.fallDirX, fallDirY: this.fallDirY,
+        fallMotion: this.fallTimer > 0 ? [this.mvx, this.mvy, this.iceCarry] : null }; }
+    load(d) {
+        if (d) Object.assign(this, d);
+        const facing = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] }[this.dir] || [0, 1];
+        this.faceX = Number.isFinite(d?.faceX) ? Math.max(-1, Math.min(1, d.faceX)) : facing[0];
+        this.faceY = Number.isFinite(d?.faceY) ? Math.max(-1, Math.min(1, d.faceY)) : facing[1];
+        this.slant = Number.isFinite(d?.slant) ? Math.max(-1, Math.min(1, d.slant)) : 0;
+        this.fallTimer = d?.fallTimer ?? 0;
+        this.sprintLocked = !!d?.sprintLocked;
+        this.mvx = this.mvy = this.iceCarry = 0; this.onIce = false;
+        for (const [key, max] of [["fallTimer", ICE.fallTime], ["slipCooldown", ICE.cooldown], ["slipDistance", ICE.checkDistance], ["slipChecks", 4294967295]]) {
+            this[key] = Number.isFinite(this[key]) ? Math.max(0, Math.min(max, this[key])) : 0;
+        }
+        this.slipChecks = Math.floor(this.slipChecks);
+        this.sprintLocked = !!this.sprintLocked;
+        this.fallDirX = Number.isFinite(this.fallDirX) ? Math.max(-1, Math.min(1, this.fallDirX)) : 1;
+        this.fallDirY = Number.isFinite(this.fallDirY) ? Math.max(-1, Math.min(1, this.fallDirY)) : 0;
+        if (this.fallTimer > 0 && Array.isArray(d?.fallMotion)) {
+            const [x, y, carry] = d.fallMotion;
+            this.mvx = Number.isFinite(x) ? Math.max(-300, Math.min(300, x)) : 0;
+            this.mvy = Number.isFinite(y) ? Math.max(-300, Math.min(300, y)) : 0;
+            this.iceCarry = Number.isFinite(carry) ? Math.max(0, Math.min(ICE.edgeMemory, carry)) : 0;
+        }
+        delete this.fallMotion;
+        return this;
+    }
 }

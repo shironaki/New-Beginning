@@ -35,13 +35,16 @@ const exists = (rel) => {
 };
 
 /* ---- 1. what index.html asks for ------------------------------------- */
-const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
-for (const m of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
-    const url = m[1];
-    if (/^(https?:|data:|#|\/\/)/.test(url)) continue;
-    checked++;
-    if (url.startsWith("/")) problems.push(`index.html: абсолютный путь "${url}" — на Pages сайт лежит в подпапке`);
-    else if (!exists(url)) problems.push(`index.html: нет файла ${url}`);
+for (const file of ["index.html", ...fs.readdirSync(path.join(ROOT, "dev")).filter((f) => f.endsWith(".html")).map((f) => `dev/${f}`)]) {
+    const html = fs.readFileSync(path.join(ROOT, file), "utf8");
+    for (const m of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
+        const url = m[1];
+        if (/^(https?:|data:|#|\/\/)/.test(url)) continue;
+        checked++;
+        const target = path.relative(ROOT, path.resolve(ROOT, path.dirname(file), url.split(/[?#]/)[0] || ".")).split(path.sep).join("/");
+        if (url.startsWith("/")) problems.push(`${file}: абсолютный путь "${url}" — на Pages сайт лежит в подпапке`);
+        else if (!exists(target)) problems.push(`${file}: нет файла ${url}`);
+    }
 }
 
 /* ---- 2. every import in every module ---------------------------------- */
@@ -71,6 +74,26 @@ if (/await\s+fetch\(\s*["']\/__/.test(main)) {
 checked++;
 if (!fs.existsSync(path.join(ROOT, ".nojekyll"))) {
     problems.push("нет файла .nojekyll — Pages прогонит сайт через Jekyll");
+}
+
+/* ---- 4. «чёрный экран» обязан быть объясним ---------------------------- */
+/* Страница может молчать тремя способами: модуль не доехал, упал на
+   линковке, застыл в await. Для первых двух ловушка должна стоять в HTML ДО
+   подключения модуля (обработчик на window позже уже ничего не ловит), для
+   третьего — watchdog обязан ждать флаг `__boot.started`, который ставит
+   main.js после первого кадра. */
+const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+checked += 3;
+const trapAt = html.indexOf("window.__bootFail =");
+const modAt = html.search(/<script[^>]*src="js\/main\.js"/);
+if (trapAt < 0 || modAt < 0 || trapAt > modAt) {
+    problems.push("index.html: ловушка __bootFail должна объявляться до <script src=\"js/main.js\">");
+}
+if (!/__boot\.started/.test(html) || !/__boot\.started\s*=/.test(main)) {
+    problems.push("index.html + js/main.js: watchdog без флага __boot.started не работает");
+}
+if (/if \(!canvas \|\| !hudRoot\) return;/.test(main)) {
+    problems.push("js/main.js: молчаливый return без #game — ровно тот чёрный экран, что нельзя объяснить");
 }
 
 /* ---- report ------------------------------------------------------------ */

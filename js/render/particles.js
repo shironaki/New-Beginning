@@ -484,7 +484,7 @@ export class Particles {
         for (let i = 0; i < this.n; i++) {
             const p = this.pool[i];
             if (!cam.isVisible(p.x, p.y, 40)) continue;
-            const sx = cam.toScreenX(p.x), sy = cam.toScreenY(p.y);
+            const sx = cam.toScreenX(p.x), sy = cam.toScreenY(p.y, p.x);
             const a = Math.max(0, Math.min(1, p.life / (p.maxLife || 1)));
             ctx.globalAlpha = a * p.alpha;
             if (p.kind === "emoji") {
@@ -523,7 +523,7 @@ export class Particles {
         for (let i = 0; i < this.tn; i++) {
             const t = this.textPool[i];
             if (!cam.isVisible(t.x, t.y, 60)) continue;
-            const sx = cam.toScreenX(t.x), sy = cam.toScreenY(t.y);
+            const sx = cam.toScreenX(t.x), sy = cam.toScreenY(t.y, t.x);
             ctx.globalAlpha = Math.max(0, Math.min(1, t.life / t.maxLife));
             ctx.font = this._font(this._uiFonts, t.size * cam.zoom * 0.55);
             ctx.textAlign = "center";

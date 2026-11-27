@@ -1,4 +1,4 @@
-/** tests — core: RNG, noise, events, ECS, clock, save, loop. */
+/** tests — core: RNG, noise, events, clock, save, loop. */
 import { suite, test, assert, run } from "./tiny.js";
 import * as cameraMod from "../js/engine/camera.js";
 import * as serveMod from "../serve.js";
@@ -16,7 +16,6 @@ import { moonFactor } from "../js/render/lighting.js";
 import { Particles, FX, MATERIAL, materialOf } from "../js/render/particles.js";
 import { RNG, hashSeed, mixSeeds, valueNoise2D, fbm2D } from "../js/core/rng.js";
 import { EventBus } from "../js/core/events.js";
-import { World } from "../js/core/ecs.js";
 import { GameClock, SEASONS, MINUTES_PER_DAY } from "../js/core/time.js";
 import { SaveManager, MemoryStorage, SAVE_VERSION } from "../js/core/save.js";
 import { GameLoop } from "../js/core/loop.js";
@@ -113,44 +112,6 @@ test("wildcard listener sees every event with its type", () => {
     bus.on("*", (p, type) => seen.push(type));
     bus.emit("a"); bus.emit("b");
     assert.deep(seen, ["a", "b"]);
-});
-
-suite("ecs");
-
-test("spawn, query, tag lookup and kill/flush", () => {
-    const w = new World();
-    const tree = w.spawn({ x: 10, y: 10, hp: 3, tags: ["tree"] });
-    w.spawn({ x: 50, y: 50, tags: ["tree"] });
-    w.spawn({ x: 0, y: 0, tags: ["npc"], name: "Тихон" });
-    assert.eq(w.byTag("tree").length, 2);
-    assert.eq(w.query("hp").length, 1);
-    assert.eq(w.nearest(12, 12, "tree", 40).id, tree.id);
-    w.kill(tree);
-    w.flush();
-    assert.eq(w.byTag("tree").length, 1);
-});
-
-test("systems run in order and can mutate entities", () => {
-    const w = new World();
-    const e = w.spawn({ x: 0, vx: 5 });
-    const order = [];
-    w.addSystem("second", () => order.push(2), { order: 10 });
-    w.addSystem("first", (world, dt) => {
-        order.push(1);
-        for (const ent of world.query("vx")) ent.x += ent.vx * dt;
-    }, { order: 0 });
-    w.tick(2);
-    assert.deep(order, [1, 2]);
-    assert.eq(e.x, 10);
-});
-
-test("serialise/restore keeps tags", () => {
-    const w = new World();
-    w.spawn({ x: 1, tags: ["a", "b"], fn: () => {} });
-    const json = w.toJSON();
-    const w2 = new World().load(json);
-    assert.eq(w2.size, 1);
-    assert.ok(w2.byTag("a").length === 1);
 });
 
 suite("clock");

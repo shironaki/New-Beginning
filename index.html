@@ -2,9 +2,64 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#101712">
     <title>Новое начало — survival-песочница</title>
     <link rel="stylesheet" href="css/style.css">
+    <script>
+/* Превью владельца — единственный глаз на песочницу, и «чёрный экран» для
+   него означает три разные беды: модуль не доехал, упал на загрузке или застыл
+   в await. У ошибки загрузки/линковки модуля обработчик на window ещё не
+   поставлен, поэтому ловушка обязана жить ЗДЕСЬ, до <script type="module">.
+   Ничего не тянет из сети, зависимостей нет, в игре не участвует. */
+window.__boot = { stages: [], error: null, box: null };
+window.__stage = (name) => {
+    window.__boot.stages.push(`${name} · ${Math.round(performance.now())} мс`);
+};
+window.__bootFail = (err) => {
+    window.__boot.error = (err && (err.stack || err.message)) || String(err || "");
+    if (window.__boot.box) return;
+    const box = document.createElement("div");
+    box.setAttribute("role", "alert");
+    box.style.cssText = "position:fixed;inset:0;display:flex;align-items:center;"
+        + "justify-content:center;padding:24px;background:#14120e;color:#f0e6d2;"
+        + "font:13px/1.55 ui-monospace,Menlo,Consolas,monospace;text-align:left;"
+        + "z-index:99999;overflow:auto";
+    box.innerHTML = "<div><b style='color:#f0cc8c'>Игра не запустилась</b><br><br>"
+        + "<span id='bootErr' style='color:#ff9d55;white-space:pre-wrap'></span><br><br>"
+        + "<span style='color:#9a8f7c'>дошло до:</span><br>"
+        + "<span id='bootStages' style='color:#c9b795;white-space:pre-wrap'></span><br><br>"
+        + "<button id='bootReset' style='font:inherit;padding:10px 14px;border-radius:10px;"
+        + "border:1px solid #d6aa68;background:#1f1a13;color:#f0e6d2'>Забыть сохранённый вид и перезагрузить</button>"
+        + "<br><br><span style='color:#9a8f7c'>Обнови страницу с очисткой кэша (Ctrl+Shift+R). "
+        + "Повторится — пришли этот текст целиком.</span></div>";
+    // Единственный палец владельца — это кнопка, а не консоль: сохранённый вид
+    // (меню «Вид мира») может ломать запуск, и его надо уметь выключить здесь.
+    // Ключ общий с js/ui/styleflags.js; тест tests/style-flags.test.js следит,
+    // чтобы он не разъехался.
+    box.querySelector("#bootReset").addEventListener("click", () => {
+        try { localStorage.removeItem("nb.style.v1"); } catch (e) { /* приватный режим */ }
+        location.reload();
+    });
+    box.querySelector("#bootErr").textContent = window.__boot.error;
+    box.querySelector("#bootStages").textContent = window.__boot.stages.join("\n") || "ни одна стадия не дошла";
+    document.documentElement.append(box);
+    window.__boot.box = box;
+};
+window.addEventListener("error", (e) => {
+    window.__bootFail(e.error || e.message);
+}, true);
+window.addEventListener("unhandledrejection", (e) => {
+    window.__bootFail(e.reason || "отклонённый промис без причины");
+});
+/* Молчание — тоже диагноз: если через 15 секунд игра так и не начала
+   рисовать, на экране должен быть вопрос, а не чёрная дыра. */
+setTimeout(() => {
+    if (!window.__boot.started) {
+        window.__bootFail(Error(`игра не начала рисовать (стадий: ${window.__boot.stages.length})`));
+    }
+}, 15000);
+    </script>
 </head>
 <body>
     <div id="stage">

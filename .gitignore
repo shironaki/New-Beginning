@@ -3,3 +3,15 @@ node_modules/
 .DS_Store
 _preview_*.png
 .artifacts/
+image-search/
+
+# Рабочие папки dev-стенда: скачанные референсы, smoke-прогоны и черновики запекки.
+dev/character-style-lab/gandalf-refs/
+dev/character-style-lab/.smoke/
+dev/character-style-lab/.bake/
+
+# Тяжёлые исходники паков, которые не нужны ни игре, ни запекке в одиночку:
+# 8 МБ анимаций скачиваются отдельно (см. dev/character-style-lab/assets/
+# quaternius/README.md — там же правило «>25 МБ веб-форма GitHub не пустит»).
+dev/character-style-lab/assets/quaternius/animations/
+dev/character-style-lab/assets/quaternius/*_Ranger.glb

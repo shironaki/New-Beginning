@@ -81,8 +81,9 @@ function roam(game, zoneId, frames) {
             fail(zoneId, "координаты героя перестали быть числом");
             break;
         }
-        const tx = Math.floor(p.x / TILE_SIZE), ty = Math.floor(p.y / TILE_SIZE);
-        const info = tileInfo(game.zone.map.get(tx, ty));
+        // Natural boundaries are continuous now; test the same physical
+        // point as the renderer/collider, not the old square authoring cell.
+        const info = game.zone.map.infoAt(p.x, p.y);
         if (info.solid) fail(zoneId, `герой стоит в непроходимом тайле (${info.name})`);
         // Wading the shallows is allowed now; swimming is not.
         if (info.liquid && info.solid) fail(zoneId, `герой стоит в глубокой воде (${info.name})`);

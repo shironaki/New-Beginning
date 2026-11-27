@@ -19,48 +19,59 @@
  *           0  └──────┘   ground, feet
  */
 
-/** Quantisation grid: 0.5 u = exactly 1 screen pixel at zoom 2. */
-export const QUANT = 0.5;
+/** Fine geometry grid: avoid whole-pixel joint jumps at fractional zooms. */
+export const QUANT = 0.125;
 
 /**
- * Body proportions — "Albion lean": small head, heavy shoulders, waist pulled
+ * Пол как геометрия, а не как «другая палитра». Один объект на все части:
+ * плечи, руки, талия, подол и голова обязаны меняться вместе, иначе фигура
+ * начинает выглядеть перекошенной (тонкие плечи на широком станах).
+ */
+export const SEX = {
+    male: { frame: 1, arm: 1, waist: 1, hem: 1, head: 1 },
+    female: { frame: 0.88, arm: 0.9, waist: 0.9, hem: 1.08, head: 0.93 }
+};
+export const sexOf = (look) => (look && look.gender === "female" ? SEX.female : SEX.male);
+
+/**
+ * Body proportions — the travelling coat silhouette: small head, heavy shoulders, waist pulled
  * in, hips and boots wide again. The pyramid is what makes a 60 px figure
  * read as a person with gear instead of a cute doll.
  *
- * head : body = 1 : 3.9
+ * head : body ≈ 1 : 4.4
  */
 export const BODY = {
-    total: 31,
+    total: 42,
 
-    headH: 8,
-    headW: 8,
-    headY: -31,              // top of the skull
+    headH: 7.5,
+    headW: 7.0,
+    headY: -42,              // top of the skull
 
-    torsoY: -23,             // shoulder line
-    torsoH: 11,
-    shoulderW: 13,           // front/back view
-    shoulderWSide: 9.5,      // profile is narrower — that is what sells the turn
-    waistW: 8.5,             // the pinch, at 72% down the torso
+    torsoY: -33,             // shoulder line
+    torsoH: 14,
+    shoulderW: 12.2,           // front/back view
+    shoulderWSide: 8.4,      // profile is narrower — that is what sells the turn
+    waistW: 8.8,             // the pinch, at 72% down the torso
     waistAt: 0.72,
-    hipW: 9,
+    hipW: 10,
 
-    hipY: -12,
-    legW: 3.8,
+    hipY: -19,
+    legW: 3.7,
     legGap: 1.0,
-    thigh: 5.0,
-    shin: 4.8,
+    thigh: 8.8,
+    shin: 7.9,
 
     ankleY: -2.4,
-    bootW: 5.2,
+    bootW: 4.7,
     bootH: 2.8,
     bootToe: 1.5,            // how far the toe sticks out past the ankle
     idleStance: 1.2,         // profile: feet part this much when standing
 
-    armY: -22,               // shoulder pivot, just under the shoulder line
-    armLen: 9.5,
-    armW: 3.0,
+    armY: -32,               // shoulder pivot, just under the shoulder line
+    armLen: 14.5,
+    armW: 2.3,
     sleeveW: 1.3,            // the shoulder is wider than the forearm
-    handH: 2.8,              // big hands — an Albion marker
+    handH: 2.2,              // readable fingers, not a square cuff
     farArmX: 1.6,            // profile: how far the hidden arm peeks out
     nearArmX: 0.9,
 
@@ -119,12 +130,61 @@ export const PALETTE = {
     // Selective contour: dark only where the form turns AWAY from the sun.
     // A uniform outline makes an icon; this makes an object in a world.
     outline: "rgba(26,20,14,0.55)",
-    outlineW: QUANT,
+    outlineW: 0.4,
     ao: "rgba(0,0,0,0.22)",  // ambient occlusion in the joints
-    aoW: QUANT,
+    aoW: 0.4,
     rim: "rgba(255,236,200,0.34)",
-    rimW: QUANT
+    rimW: 0.4
 };
+
+/**
+ * Цветовые дорожки спрайтового героя. Форма comes из запекки (js/render/heroframes.js),
+ * где каждый пиксель помнит, к какому материалу он относится, — и цвет этого
+ * материала в рантайме берётся из дорожки: N оттенков того цвета, что выбран в
+ * панели внешности. Смещения тонов те же, что у векторного героя (TONE и PALETTE
+ * выше), поэтому куртка героя и куртка поселенца светятся одинаково, хоть и
+ * рисуются по-разному.
+ *
+ * `at` (куда в палитре лежат слоты дорожки) выдаёт запекка — здесь только тон.
+ */
+export const RAMPS = {
+    cloth: { look: "coat", offsets: [TONE.deep, TONE.dark, TONE.base, TONE.lit, TONE.lit + 12] },
+    pants: { look: "pants", offsets: [TONE.deep, TONE.dark, TONE.base, TONE.lit] },
+    skin: { look: "skin", offsets: [PALETTE.skinDeep, PALETTE.skinShade, 0, PALETTE.skinLit] },
+    hair: { look: "hair", offsets: [PALETTE.hairShade, 0, PALETTE.hairLit] }
+};
+
+/**
+ * В какую сторону экрана «наружу» от корпуса у данной руки. Считаем по ракурсу,
+ * а не по положению кисти: в профиле обе руки стоят почти на оси тела, и знак от
+ * x прыгал бы с кадра на кадр. down — правая рука зрителю слева, up — наоборот.
+ */
+export function toolOutward(dir, hand = "right") {
+    if (dir === "right") return 1;
+    if (dir === "left") return -1;
+    const anatomical = hand === "left" ? -1 : 1;
+    return dir === "up" ? anatomical : -anatomical;
+}
+
+/**
+ * Угол предмета в кулаке спрайтового героя. База — экранное направление
+ * предплечя из запекки: клинок продолжает руку и на замахе идёт дугой анимации.
+ * Когда рука опущена, добавляем наклон «от тела» (иначе нож висит вдоль бедра,
+ * как палка, а приёмка требует, чтобы он был направлен от корпуса). На замахе
+ * поправка гаснет сама — w → 0, спорить с анимацией она не может.
+ */
+export function spriteToolAngle(baked, outward, bias = 0.55) {
+    const w = Math.max(0, Math.min(1, (1 - Math.cos(baked)) / 2));
+    return baked - bias * outward * w;
+}
+
+/** Тот же сдвиг тона, что использует векторная отрисовка: +N к каждому каналу. */
+export function shadeHex(hex, amount) {
+    const c = String(hex).replace("#", "");
+    const r = parseInt(c.slice(0, 2), 16), g = parseInt(c.slice(2, 4), 16), b = parseInt(c.slice(4, 6), 16);
+    const f = (v) => Math.max(0, Math.min(255, Math.round(v + amount)));
+    return `#${[f(r), f(g), f(b)].map(v => v.toString(16).padStart(2, "0")).join("")}`;
+}
 
 /** Contact shadow — anchored to the centroid of the feet, not the sprite. */
 /**
@@ -170,19 +230,15 @@ export const SHADOW = {
     // the hero planted. Only the soft halo leans with the sun, and never more
     // than this, so the hero is lit by the same sun as the trees without ever
     // looking like he is hovering next to his own shadow.
-    castHeight: 26,          // u of body that actually throws a shadow
+    castHeight: 29,          // u of body that actually throws a shadow
     sunLean: 2.6,            // u of halo offset at a full-length sun shadow
     sunStretch: 0.35         // halo radii gained along the sun direction
 };
 
 /**
- * Locomotion. The whole point: the phase is driven by DISTANCE, so the feet
- * cannot outrun or lag behind the ground.
- *
- *   stride  — screen pixels of ground covered by one full cycle (two steps)
- *   swing   — foot travel amplitude; strideUnits / 4 means zero slip:
- *             one step covers stride/2 px = stride/4 u, and the foot moves
- *             2 * swing = stride/4 u relative to the hip. Exactly matched.
+ * Distance-driven locomotion with an IK-bounded foot swing. This is not a
+ * world-space foot-lock solver: cadence follows travel, amplitude stays
+ * inside the leg's reach so a longer stride does not pump the head.
  */
 /**
  * Ground physics of the hero. Instant velocity made the hero feel weightless:
@@ -190,10 +246,14 @@ export const SHADOW = {
  * mass without costing responsiveness — at `accel` the hero is at full walk in
  * about 0.08 s and stops within ~2 px.
  */
+export const STAMINA = { drain: 16, walkRecovery: 7, idleRecovery: 14 };
+
 export const MOVE = {
     // The simulation step the hero moves on, independent of the frame rate.
     // 1/120 s divides every rate we care about (30, 60, 120), so all three
     // walk exactly the same ground; the leftover is carried to the next frame.
+    sprintStop: 6, sprintResume: 18,
+    strideFullSpeed: 12, // fade legs when pushing into a wall, not while walking slowly
     step: 1 / 120,
     maxCatchUp: 0.25,        // s — a hitch is dropped, not replayed in full
     stepEps: 1e-9,           // binary dust guard on the step accumulator
@@ -210,14 +270,14 @@ export const MOVE = {
 
 export const GAIT = {
     strideWalk: 24,          // px of ground per cycle  -> 2.83 cycles/s at 68 px/s
-    strideRun: 34,           //                         -> 3.47 cycles/s at 118 px/s
+    strideRun: 46,           //                         -> 3.47 cycles/s at 118 px/s
     pxPerUnit: 2,            // camera zoom; stride is quoted in screen px
     cadenceCap: 4.2,         // cycles/s, guards against a sewing machine on buffs
 
     liftWalk: 1.8,           // max foot lift
     liftRun: 2.6,
-    bobWalk: 0.9,            // hips rise when the legs PASS, i.e. |cos(phase)|
-    bobRun: 1.4,
+    bobWalk: 0.45,            // hips rise when the legs PASS, i.e. |cos(phase)|
+    bobRun: 0.65,
     armRatio: 0.75,          // arm swing relative to leg swing
     armRatioTool: 0.40,      // the hand holding a tool swings less
     leanRun: 1.2,            // torso offset into the direction of travel
@@ -228,7 +288,7 @@ export const GAIT = {
     leanAccel: 2.6,          // px of torso offset at the reference acceleration
     accelRef: 900,           // px/s² — full-tilt start from standing
     leanAccelTau: 0.09,      // s — the torso itself has a little give
-    squash: 0.015,           // ±1.5% on contact — a hint, not a bounce
+    squash: 0.006,           // ±1.5% on contact — a hint, not a bounce
     kneeBend: 0.6,           // how hard the IK pushes the knee forward (0..1)
 
     blendWalk: 0.12,         // s, idle <-> walk
@@ -243,7 +303,7 @@ export const GAIT = {
     hipSway: 0,              // lateral pelvis travel, head-on — DO NOT RAISE
     shoulderCounter: 0,      // follows the sway; zero while the sway is zero
     clothLagPhase: 0.5,      // rad the belt flap trails the pelvis
-    heelStrike: 0.6,         // extra dip on contact — this is where weight lives
+    heelStrike: 0.12,         // extra dip on contact — this is where weight lives
 
     // Diagonals. There is no separate three-quarter pose; the side view is
     // used (it is the only one with a readable stride) and the body is
@@ -265,8 +325,6 @@ export const ACTION = {
     strikeAmp: 1.15
 };
 
-/** Animation states. hit/down are reserved for the combat phase. */
-export const STATES = ["idle", "walk", "run", "action", "hit", "down"];
 
 /* --- shared easing: one curve everywhere -------------------------------- */
 
@@ -288,4 +346,19 @@ export function approach(cur, target, dt, seconds) {
     if (cur < target) return Math.min(target, cur + step);
     if (cur > target) return Math.max(target, cur - step);
     return target;
+}
+
+/** Shared whole-body fall transform and held-light anchor (world units). */
+export const ATTACH = { fallAngle: 1.32, fallY: 2, fallTime: 1.65, flameHeight: 16 };
+
+/** Continuous stumble → slide → get-up; shared by body and held light. */
+export function fallPose(p) {
+    if (!(p.fallTimer > 0)) return { angle: 0, y: 0, crouch: 0, amount: 0 };
+    const elapsed = Math.max(0, ATTACH.fallTime - p.fallTimer);
+    const down = easeInOutSine(elapsed / 0.32);
+    const stand = easeInOutSine((elapsed - 1.05) / 0.6);
+    const amount = down * (1 - stand);
+    const sign = Math.abs(p.fallDirX || 0) > 0.05 ? Math.sign(p.fallDirX) : Math.abs(p.fallDirY || 0) > 0.05 ? Math.sign(p.fallDirY) : p.dir === "left" ? -1 : 1;
+    return { angle: ATTACH.fallAngle * amount * sign, y: ATTACH.fallY * amount,
+        crouch: 2.5 * Math.sin(stand * Math.PI) + 1.5 * Math.sin(down * Math.PI), amount };
 }

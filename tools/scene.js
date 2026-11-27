@@ -11,6 +11,7 @@
  *   node tools/scene.js --list
  *
  * Flags
+ *   --relief           isolated relief pilot (supports --hour, --weather, --day, --wet)
  *   --zone <id>        zone to enter (default: the starting valley)
  *   --at x,y           world position for the hero (default: the zone spawn)
  *   --near <kind>      stand next to the closest prop of that kind (--gap px)
@@ -19,11 +20,19 @@
  *   --hour <0..24>     clock, fractional hours allowed        (default 12)
  *   --day <n>          day number — picks the season          (default 1)
  *   --weather <key>    clear|wind|cloudy|rain|storm|fog|snow  (default clear)
+ *   --wet <0..1>      ground moisture (default 0; does not imply instant rain)
  *   --zoom <n>         camera zoom                            (default 2.6)
  *   --size WxH         canvas size                            (default 960x560)
  *   --frames <n>       frames to simulate before the shot     (default 8)
  *   --walk <dx,dy>     hold this input while simulating (prints, splashes)
+ *   --dir <direction>  face down|up|left|right for attachment review
+ *   --hero3d off       векторный герой вместо запечённых 3D-кадров (для сравнения)
+ *   --fallen           freeze a fallen pose after simulation
+ *   --chop [kind]      сломать ближайший проп и снять кадр, когда обломки ещё
+ *                      в воздухе (без kind — ближайшее дерево)
+ *   --light-fire       light the closest campfire with a log
  *   --torch            put a lit torch in the hero's hand
+ *   --tool <id>        equip any item in a hand (--hand left|right)
  *   --hud              keep the interaction prompt visible
  *   --out <path>       output file (default .artifacts/scene.png)
  */
@@ -32,6 +41,7 @@ import path from "node:path";
 import { ShimCanvas, encodePNG } from "./canvas-shim.js";
 import { installDOM } from "../tests/dom-harness.js";
 import { ZONES } from "../js/world/regions.js";
+import { propDef } from "../js/sandbox/gather.js";
 
 const args = process.argv.slice(2);
 const flag = (name, dflt = null) => {
@@ -70,9 +80,24 @@ const hudRoot = globalThis.document.getElementById("hud");
 globalThis.document.getElementById = (id) => (id === "game" ? screen : hudRoot);
 
 const { Game } = await import("../js/main.js");
-const game = new Game({ canvas: screen, hudRoot, seed: String(flag("seed", "ashes-and-grain")) });
+const seedArg = flag("seed", "ashes-and-grain");
+const seed = /^\d+$/.test(String(seedArg)) ? Number(seedArg) : String(seedArg);
+const GameClass = flag("relief", false) ? (await import("../js/dev/relief-trial.js")).ReliefTrialGame : Game;
+const game = new GameClass({ canvas: screen, hudRoot, seed });
 game.hud.hideStory();
 game.paused = false;
+
+// --hero3d off возвращает героя в векторную отрисовку: нужен, чтобы сравнивать
+// запечённого 3D-героя с прежним и видеть, что именно далла запекка.
+const hero3d = flag("hero3d", null);
+if (hero3d === "off") (await import("../js/render/hero3d.js")).HERO3D.enabled = false;
+// --hero3d smooth снимает пиксельный грейд: тот же риг, та же сетка и те же якоря
+// кистей, но 14 тонов на дорожку, ни дизеринга, ни обводки. Сравнивают именно так —
+// на одной сцене, тем же кадром.
+else if (hero3d) {
+    const ok = await (await import("../js/render/hero3d.js")).hero3dQuality(String(hero3d));
+    if (!ok) console.log(`   (герой: режим «${hero3d}» недоступен — играет то, что есть)`);
+}
 
 const zone = flag("zone", null);
 if (zone && zone !== true) {
@@ -141,13 +166,35 @@ if (at && at !== true) {
 }
 
 game.clock.day = num("day", game.clock.day);
-game.clock.minute = Math.max(0, Math.min(24, num("hour", 12))) * 60;
+game.clock.minute = Math.min(1439, Math.round(Math.max(0, Math.min(24, num("hour", 12))) * 60));
 const weather = flag("weather", null);
 if (weather && weather !== true) game.weather.current = String(weather);
+game.weather.groundWet = Math.max(0, Math.min(1, num("wet", 0)));
 
 if (flag("torch", false)) {
     game.inventory.add("torch", 1);
     game.inventory.setActive(game.inventory.list().findIndex((s) => s.id === "torch"));
+}
+/**
+ * --tool <itemId> — положить предмет в руку (и взять его): так видно хват,
+ * наклон клинка и то, не прячется ли предмет за телом. --hand left|right.
+ */
+const toolArg = flag("tool", null);
+if (toolArg && toolArg !== true) {
+    const id = String(toolArg), hand = String(flag("hand", "right"));
+    game.inventory.add(id, 1);
+    const i = game.inventory.slots.findIndex((sl) => sl?.id === id);
+    if (i >= 0 && !game.inventory.equipHand(hand, i)) console.error(`рука ${hand} не приняла ${id}`);
+    else if (i < 0) console.error(`нет предмета ${id} в рюкзаке`);
+}
+if (flag("light-fire", false)) {
+    const fires = game.zone.objects.filter((o) => o.kind === "campfire" && !o.removed);
+    fires.sort((a, b) => Math.hypot(a.x - game.player.x, a.y - game.player.y) - Math.hypot(b.x - game.player.x, b.y - game.player.y));
+    if (fires[0]) {
+        const f = game.fires.get(game.fireKey(game.zone, fires[0]));
+        f.addFuel("log"); f.setExposure(game.fireEnvironment(game.zone, fires[0]));
+        for (let i = 0; i < 6 && !f.lit; i++) f.light();
+    }
 }
 if (!flag("hud", false)) game.findInteractable = () => null;
 
@@ -155,14 +202,63 @@ const walk = flag("walk", null);
 if (walk && walk !== true) {
     const [dx, dy] = String(walk).split(",").map(Number);
     game.input.axis = () => ({ x: dx || 0, y: dy || 0 });
-    game.input.pressed = () => false;
+    game.input.pressed = (action) => action === "sprint" && !!flag("run", false);
 }
 
+game.player.stamina = Math.max(0, Math.min(game.player.maxStamina, num("stamina", game.player.stamina)));
 const frames = num("frames", 8);
 for (let i = 0; i < frames; i++) { game.update(1 / 60); game.render(); }
 
+const dir = flag("dir", null);
+if (["down", "up", "left", "right"].includes(dir)) game.player.dir = dir;
+if (flag("fallen", false)) game.player.fallTimer = 1;
+// --look "coat=#8f3b3b,pants=#2f3a4a" — цвета образа в игре: спрайт героя красится
+// из них, поэтому кадр с --look проверяет не пекарню, а связку look → палитра → пиксель.
+if (flag("look", null) !== null) {
+    const look = { ...game.look };
+    for (const kv of String(flag("look")).split(/[, ]+/)) {
+        const [k, v] = kv.split("=");
+        if (k && v) look[k] = v;
+    }
+    game.look = look;
+}
+// --chop: разрушение в кадре. Берём ближайший проп нужного вида, выдаём
+// инструмент, добиваем одним ударом и прогоняем несколько кадров — так видно и
+// направление падения, и то, где обломки лягут.
+const chop = flag("chop", null);
+if (chop) {
+    const want = typeof chop === "string" ? chop : null;
+    const near = (o) => Math.hypot(o.x - game.player.x, o.y - game.player.y);
+    const cands = (game.zone.objects || []).filter((o) => {
+        if (o.removed || o.depleted) return false;
+        const def = propDef(o.kind);
+        if (!def) return false;
+        // Без аргумента — любое дерево; с аргументом — любой проп, даже тот,
+        // для которого инструмент не нужен (осыпь, куст).
+        return want ? o.kind === want : def.tool === "axe";
+    });
+    cands.sort((a, b) => near(a) - near(b));
+    const target = cands[0];
+    if (target) {
+        // Инструмент — это предмет с тегом инструмента: «axe» в сумке нет и не
+        // будет, ищется axe_stone. Кадр не должен молча показывать «ничего».
+        const tool = propDef(target.kind).tool;
+        if (tool) game.inventory.add(`${tool}_stone`, 1);
+        target.hits = 0.01;
+        game.harvest(target);
+        if (!target.depleted) console.log("⚠️  --chop: проп не сломался — проверьте инструмент");
+        const shot = num("chop-frames", 22);
+        for (let i = 0; i < shot; i += 1) { game.update(1 / 60); game.render(); }
+        game.camera.snapTo(game.player.x, game.player.y - 8);
+        console.log(`🪓 ${target.kind}: обломков в воздухе ${game.debris ? game.debris.count : "?"}`);
+    } else {
+        console.log("⚠️  --chop: рядом нет подходящего пропа");
+    }
+}
 game.camera.zoom = num("zoom", 2.6);
 game.camera.snapTo(game.player.x, game.player.y - 8);
+// Pin visual time without replaying hundreds of software-rendered frames.
+if (flag("pose-time", null) !== null) game.renderer.time = num("pose-time", 0) - 1 / 60;
 game.render();
 
 fs.writeFileSync(OUT, encodePNG(screen));

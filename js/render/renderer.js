@@ -1,3 +1,4 @@
+import { paintCookware, paintLoot } from "./cookware.js";
 /**
  * render — the frame.
  *
@@ -11,11 +12,17 @@
  * Only visible chunks are drawn, and a chunk is re-baked only when a tile in
  * it changes. That is the whole performance story for a 96×72 zone.
  */
+import { projectGround } from "./projected-ground.js";
+import { syncWaterState, waterIce } from "../world/water-state.js";
 import { CHUNK } from "../world/tilemap.js";
 import { TILE_SIZE, TILES } from "../world/tiles.js";
-import { paintTile, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, setWalker, setBreeze, propHeight, propTone, puddleScreenPath, coastReach } from "./tilesart.js";
-import { drawCharacter, drawSleeping } from "./character.js";
+import { paintTile, paintSnowGround, paintEdges, paintProp, paintFlames, paintSpitItem, setSun, setFireLights, setShadowOrigin, setWalker, setBreeze, propHeight, propTone, puddleScreenPath, coastReach, SUN } from "./tilesart.js";
+import { drawCharacter, drawSleeping, toolAttachment } from "./character.js";
+import { paintProp3D, paintDebris3D, propSunFor, setPropSun } from "./props3d.js";
+import { HERO3D, hero3dTone } from "./hero3d.js";
 import { LightMap, LIGHT } from "./lighting.js";
+import { bakeTerrain, drawTerrainWater } from "./terrain.js";
+import { drawWetGround } from "./surface.js";
 import { itemEmoji } from "../sandbox/items.js";
 
 /**
@@ -216,15 +223,23 @@ export class Renderer {
     bakeChunk(zone, cx, cy) {
         const size = CHUNK * TILE_SIZE;
         const cv = document.createElement("canvas");
-        cv.width = size; cv.height = size;
+        const inset = zone.terrain ? 8 : 0;
+        cv.width = cv.height = size + inset * 2;
         const c = cv.getContext("2d");
         c.imageSmoothingEnabled = false;
+        if (zone.terrain) {
+            bakeTerrain(c, zone, cx, cy, cv.width, this.season, inset);
+            this.stats.baked++;
+            const result = zone.playableRelief ? projectGround(cv, zone.playableRelief, cx * size - inset, cy * size - inset) : cv;
+            result.groundInset = inset;
+            return result;
+        }
         for (let ty = 0; ty < CHUNK; ty++) {
             for (let tx = 0; tx < CHUNK; tx++) {
                 const wx = cx * CHUNK + tx, wy = cy * CHUNK + ty;
                 if (!zone.map.inBounds(wx, wy)) continue;
                 const id = zone.map.get(wx, wy);
-                paintTile(c, id, tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, wx, wy, this.season);
+                paintTile(c, id, tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, wx, wy, this.season, zone.map);
             }
         }
         // Second pass so edges blend over finished neighbours.
@@ -233,6 +248,13 @@ export class Renderer {
                 const wx = cx * CHUNK + tx, wy = cy * CHUNK + ty;
                 if (!zone.map.inBounds(wx, wy)) continue;
                 paintEdges(c, zone.map, wx, wy, tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, this.season);
+            }
+        }
+        if (this.season === "winter") {
+            for (let ty = 0; ty < CHUNK; ty++) for (let tx = 0; tx < CHUNK; tx++) {
+                const wx = cx * CHUNK + tx, wy = cy * CHUNK + ty;
+                if (!zone.map.inBounds(wx, wy)) continue;
+                paintSnowGround(c, zone.map.get(wx, wy), tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, wx, wy);
             }
         }
         this.stats.baked++;
@@ -305,7 +327,8 @@ export class Renderer {
     drawGround(zone) {
         const cam = this.camera;
         const ctx = this.ctx;
-        const chunks = zone.map.chunksInRect(cam.x, cam.y, cam.viewW, cam.viewH);
+        const lift = zone.playableRelief?.maxHeight || 0;
+        const chunks = zone.map.chunksInRect(cam.x, cam.y, cam.viewW, cam.viewH + lift);
         this.stats.chunksDrawn = 0;
         for (const ch of chunks) {
             const key = `${zone.id}:${ch.key}`;
@@ -317,9 +340,12 @@ export class Renderer {
             if (!cv) { cv = this.bakeChunk(zone, ch.cx, ch.cy); this.chunkCache.set(key, cv); }
             const wx = ch.cx * CHUNK * TILE_SIZE;
             const wy = ch.cy * CHUNK * TILE_SIZE;
-            const s = cam.worldToScreen(wx, wy);
-            const size = CHUNK * TILE_SIZE * cam.zoom;
-            ctx.drawImage(cv, Math.round(s.x), Math.round(s.y), Math.ceil(size), Math.ceil(size));
+            // Texture already contains elevation; don't project its origin twice.
+            const sx = (wx - (cv.groundInset || 0) - cam.x + cam.offsetX) * cam.zoom;
+            const sy = (wy - (cv.groundInset || 0) - (cv.groundLift || 0) - cam.y + cam.offsetY) * cam.zoom;
+            // World-sampled gutters overlap, including curved projected row edges.
+            // Keep ONE uniform scale; independent rectangle rounding cracks rows.
+            ctx.drawImage(cv, sx, sy, cv.width * cam.zoom, cv.height * cam.zoom);
             this.stats.chunksDrawn++;
         }
         return this;
@@ -331,6 +357,7 @@ export class Renderer {
      * visible tiles, two strokes each.
      */
     drawWater(zone, daylight = 1, hour = 12, underground = false) {
+        if (zone.terrain) { drawTerrainWater(this.ctx, zone, this.camera, this.time, daylight); return this; }
         const cam = this.camera;
         const ctx = this.ctx;
         const t = this.time;
@@ -575,18 +602,17 @@ export class Renderer {
         }
 
         for (const obj of list) {
-            if (obj.removed) continue;
+            if (obj.removed || obj.depleted) continue;
             const hero = obj.kind === "__hero";
             const hgt = hero ? MIRROR.heroHeight : propHeight(obj.kind, obj.size || 1);
             if (hgt < MIRROR.minHeight) continue;
             if (!cam.isVisible(obj.x, obj.y, 120)) continue;
             // Where does the water start below it? A tree may stand a little
             // way up the bank and still be mirrored — but only a little.
-            const tx = Math.floor(obj.x / TILE_SIZE);
             let start = -1;
             for (let d = 4; d <= MIRROR.gap; d += 4) {
-                const info = TILES[zone.map.get(tx, Math.floor((obj.y + d) / TILE_SIZE))];
-                if (info && info.liquid) { start = d; break; }
+                const info = zone.map.infoAt(obj.x, obj.y + d);
+                if (info && info.liquid && waterIce(zone.map, obj.x, obj.y + d).cover < 0.55) { start = d; break; }
             }
             if (start < 0) continue;
             const near = 1 - (start / MIRROR.gap) * (1 - MIRROR.gapFade);
@@ -600,16 +626,20 @@ export class Renderer {
                 // The bar has to be ON water: the map decides where the
                 // reflection ends, so it never spills onto the bank.
                 const wy = obj.y + start + d;
-                const info = TILES[zone.map.get(Math.floor(obj.x / TILE_SIZE), Math.floor(wy / TILE_SIZE))];
-                if (!info || !info.liquid) break;
+                const info = zone.map.infoAt(obj.x, wy);
+                if (!info || !info.liquid || waterIce(zone.map, obj.x, wy).cover >= 0.55) break;
                 const wob = Math.sin(t * MIRROR.wobbleHz * Math.PI * 2 - d * MIRROR.wobbleK)
                           * MIRROR.wobbleAmp * (0.4 + f);
                 const w = halfW * (1 - f * MIRROR.taper);
                 const a = strength * near * (1 - f * MIRROR.fade);
                 if (a <= 0.004) break;
-                const sc = cam.worldToScreen(obj.x + wob - w, wy);
                 ctx.globalAlpha = a;
-                ctx.fillRect(sc.x, sc.y, w * 2 * z, MIRROR.rowStep * MIRROR.barFill * z + 1);
+                for (let dx = -w; dx < w; dx += 2) {
+                    const wx = obj.x + wob + dx, width = Math.min(2, w - dx);
+                    if (!zone.map.infoAt(wx, wy).liquid || !zone.map.infoAt(wx + width, wy + 2).liquid) continue;
+                    const sc = cam.worldToScreen(wx, wy);
+                    ctx.fillRect(sc.x, sc.y, width * z, MIRROR.rowStep * MIRROR.barFill * z);
+                }
             }
             ctx.globalAlpha = 1;
         }
@@ -622,10 +652,16 @@ export class Renderer {
         const ctx = this.ctx;
         const drawables = [];
 
-        for (const obj of zone.objects) {
+        for (const obj of [...(zone.edgeScenery || []), ...zone.objects]) {
             if (obj.removed) continue;
-            if (!cam.isVisible(obj.x, obj.y, 70)) continue;
+            if (!cam.isVisible(obj.x, obj.y, 100)) continue;
             drawables.push({ y: obj.y, x: obj.x, ord: drawables.length, kind: "prop", obj });
+        }
+        // Падающие обломки идут в ту же сортировку, что и пропы: бревно, летящее
+        // перед героем, обязано закрыть его, а не висеть поверх всего кадра.
+        for (const body of (state.debris && state.debris.list) || []) {
+            if (!cam.isVisible(body.x, body.y - body.z, 90)) continue;
+            drawables.push({ y: body.y, x: body.x, ord: drawables.length, kind: "debris", obj: body });
         }
         for (const ent of (state.entities || [])) {
             if (!cam.isVisible(ent.x, ent.y, 70)) continue;
@@ -639,23 +675,48 @@ export class Renderer {
         // are broken by x and then by identity: two props on the same row used
         // to swap places between frames (sort is only stable for equal keys of
         // the same shape) and the overlap flickered.
-        drawables.sort((a, b) => (a.y - b.y) || (a.x - b.x) || (a.ord - b.ord));
+        const depth = (d) => d.y - (zone.playableRelief?.heightAt(d.x, d.y) || 0);
+        drawables.sort((a, b) => (depth(a) - depth(b)) || (a.x - b.x) || (a.ord - b.ord));
         this.stats.propsDrawn = drawables.length;
 
         for (const d of drawables) {
             const o = d.obj;
-            if (d.kind === "prop") this._occlude(o, player, dt);
+            if (d.kind === "debris") {
+                // Тело летит над землёй, поэтому нога — это y, а рисунок — на z
+                // выше; окклюзия ему не нужна, он и так на виду у всего кадра.
+                const s = cam.worldToScreen(o.x, o.y);
+                ctx.save();
+                ctx.translate(s.x, s.y);
+                ctx.scale(cam.zoom, cam.zoom);
+                paintDebris3D(ctx, o, {
+                    time: this.time, season: this.season,
+                    weather: state.weather, groundWet: state.groundWet,
+                    settle: state.debris.cfg ? state.debris.cfg.settle : 0.18
+                });
+                ctx.restore();
+                continue;
+            }
+            if (d.kind === "prop" && !o.depleted) this._occlude(o, player, dt);
             const s = cam.worldToScreen(o.x, o.y);
             ctx.save();
-            ctx.translate(Math.round(s.x), Math.round(s.y));
+            ctx.translate(d.kind === "prop" ? Math.round(s.x) : s.x, d.kind === "prop" ? Math.round(s.y) : s.y);
             ctx.scale(cam.zoom, cam.zoom);
             if (d.kind === "prop") {
                 if (o._fade > 0) ctx.globalAlpha = 1 - (1 - OCCLUDE.alpha) * o._fade;
-                paintProp(ctx, o, this.time, this.season);
+                if (o.depleted) paintLoot(ctx, o.loot || []);
+                // Настоящая 3D-модель, запечённая в спрайт (props3d), если она для
+                // этого kind есть; процедурная кривая остаётся запасным путём —
+                // побитые пропы, зима без кадра, среда без канваса.
+                else if (!paintProp3D(ctx, o, {
+                    time: this.time, season: this.season,
+                    weather: state.weather, groundWet: state.groundWet,
+                    wind: state.underground ? 0 : Math.cos(state.windAngle || 0) * (state.windStrength || 0)
+                })) paintProp(ctx, o, this.time, this.season);
                 ctx.globalAlpha = 1;
                 if (o.kind === "campfire") {
                     const fire = fires && fires.get(o.id != null ? o.id : `${o.tx},${o.ty}`);
                     paintFlames(ctx, fire ? fire.intensity : 0, this.time, fire ? fire.stack : []);
+                    paintCookware(ctx, fire, this.time);
                     if (fire) {
                         fire.spit.forEach((slot, i) => {
                             if (slot) paintSpitItem(ctx, i, slot.state, itemEmoji(slot.itemId), slot.itemId);
@@ -674,8 +735,16 @@ export class Renderer {
                 drawCharacter(ctx, {
                     dir: o.dir, phase: o.anim, gait: o.gait, runBlend: o.runBlend,
                     slant: o.slant, moving: o.moving, look: state.look,
-                    actionTimer: o.actionTimer, tool: state.tool, idleTime: this.time,
-                    wading: this._inWater(state.zone, o.x, o.y)
+                    ax: o.ax, ay: o.ay, leanAX: o.leanAX, leanAY: o.leanAY, faceX: o.faceX, faceY: o.faceY,
+                    fallTimer: o.fallTimer, fallDirX: o.fallDirX, fallDirY: o.fallDirY,
+                    actionTimer: o.actionTimer, actionKind: o.actionKind,
+                    actionHand: o.actionHand, tool: state.tool, ...state.hands, idleTime: this.time,
+                    torchWind: state.underground ? 0 : Math.cos(state.windAngle || 0) * (state.windStrength || 0),
+                    wading: this._inWater(state.zone, o.x, o.y),
+                    // Погода на герое: без этих трёх полей спрайт не знает, что
+                    // ткань должна потемнеть от дождя (см. heroWeatherTint).
+                    weather: state.weather, groundWet: state.groundWet,
+                    underground: !!state.underground, wet: o.wet
                 });
             } else {
                 setShadowOrigin(o.x, o.y);
@@ -686,7 +755,9 @@ export class Renderer {
                     dir: o.dir || "down", phase: o.anim || 0,
                     gait: o.gait != null ? o.gait : (o.moving ? 1 : 0),
                     runBlend: o.runBlend || 0,
-                    moving: !!o.moving, look: o.look, idleTime: this.time
+                    moving: !!o.moving, look: o.look, idleTime: this.time,
+                    weather: state.weather, groundWet: state.groundWet,
+                    underground: !!state.underground, wet: o.wet
                 });
             }
             ctx.restore();
@@ -703,10 +774,11 @@ export class Renderer {
     _collectLights(state) {
         const out = this._lights || (this._lights = []);
         let n = 0;
-        const push = (x, y, r, i) => {
+        const push = (x, y, r, i, flicker = 1, glow = 1) => {
             let L = out[n];
             if (!L) { L = { x: 0, y: 0, r: 0, i: 1, phase: 0 }; out[n] = L; }
-            L.x = x; L.y = y; L.r = r; L.i = i;
+            L.anchorX = L.anchorY = undefined; L.localX = L.localY = 0;
+            L.x = x; L.y = y; L.r = r; L.i = i; L.flicker = flicker; L.glow = glow;
             // Flicker phase keyed to the world, so two fires are out of step
             // with each other and neither changes beat when the camera moves.
             L.phase = (x * 0.013 + y * 0.029) % 6.283;
@@ -720,7 +792,16 @@ export class Renderer {
                 push(obj.x, obj.y, fire.lightRadius, 0.55 + fire.intensity * 0.45);
             }
         }
-        if (state.playerLight > 0) push(state.player.x, state.player.y - 8, state.playerLight, 0.8);
+        if (state.playerLight > 0) {
+            const p = state.player;
+            const sides = state.hands ? ["left", "right"].filter((side) => state.hands[side + "Tool"]?.tool === "torch") : ["right"];
+            for (const side of sides) {
+                const attachment = toolAttachment({ ...p, ...state.hands, phase: p.anim, idleTime: this.time,
+                    torchWind: state.underground ? 0 : Math.cos(state.windAngle || 0) * (state.windStrength || 0) }, side);
+                push(p.x + attachment.x, p.y + attachment.y, state.playerLight, attachment.intensity, 0, .45);
+                Object.assign(out[n - 1], { anchorX: p.x, anchorY: p.y, localX: attachment.x, localY: attachment.y, hand: side });
+            }
+        }
         for (const L of state.extraLights || []) push(L.x, L.y, L.r, L.i || 0.7);
         out.length = n;
         setFireLights(out);
@@ -730,8 +811,8 @@ export class Renderer {
     /** Is this world point standing in water? (Used for the waterline.) */
     _inWater(zone, x, y) {
         if (!zone || !zone.map) return false;
-        const info = TILES[zone.map.get(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE))];
-        return !!(info && info.liquid);
+        const info = zone.map.infoAt(x, y);
+        return !!(info && info.liquid) && waterIce(zone.map, x, y).cover < 0.55;
     }
 
     /**
@@ -741,9 +822,11 @@ export class Renderer {
     _occlude(obj, player, dt) {
         const tall = propHeight(obj.kind, obj.size || 1);
         let want = 0;
-        if (tall >= OCCLUDE.minHeight && obj.y > player.y) {
+        const surface = this?.camera?.surface;
+        const objY = obj.y - (surface?.heightAt(obj.x, obj.y) || 0), playerY = player.y - (surface?.heightAt(player.x, player.y) || 0);
+        if (tall >= OCCLUDE.minHeight && objY > playerY) {
             const dx = Math.abs(obj.x - player.x);
-            const dy = obj.y - player.y;                 // prop is in front
+            const dy = objY - playerY;                 // prop is in front
             // A crown is as wide as the tree is tall, roughly; the overlap
             // that matters is crown half-width plus the hero's shoulders.
             const reach = tall * OCCLUDE.spread + OCCLUDE.bodyHalf;
@@ -992,8 +1075,21 @@ export class Renderer {
      */
     render(state, dt = 0) {
         this.time += dt;
-        this.season = state.clock ? state.clock.season.key : "spring";
+        syncWaterState(state.zone, state.clock, state.weather);
+        // A dev jump, natural season change and loading a save all follow
+        // this path. Invalidate once on a palette change, not every frame.
+        const season = state.underground ? "spring" : state.clock ? state.clock.season.key : "spring";
+        if (season !== this.season) { this.season = season; this.invalidate(); }
         setSun(state.clock ? state.clock.minute / 60 : 12, state.clock ? state.clock.daylight : 1);
+        // Тот же свет уходит в запечённые кадры пропов: перекос светотени по
+        // граням и блик на мокром. setPropSun сама решает, насколько сильно
+        // сдвинулось солнце, чтобы перепечь кадры, — вызов каждый кадр бесплатен.
+        const propSun = propSunFor(state, SUN);
+        setPropSun(propSun);
+        // Живой герой ловит ТОТ ЖЕ свет, что и двор. У листа освещение запечено в
+        // кадр, поэтому вечером он оставался полуденным; у three.js источник
+        // настоящий, и без этой строки герой светился бы сам по себе.
+        if (HERO3D.live) hero3dTone(propSun);
         const ctx = this.ctx;
         ctx.fillStyle = "#0a0c10";
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -1013,6 +1109,7 @@ export class Renderer {
                        state.clock ? state.clock.daylight : 1,
                        state.clock ? state.clock.minute / 60 : 12,
                        !!state.underground);
+        drawWetGround(ctx, this.camera, state, this.time);
         this.drawCloudShadows(state.weather,
                               state.clock ? state.clock.daylight : 1,
                               !!state.underground,
@@ -1030,7 +1127,7 @@ export class Renderer {
             ctx.restore();
         }
         this.drawInteractHint(state.interact && state.interact.target, state.interact && state.interact.label);
-        this.drawWeather(state.weather, dt, state.windAngle || 0);
+        if (!state.underground) this.drawWeather(state.weather, dt, state.windAngle || 0);
 
         // --- lights ---------------------------------------------------------
         // The very list the shadows were thrown from, now in screen space.
@@ -1038,9 +1135,10 @@ export class Renderer {
         this.lightMap.begin();
         for (const L of this._lights || []) {
             if (!cam.isVisible(L.x, L.y, 200)) continue;
-            const s = cam.worldToScreen(L.x, L.y);
+            const s = cam.worldToScreen(L.anchorX ?? L.x, L.anchorY ?? L.y);
+            s.x += (L.localX || 0) * cam.zoom; s.y += (L.localY || 0) * cam.zoom;
             this.lightMap.add(s.x, s.y, L.r * cam.zoom,
-                { intensity: L.i, warmth: 0.88, flicker: 1, phase: L.phase || 0 });
+                { intensity: L.i, warmth: 0.88, flicker: L.flicker ?? 1, phase: L.phase || 0, glow: L.glow ?? 1 });
         }
         // Underground the eye adjusts: a weak glow so galleries are readable
         // even without a torch (a torch is still far brighter).

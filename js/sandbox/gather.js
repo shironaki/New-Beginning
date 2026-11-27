@@ -8,6 +8,7 @@
  * prologue is playable with nothing in your pockets.
  */
 
+import { craftSourceHint } from "./craft.js";
 /**
  * `block` is the radius of the prop's footprint IN PIXELS, measured at the
  * base — the trunk, not the canopy. TILE_SIZE is 32 and the player's radius is
@@ -27,10 +28,30 @@ export const PROPS = {
     palm:        { name: "Пальма",       tool: "axe", hits: 3, drops: [["log", 1], ["fiber", 2]], solid: true, xp: 3, shade: true, block: 4.2 },
     dead_tree:   { name: "Сухое дерево", tool: "axe", hits: 2, drops: [["firewood", 3], ["log", 1, 0.5]], solid: true, xp: 2, block: 4.2 },
     burnt_tree:  { name: "Обгоревшее дерево", tool: "axe", hits: 2, drops: [["charcoal", 2], ["firewood", 2]], solid: true, xp: 2, block: 4.6 },
-    burnt_stump: { name: "Обугленный пень", tool: null, hits: 2, drops: [["charcoal", 1], ["ash_dust", 1]], solid: false, xp: 1, block: 3.6 },
+    // Пень — не дерево: у 16-пиксельного кадра нет ни причин иметь collider на
+    // 3.6 единицы (это радиус сосны), ни права спотыкать. `block` без `solid`
+    // только вводил в заблуждение.
+    burnt_stump: { name: "Обугленный пень", tool: null, hits: 2, drops: [["charcoal", 1], ["ash_dust", 1]], solid: false, xp: 1, block: 0 },
     driftwood:   { name: "Плавник",      tool: null, hits: 1, drops: [["firewood", 2]], solid: false, xp: 1, block: 0 },
 
+    /* ---- постройки (3D-детали деревни, разбираются руками/инструментом) ---- */
+    crate:    { name: "Ящик",        tool: null, hits: 2, drops: [["plank", 2], ["fiber", 1, 0.4]], solid: true, xp: 1, block: 1.6 },
+    fence:    { name: "Плетень",     tool: null, hits: 2, drops: [["fiber", 2], ["log", 1, 0.3]], solid: true, xp: 1, block: 1.8 },
+    wagon:    { name: "Телега",      tool: "axe", hits: 4, drops: [["plank", 3], ["log", 2]], solid: true, xp: 3, block: 3.2 },
+    chimney:  { name: "Труба",       tool: "pick", hits: 5, drops: [["stone", 4], ["ash_dust", 2]], solid: true, xp: 3, block: 2.6 },
+    hut_wall: { name: "Стена дома",  tool: "pick", hits: 6, drops: [["stone", 3], ["plank", 2]], solid: true, xp: 4, block: 3.4 },
+    hut_roof: { name: "Крыша",       tool: "axe", hits: 5, drops: [["hay", 3], ["plank", 1, 0.5]], solid: false, xp: 3, block: 0 },
+
     /* ---- stone & ore --------------------------------------------------- */
+    beach_pebbles: { name: "Галька", tool: null, hits: 1, drops: [["stone", 2], ["flint", 1, 0.3]], solid: false, xp: 1, instant: true, block: 0 },
+    /**
+     * Осыпь — обломки вокруг валуна, которые можно разобрать руками. Это не
+     * «подарок игроку», а развилка дизайна: в пепельных землях валун требует
+     * кирку, кирка требует камень, и без осыпи первый каменный инструмент
+     * просто неоткуда взять. Даёт втрое меньше камня за удар — ради этого и
+     * стоит держать в мире и то, и другое.
+     */
+    scree:    { name: "Каменная осыпь", tool: null, hits: 1, drops: [["stone", 1], ["flint", 1, 0.12]], solid: false, xp: 1, instant: true, block: 0 },
     rock:        { name: "Камень",       tool: "pick", hits: 3, drops: [["stone", 2], ["flint", 1, 0.3]], solid: true, xp: 3, block: 6.5 },
     ore_rock:    { name: "Рудная жила",  tool: "pick", hits: 5, drops: [["stone", 1]], solid: true, xp: 7, oreDrop: true, block: 6.5 },
     ruin_wall:   { name: "Обломок стены",tool: "pick", hits: 4, drops: [["stone", 3]], solid: true, xp: 3, block: 9 },
@@ -55,11 +76,6 @@ export const PROPS = {
 
 export function propDef(kind) { return PROPS[kind] || null; }
 
-/** Does this prop yield resources at all? */
-export function isHarvestable(kind) {
-    const d = propDef(kind);
-    return !!d && Array.isArray(d.drops);
-}
 
 /** Tool required ("axe" | "pick" | null for bare hands). */
 export function requiredTool(kind) {
@@ -96,9 +112,14 @@ export function rollDrops(obj, rng) {
 }
 
 /** Human-readable reason when the player lacks the tool. */
-export function toolHint(kind) {
+export function toolHint(kind, { how = false } = {}) {
     const tool = requiredTool(kind);
     if (!tool) return null;
     const names = { axe: "🪓 топор", pick: "⛏️ кирка", knife: "🔪 нож", hoe: "🌾 мотыга", rod: "🎣 удочка" };
-    return `Нужен ${names[tool] || tool}`;
+    const line = `Нужен ${names[tool] || tool}`;
+    // Подсказка «где взять» — только в тосте: в подписи цели под ногами каждая
+    // лишняя строка двигает камеру, а прочитать её всё равно некогда.
+    if (!how) return line;
+    const src = craftSourceHint(tool);
+    return src ? `${line} — ${src}` : line;
 }
