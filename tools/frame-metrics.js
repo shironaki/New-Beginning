@@ -36,7 +36,11 @@ export const SCENES = [
     { name: "03-night", zone: "ashfall", hour: 21.5, weather: "clear", hero: 1, zoom: 2.6, torch: 1 },
     { name: "04-dawn", zone: "ashfall", hour: 5.8, weather: "clear", hero: 1, zoom: 2.6, torch: 1 },
     { name: "05-forest-day", zone: "forest", hour: 12, weather: "clear", hero: 1, zoom: 2.6 },
-    { name: "06-rain", zone: "meadow", hour: 15, weather: "rain", hero: 1, zoom: 2.6 }
+    { name: "06-rain", zone: "meadow", hour: 15, weather: "rain", hero: 1, zoom: 2.6 },
+    // Ночь БЕЗ источника света: отдельная сцена и отдельный смысл. Пока герой
+    // тут не читается (Δ ниже порога) — тема «чернильная дыра вместо героя»
+    // не закрыта, и красная строка в этом отчёте честнее, чем «всё зелёно».
+    { name: "07-night-dark", zone: "ashfall", hour: 0.5, weather: "clear", hero: 1, zoom: 2.6 }
 ];
 
 const W = 760, H = 560;
